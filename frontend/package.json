@@ -1,0 +1,33 @@
+{
+  "name": "cloud-condition-admin-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "云条件单后台管理系统 - 前端",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "build:only": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@vicons/ionicons5": "^0.13.0",
+    "axios": "^1.20.0",
+    "echarts": "^6.1.0",
+    "naive-ui": "^2.45.3",
+    "pinia": "^3.0.4",
+    "vue": "^3.5.43",
+    "vue-echarts": "^8.3.1",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "typescript": "~5.9.3",
+    "unplugin-auto-import": "^21.1.0",
+    "unplugin-vue-components": "^32.1.0",
+    "vite": "^7.3.7",
+    "vue-tsc": "^3.3.12"
+  }
+}

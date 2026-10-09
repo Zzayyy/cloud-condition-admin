@@ -1,0 +1,212 @@
+/* ==========================================================================
+   设计令牌（Design Tokens）
+   亮/暗两套变量，组件里一律引用变量，不写死颜色。
+   ========================================================================== */
+
+:root {
+  /* 品牌色阶 */
+  --brand: #3b6ff5;
+  --brand-hover: #5583f7;
+  --brand-pressed: #2a5ae0;
+  --brand-soft: rgba(59, 111, 245, 0.1);
+
+  /* 语义色 */
+  --success: #2f9e5f;
+  --warning: #dd7a15;
+  --danger: #d6455e;
+  --info: #5b6b8c;
+
+  /* 中性色阶（背景由浅到深 / 文字由深到浅） */
+  --bg-body: #f4f6fb;
+  --bg-surface: #ffffff;
+  --bg-sider: #ffffff;
+  --bg-header: rgba(255, 255, 255, 0.82);
+  --bg-hover: rgba(15, 23, 42, 0.045);
+  --bg-active: rgba(59, 111, 245, 0.1);
+  --bg-code: rgba(15, 23, 42, 0.06);
+
+  --text-primary: #1a2233;
+  --text-secondary: #4a5568;
+  --text-muted: #8a94a6;
+  --text-inverse: #ffffff;
+
+  --border: rgba(15, 23, 42, 0.09);
+  --border-strong: rgba(15, 23, 42, 0.16);
+
+  /* 阴影 */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.07), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 12px 28px rgba(15, 23, 42, 0.12), 0 4px 10px rgba(15, 23, 42, 0.06);
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  /* 布局尺寸 */
+  --header-height: 60px;
+  --sider-width: 248px;
+
+  /* 统计卡片右下角的装饰光晕透明度 */
+  --stat-glow: 0.07;
+
+  color-scheme: light;
+}
+
+/* ---------------------------------- 暗色 ---------------------------------- */
+
+html.dark {
+  --brand: #6d95ff;
+  --brand-hover: #85a8ff;
+  --brand-pressed: #5583f7;
+  --brand-soft: rgba(109, 149, 255, 0.16);
+
+  --success: #4cc07f;
+  --warning: #f0a03c;
+  --danger: #f2687f;
+  --info: #93a1bd;
+
+  --bg-body: #0e1420;
+  --bg-surface: #161d2c;
+  --bg-sider: #131a28;
+  --bg-header: rgba(19, 26, 40, 0.82);
+  --bg-hover: rgba(255, 255, 255, 0.055);
+  --bg-active: rgba(109, 149, 255, 0.16);
+  --bg-code: rgba(255, 255, 255, 0.08);
+
+  --text-primary: #e8ecf4;
+  --text-secondary: #aab4c6;
+  --text-muted: #7d8798;
+  --text-inverse: #0e1420;
+
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
+
+  /* 暗色下同样的透明度会糊成一团脏影子，压淡 */
+  --stat-glow: 0.045;
+
+  color-scheme: dark;
+}
+
+/* ==========================================================================
+   基础重置
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 主题切换过渡 */
+body,
+.n-card,
+.n-layout,
+.n-layout-sider,
+.n-layout-header {
+  transition:
+    background-color 0.22s ease,
+    border-color 0.22s ease,
+    color 0.22s ease;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--text-primary);
+}
+
+a {
+  color: var(--brand);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--brand-hover);
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ==========================================================================
+   通用工具类
+   ========================================================================== */
+
+.page-container {
+  padding: 20px 24px;
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+.mono {
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+  font-size: 12.5px;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+/* 卡片统一质感 */
+.n-card {
+  box-shadow: var(--shadow-sm) !important;
+  border-radius: var(--radius) !important;
+  border: 1px solid var(--border) !important;
+}
+
+/* 让页面里的卡片间距一致 */
+.page-card {
+  margin-bottom: 16px;
+}
+
+.page-card:last-child {
+  margin-bottom: 0;
+}
+
+/* 页面主标题：带模块色竖条的标题行 */
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}

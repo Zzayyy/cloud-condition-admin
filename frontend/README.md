@@ -1,0 +1,274 @@
+# 云条件单后台管理系统 · 前端
+
+管理云条件单相关的**策略平台、委托服务器、数据中台、Redis 与 MySQL 数据**。
+
+技术栈：Vue 3 + Vite + TypeScript + Naive UI + Vue Router + Pinia + Axios + ECharts。
+
+> 当前阶段：**只有菜单和页面骨架**。除「总览」外，其余页面都是占位页，
+> 后端接口尚未实现。占位页会把该页面**真实的数据来源**列出来，方便逐个补齐。
+
+---
+
+## 快速开始
+
+```bash
+cd cloud-condition-admin/frontend
+npm install
+npm run dev          # http://localhost:5173
+```
+
+其他命令：
+
+| 命令 | 说明 |
+|---|---|
+| `npm run dev` | 开发服务器（含 API 代理） |
+| `npm run build` | 类型检查 + 生产构建，产物在 `dist/` |
+| `npm run preview` | 预览生产构建 |
+| `npm run typecheck` | 只跑 `vue-tsc` 类型检查 |
+
+---
+
+## 菜单是怎么定出来的
+
+菜单不是拍脑袋想的，是先到现场把数据结构摸清楚再反推的。
+
+### 第一步：摸清真实结构
+
+用只读方式连接现场环境核对（**未做任何写操作**）：
+
+* **MySQL** `192.168.1.136:3306` / 库 `qianlong_cloud`（MySQL 8.0.45），
+  用户 `qianlong_cloud`。共 **9 张表 + 1 个视图**：
+
+  | 表 | 说明 | 实测规模 |
+  |---|---|---|
+  | `T_Conditional` | 正在运行的条件单策略 | 0 行 |
+  | `T_Conditional_his` | 历史条件单 | 0 行 |
+  | `V_Conditional` | 视图，前两张表的并集 | — |
+  | `T_Order` | 委托下单表 | 自增 2644 |
+  | `T_Order_his` | 历史委托 | 1 行 |
+  | `T_Trade` | 成交数据 | 自增 979 |
+  | `T_Trade_his` | 历史成交 | 0 行 |
+  | `T_User` | 用户账号 | 自增 160698 |
+  | `T_UserLog` | 登录日志 | **19.05 万行** |
+  | `T_StrategyLog` | 策略单日志 | **1.66 万行** |
+
+* **Redis** 两个实例，均为 8.6.2：
+
+  | 实例 | 内存 | 客户端 | 使用的 DB |
+  |---|---|---|---|
+  | `192.168.1.136` | 86.98 M | 12 | db0、db1 |
+  | `192.168.1.137` | 1.47 G | 6 | db0、db1、db2 |
+
+  键分为三类：
+
+  * **Stream**：`DataHub_req_stream`（137 db0 已达 **407.3 万条**）、
+    `DataHub_reply_stream`、`WT-<编号>` / `WT-<编号>-reply`（委托服务器方向）、
+    `ST-<编号>` / `ST-<编号>-reply`（策略平台方向）。
+    消费组固定为 `user_group`，consumer 名就是流名本身。
+  * **ReJSON**：`traderserver`（委托服务器节点数组）、`strategy-srv`（策略服务器节点数组）、
+    `acc-<账号>_<账号类型>_<渠道>`、`strategy-<账号>_<账号类型>_<渠道>`。
+  * **String**：`unique_id`（已分配的唯一编号水位）。
+
+  Pub/Sub 频道：`tradeserver_{online,beat,offline}`、`strategyserver_{online,beat,offline}`、
+  `datahub_{online,beat,offline,select,oncall}`。
+  ⚠️ 现场真中台订阅的是**带 `_1` 后缀**的那一套。
+
+* 协议文档：`请求接口字段.txt`（9 个客户端协议）、`请求接口doc.txt`、
+  `数据中台to策略平台.txt`（MsgType 4/8/11/17/18）。
+
+### 第二步：按「管理对象」分菜单
+
+菜单按**被管理的实体**划分，而不是按技术或页面类型：
+
+```
+总览
+策略平台管理      ← 策略服务器、条件单策略、策略运行日志
+委托服务器管理    ← 委托服务器、委托单、成交回报
+数据中台管理      ← 中台节点、消息总线、协议报文
+账户与用户        ← 用户账号、签署与股东号、登录日志
+数据存储          ← Redis 管理、数据库管理、数据维护
+监控与统计        ← 性能压测、破坏测试、实时指标
+系统管理          ← 连接配置、管理用户与权限、操作审计
+```
+
+共 **8 个一级菜单 / 24 个页面**。
+
+这样划分的原因：
+
+1. **对应你说的四类管理对象**：「所有的策略平台、委托服务器、数据中台，还有 Redis 以及数据库」，
+   分别落到「策略平台管理」「委托服务器管理」「数据中台管理」「数据存储」。
+2. **每个菜单都有真实数据兜底**（见下表），不是空壳。
+3. **账户与用户是隐藏的第五个维度**：`T_User` / `acc-*` 既不属于平台也不属于存储，
+   但条件单必须挂在账号上，所以单独成组。
+4. **监控与统计单独成组**：你们已有的 `datahub_test`、`strategy_test` 工具
+   已经在做性能压测和破坏测试，把它搬进后台比留在命令行更合适。
+
+### 第三步：把数据来源写进菜单
+
+每个菜单项在 `src/config/menu.ts` 里都带 `refs`（数据来源）和 `todos`（待办功能），
+占位页会直接把它们渲染出来。**所以打开任意一个页面，就能知道这个页面该连哪张表、哪个键。**
+
+---
+
+## 视觉设计
+
+界面不是「Naive UI 默认样子的堆砌」，有一套自己的设计令牌。
+
+### 模块配色
+
+8 个一级菜单各有主色，侧边栏图标、页面标题竖条、页签圆点、
+总览指标卡、占位页强调色都跟着走，扫一眼就知道自己在哪个模块：
+
+| 模块 | 颜色 | 模块 | 颜色 |
+|---|---|---|---|
+| 总览 | 蓝 `#3b6ff5` | 账户与用户 | 玫红 `#d94f8a` |
+| 策略平台管理 | 紫 `#7c5cf0` | 数据存储 | 绿 `#2f9e5f` |
+| 委托服务器管理 | 青 `#0d9c9c` | 监控与统计 | 红 `#d6455e` |
+| 数据中台管理 | 橙 `#dd7a15` | 系统管理 | 石板灰 `#5b6b8c` |
+
+配色定义在 `src/theme/palette.ts`。数据来源卡片还会按**数据类型**再上一次色
+（MySQL / Redis / Stream / Pub-Sub / JSON / 文档），和模块色是两套体系，
+互不干扰。
+
+### 亮暗双主题
+
+* 亮/暗两套 CSS 变量在 `src/assets/styles/global.css`，
+  `html.dark` 上整体切换；组件里一律引用变量，不写死颜色。
+* 顶栏可切「跟随系统 / 浅色 / 深色」，选择记在 `localStorage`。
+* 暗色不是简单反色：主色、语义色、阴影、装饰光晕都单独调过。
+  > 例如指标卡右下的装饰光晕用 `--stat-glow` 控制，
+  > 亮色 `0.07`、暗色 `0.045` —— 同一个透明度在暗色下会糊成一团脏影子。
+
+### 样式约定
+
+* 组件内的 `<style scoped>` 只写**布局**，颜色一律走 CSS 变量。
+* 需要钻进 Naive UI 内部时用 `:deep()`，**不要用 `:global()`** ——
+  它在 scoped 样式里会被编译成 `html.dark{...}` 这种裸选择器，
+  污染全局（这个坑已经踩过一次）。
+* 复用类放在 `global.css`：`.page-container`、`.page-card`、`.mono`、
+  `.section-title`。
+
+---
+
+
+**只需改一个文件**：`src/config/menu.ts`。侧边栏、面包屑、页面标题、路由表全部由它推导。
+
+```ts
+{
+  name: 'monitor-alarm',          // 唯一，同时是路由 name 和菜单 key
+  path: '/monitor/alarm',
+  view: 'monitor/MonitorAlarm',   // 可选；对应 src/views/monitor/MonitorAlarm.vue
+  meta: {
+    title: '告警规则',
+    icon: AlertCircleOutline,     // 来自 @vicons/ionicons5
+    status: 'planned',            // planned 后端待实现 / placeholder 页面待开发
+    desc: '一句话说明这个页面干什么',
+    refs: [{ label: 'MySQL 表', value: 'T_Alarm' }],
+    todos: ['规则增删改查', '告警渠道配置'],
+  },
+}
+```
+
+* **不写 `view`** → 自动落到通用占位页（能显示 refs/todos），适合先占位。
+* **写了 `view`** → 去 `src/views/` 下建对应文件即可，路由会自动接上。
+* 写完不用注册路由，`router/index.ts` 会自动读取。
+
+---
+
+## 目录结构
+
+```
+frontend/
+├── src/
+│   ├── api/
+│   │   ├── http.ts        # Axios 实例、拦截器、统一响应解包、错误类型
+│   │   ├── types.ts       # ApiEnvelope / PageQuery / PageResult
+│   │   ├── domain.ts      # 业务实体类型（按真实表结构整理）
+│   │   └── endpoints.ts   # 按模块拆分的接口定义（全部待后端实现）
+│   ├── theme/
+│   │   └── palette.ts     # ★ 模块配色（8 个一级菜单各自主色）
+│   ├── config/
+│   │   └── menu.ts        # ★ 菜单唯一数据源（含数据来源与待办）
+│   ├── layouts/
+│   │   └── BasicLayout.vue# 侧边栏 + 顶栏 + 面包屑 + 多页签
+│   ├── router/
+│   │   └── index.ts       # 由 menu.ts 推导路由
+│   ├── stores/
+│   │   ├── app.ts         # 主题、侧边栏折叠
+│   │   └── tabs.ts        # 多页签
+│   ├── components/
+│   │   └── PagePlaceholder.vue
+│   ├── views/
+│   │   ├── dashboard/DashboardView.vue   # 唯一已实现的页面
+│   │   ├── PlaceholderView.vue           # 通用占位页
+│   │   └── NotFoundView.vue
+│   ├── assets/styles/global.css
+│   ├── App.vue
+│   └── main.ts
+├── .env / .env.development / .env.production
+└── vite.config.ts
+```
+
+---
+
+## 前后端约定
+
+后端目录 `cloud-condition-admin/backend/` 目前是空的。前端已按下面的约定写好，
+后端照此实现即可直接对接。
+
+### 1. 统一响应结构
+
+所有接口返回 HTTP 200，业务结果放 body：
+
+```json
+{ "code": 0, "message": "ok", "data": {} }
+```
+
+* `code === 0` 视为成功，其余视为业务错误（前端抛 `BizError`）。
+* 后端若采用别的结构，**只需改 `src/api/http.ts` 里的 `isApiEnvelope` 与 `unwrap`**。
+* 分页统一用 `PageQuery` / `PageResult`（`src/api/types.ts`），
+  即 `{ page, pageSize, keyword, sortBy, sortOrder }` → `{ list, total, page, pageSize }`。
+
+### 2. 接口清单
+
+接口路径已按资源定义在 `src/api/endpoints.ts`，主要有：
+
+| 模块 | 接口 |
+|---|---|
+| 策略平台 | `/strategy/servers`、`/strategy/conditionals`、`/strategy/logs` |
+| 委托服务器 | `/trade/servers`、`/trade/assignments`、`/trade/orders`、`/trade/trades` |
+| 数据中台 | `/datahub/nodes`、`/datahub/streams`、`/datahub/trace` |
+| 账户用户 | `/account/users`、`/account/redis/{account}`、`/account/logs` |
+| 数据存储 | `/storage/redis/keys`、`/storage/redis/channels`、`/storage/mysql/query` |
+| 监控统计 | `/monitor/performance/tasks`、`/monitor/destroy/cases`、`/monitor/realtime/*` |
+| 系统管理 | `/system/connections`、`/system/audit`、`/system/auth/*` |
+
+> 路径只是**建议**，改动时同步改 `endpoints.ts` 即可。
+
+### 3. 开发环境代理
+
+`.env.development` 里的 `VITE_API_TARGET`（默认 `http://127.0.0.1:8000`）
+就是后端地址，`/api` 前缀会代理过去。后端起来后改这一处即可。
+
+### 4. 后端实现时必须注意的安全点
+
+这些是现场实测发现的，**接口设计时要带上限，否则会把生产环境拖垮**：
+
+* `137 db0` 的 `DataHub_req_stream` 有 **407 万条**，
+  列表类接口必须强制分页 + 条数上限，禁止全量 `XRANGE`。
+* `T_UserLog` 19 万行、`T_StrategyLog` 1.6 万行，查询必须走分页与索引。
+* Redis 键扫描用 `SCAN`，禁止 `KEYS *`。
+* `/storage/mysql/query` 必须**强制只读**并限制结果集大小。
+* 破坏测试写的是 `137 db2` 的 `DataHub_req_stream`（`db2` 与生产流隔离），
+  不要写到 db0/db1。
+* 高危操作（删键、删流、破坏测试、清理数据、改连接配置）需要二次确认 + 写审计。
+
+---
+
+## 已知待办
+
+- [ ] 后端服务（`backend/` 为空，所有接口待实现）
+- [ ] 登录鉴权：顶栏「退出登录」目前只弹提示，未接真实鉴权
+- [ ] 21 个占位页逐个实现（建议顺序：策略服务器 → 委托服务器 → 消息总线）
+- [ ] ECharts 已装未用，接入「实时指标」时记得在 `vite.config.ts` 打开 `charts` 分包
+- [ ] 「总览」当前是静态快照，接口就绪后换成实时数据

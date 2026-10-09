@@ -1,0 +1,17 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vite
+*.log
+.env.local
+.env.*.local
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# 构建期由 unplugin-auto-import / unplugin-vue-components 生成，
+# 每次 dev/build 会重新产出，不入库。
+auto-imports.d.ts
+components.d.ts
