@@ -49,8 +49,8 @@ import {
   mockDailyCreated,
   mockStrategyApi,
   mockTypeDistribution,
-  withDelay,
 } from '@/api/mock/strategy'
+import { withDelay } from '@/api/mock/_shared'
 import { CONDITIONAL_FLAGS, CONDITIONAL_MODES, CONDITIONAL_TYPES, type Conditional } from '@/api/domain'
 import { useResource } from '@/composables/useResource'
 import { formatJson, orDash, shortDateTime, thousands } from '@/utils/format'
@@ -129,7 +129,16 @@ const summary = computed(() => {
 })
 
 const typeChartOption = computed(() => {
-  const dist = mockTypeDistribution()
+  // 类型分布可由当前页数据算出，真实接口下同样成立（不走 mock）
+  const counts = new Map<number, number>()
+  for (const r of rows.value) {
+    if (r.Type == null) continue
+    counts.set(r.Type, (counts.get(r.Type) ?? 0) + 1)
+  }
+  const dist = [...counts.entries()].map(([type, count]) => ({
+    name: CONDITIONAL_TYPES[type as keyof typeof CONDITIONAL_TYPES] ?? `类型 ${type}`,
+    count,
+  }))
   return {
     tooltip: { trigger: 'item', formatter: '{b}<br/>{c} 条（{d}%）' },
     legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 12 } },
@@ -149,7 +158,9 @@ const typeChartOption = computed(() => {
 })
 
 const dailyChartOption = computed(() => {
-  const daily = mockDailyCreated()
+  // 趋势需跨天聚合，只有演示数据具备；真实接口下改由后端提供，
+  // 非演示态返回空数组 → 图表显示「暂无数据」，不用假数据充数。
+  const daily = isMock.value ? mockDailyCreated() : []
   return {
     grid: { left: 8, right: 16, top: 16, bottom: 8, containLabel: true },
     tooltip: { trigger: 'axis' },

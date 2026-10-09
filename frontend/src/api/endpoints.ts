@@ -56,9 +56,14 @@ export const tradeApi = {
   listServers: (query?: PageQuery) =>
     api.get<PageResult<TraderServer>>('/trade/servers', query),
 
-  /** 启用/停用委托服务器 */
-  setServerEnabled: (id: number, enable: boolean) =>
-    api.post<void>(`/trade/servers/${id}/enable`, { enable }),
+  /**
+   * 启用/停用委托服务器。
+   *
+   * ⚠️ 现场 `traderserver` 键里 **id 是重复的**（多次上线累积，见 mock 注释），
+   * 所以追加 mac 作为定位条件，避免误改到别的节点。
+   */
+  setServerEnabled: (id: number, mac: string, enable: boolean) =>
+    api.post<void>(`/trade/servers/${id}/enable`, { mac, enable }),
 
   /** 账号 → 委托服务器分配关系 */
   listAssignments: (query?: PageQuery) =>
@@ -67,6 +72,14 @@ export const tradeApi = {
   listOrders: (query?: PageQuery) => api.get<PageResult<OrderRecord>>('/trade/orders', query),
 
   listTrades: (query?: PageQuery) => api.get<PageResult<TradeRecord>>('/trade/trades', query),
+
+  /** 某委托号下的成交明细（委托 → 成交 下钻） */
+  listTradesByOrder: (orderNo: string) =>
+    api.get<TradeRecord[]>(`/trade/orders/${orderNo}/trades`),
+
+  /** 某台委托服务器承载的账号 */
+  listAccountsByServer: (serverId: number) =>
+    api.get<RedisAccount[]>(`/trade/servers/${serverId}/accounts`),
 }
 
 /* -------------------------------- 数据中台 -------------------------------- */

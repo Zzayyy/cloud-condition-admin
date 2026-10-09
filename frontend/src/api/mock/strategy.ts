@@ -10,86 +10,22 @@
  */
 import type { Conditional, StrategyLog, StrategyServer } from '../domain'
 import type { PageQuery, PageResult } from '../types'
+import {
+  agoBy,
+  asNumber,
+  asString,
+  fmt,
+  intBetween,
+  paginate,
+  pick,
+  seededRandom,
+  withDelay,
+  type Rand,
+} from './_shared'
 
 /* ------------------------------ 工具 ------------------------------ */
 
-/** 固定种子的伪随机，保证每次刷新数据一致，方便对比界面。 */
-function mulberry32(seed: number) {
-  return function next() {
-    seed |= 0
-    seed = (seed + 0x6d2b79f5) | 0
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-const rand = mulberry32(20261009)
-
-function pick<T>(list: readonly T[]): T {
-  return list[Math.floor(rand() * list.length)]
-}
-
-function intBetween(min: number, max: number): number {
-  return min + Math.floor(rand() * (max - min + 1))
-}
-
-/** 'YYYY-MM-DD HH:mm:ss' */
-function fmt(date: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return (
-    `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ` +
-    `${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`
-  )
-}
-
-/** 相对现在偏移若干秒，返回 [格式化字符串, 秒级时间戳] */
-function agoBy(seconds: number): [string, number] {
-  const d = new Date(Date.now() - seconds * 1000)
-  return [fmt(d), Math.floor(d.getTime() / 1000)]
-}
-
-/** 模拟网络延迟，让加载态可见 */
-export function withDelay<T>(value: T, ms = 260): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms))
-}
-
-/** 生成一个通用查询器：过滤 → 排序 → 分页 */
-function paginate<T>(
-  rows: T[],
-  query: PageQuery,
-  search: (row: T, keyword: string) => boolean,
-  sorters: Record<string, (row: T) => number | string>,
-): PageResult<T> {
-  const page = Number(query.page) > 0 ? Number(query.page) : 1
-  const pageSize = Number(query.pageSize) > 0 ? Number(query.pageSize) : 20
-
-  let list = rows
-  const keyword = typeof query.keyword === 'string' ? query.keyword.trim() : ''
-  if (keyword) list = list.filter((row) => search(row, keyword))
-
-  const sortBy = typeof query.sortBy === 'string' ? query.sortBy : ''
-  const sorter = sorters[sortBy]
-  if (sorter) {
-    const dir = query.sortOrder === 'desc' ? -1 : 1
-    list = [...list].sort((a, b) => {
-      const va = sorter(a)
-      const vb = sorter(b)
-      if (va === vb) return 0
-      return (va > vb ? 1 : -1) * dir
-    })
-  }
-
-  const total = list.length
-  const start = (page - 1) * pageSize
-  return { list: list.slice(start, start + pageSize), total, page, pageSize }
-}
-
-const asString = (v: unknown): string => (typeof v === 'string' ? v : '')
-const asNumber = (v: unknown): number | undefined => {
-  const n = Number(v)
-  return Number.isFinite(n) && v !== '' && v !== null && v !== undefined ? n : undefined
-}
+const rand: Rand = seededRandom(20261009)
 
 /* --------------------------- 策略服务器 --------------------------- */
 
@@ -113,15 +49,15 @@ function buildServers(): StrategyServer[] {
 
   return seedRows.map((row, index) => {
     // 前 5 个心跳新鲜（在线），第 6 个刚掉线，最后 2 个停用
-    const offsetSec = index < 5 ? intBetween(2, 8) : index === 5 ? intBetween(40, 120) : intBetween(3600, 86400)
+    const offsetSec = index < 5 ? intBetween(rand, 2, 8) : index === 5 ? intBetween(rand, 40, 120) : intBetween(rand, 3600, 86400)
     const [lastActive, ts] = agoBy(offsetSec)
-    const [loginTime] = agoBy(offsetSec + intBetween(3600, 200000))
+    const [loginTime] = agoBy(offsetSec + intBetween(rand, 3600, 200000))
 
     return {
       id: index,
       ip: row.ip,
       mac: row.mac,
-      usecount: index < 5 ? intBetween(0, 860) : 0,
+      usecount: index < 5 ? intBetween(rand, 0, 860) : 0,
       'login-time': loginTime,
       'last-active-time': lastActive,
       lastActiveTimeLong: ts,
@@ -176,30 +112,30 @@ function buildStrategyJson(contract: string, condType: number): string {
     create: {
       Account: { FAccount: '300130000461', AccountType: 1, AccAtt: 6 },
       CondType: condType,
-      CondName: pick(COND_NAMES),
+      CondName: pick(rand, COND_NAMES),
       CondDesc: '演示数据',
       ValidDate: '2026-12-31',
       Entrust: {
         ContractCode: contract,
-        ExchangeNum: pick([1, 2]),
+        ExchangeNum: pick(rand, [1, 2]),
         EntrustPrice: (rand() * 12 + 0.5).toFixed(4),
         MarketOrderType: 15,
         CoveredType: false,
-        BSType: pick([1, 2]),
-        OCType: pick([1, 2]),
+        BSType: pick(rand, [1, 2]),
+        OCType: pick(rand, [1, 2]),
         PriceUnit: '0.0001',
-        EntrustAmount: intBetween(1, 100) * 10,
+        EntrustAmount: intBetween(rand, 1, 100) * 10,
       },
       CondPrice: {
         ContractCode: contract,
         ExchangeNum: 2,
-        Op: pick(['>', '<']),
+        Op: pick(rand, ['>', '<']),
         TriggerPrice: (rand() * 12 + 0.5).toFixed(4),
       },
       CondPercent: {
         ContractCode: contract,
         ExchangeNum: 2,
-        Op: pick(['>', '<']),
+        Op: pick(rand, ['>', '<']),
         TriggerPercent: (rand() * 8 + 1).toFixed(2),
       },
       CondTime: {
@@ -233,20 +169,20 @@ function buildConditionals(): Conditional[] {
   const count = 46
 
   for (let i = 0; i < count; i += 1) {
-    const owner = pick(F_ACCOUNTS)
-    const contract = pick(CONTRACTS)
-    const condType = pick(COND_TYPES)
-    const mode = pick(MODES)
-    const flag = mode === 3 ? 2 : pick(FLAGS)
+    const owner = pick(rand, F_ACCOUNTS)
+    const contract = pick(rand, CONTRACTS)
+    const condType = pick(rand, COND_TYPES)
+    const mode = pick(rand, MODES)
+    const flag = mode === 3 ? 2 : pick(rand, FLAGS)
 
-    const addSeconds = intBetween(60, 60 * 60 * 24 * 45)
+    const addSeconds = intBetween(rand, 60, 60 * 60 * 24 * 45)
     const addDate = new Date(Date.now() - addSeconds * 1000)
-    const modifyDate = new Date(addDate.getTime() + intBetween(0, addSeconds) * 1000)
-    const runCount = intBetween(0, 320)
+    const modifyDate = new Date(addDate.getTime() + intBetween(rand, 0, addSeconds) * 1000)
+    const runCount = intBetween(rand, 0, 320)
     const triggered = mode === 3 || (runCount > 0 && rand() > 0.6)
 
     rows.push({
-      id: Number(`2026${String(intBetween(10, 12)).padStart(2, '0')}${String(intBetween(1, 28)).padStart(2, '0')}${String(i + 1).padStart(4, '0')}`),
+      id: Number(`2026${String(intBetween(rand, 10, 12)).padStart(2, '0')}${String(intBetween(rand, 1, 28)).padStart(2, '0')}${String(i + 1).padStart(4, '0')}`),
       Account: owner.account,
       UserAccount: owner.user,
       Strategy: buildStrategyJson(contract, condType),
@@ -258,14 +194,14 @@ function buildConditionals(): Conditional[] {
       EndTime: '2026-12-31 23:59:59',
       Status: triggered ? 1 : 0,
       Flag: flag,
-      Description: pick(COND_NAMES),
+      Description: pick(rand, COND_NAMES),
       Validity: 0,
       ModifyTime: fmt(modifyDate),
       TriggeredTime: triggered ? fmt(new Date(addDate.getTime() + 1800_000)) : null,
       Reason: rand() > 0.7 ? '用户手动调整触发价' : null,
       Mode: mode,
       Type: condType,
-      Name: pick(COND_NAMES),
+      Name: pick(rand, COND_NAMES),
     })
   }
 
@@ -284,9 +220,9 @@ function buildLogs(): StrategyLog[] {
   const count = 90
 
   for (let i = 0; i < count; i += 1) {
-    const src = pick(CONDITIONALS)
-    const status = pick(LOG_STATUS)
-    const seconds = intBetween(30, 60 * 60 * 24 * 20)
+    const src = pick(rand, CONDITIONALS)
+    const status = pick(rand, LOG_STATUS)
+    const seconds = intBetween(rand, 30, 60 * 60 * 24 * 20)
     const [occur] = agoBy(seconds)
 
     rows.push({
@@ -295,16 +231,16 @@ function buildLogs(): StrategyLog[] {
       Status: status,
       Info:
         status === '触发成功'
-          ? `条件单触发，已发出委托 ${pick(CONTRACTS)}，委托号 ${intBetween(20000, 99999)}`
+          ? `条件单触发，已发出委托 ${pick(rand, CONTRACTS)}，委托号 ${intBetween(rand, 20000, 99999)}`
           : status === '触发失败'
-            ? `触发失败：委托被拒绝，${pick(['资金不足', '持仓不足', '价格超出涨跌停', '合约不可交易'])}`
+            ? `触发失败：委托被拒绝，${pick(rand, ['资金不足', '持仓不足', '价格超出涨跌停', '合约不可交易'])}`
             : status === '校验失败'
-              ? `协议校验失败：${pick(['EntrustAmount 必须大于 0', 'TriggerPrice 格式错误', 'ExchangeNum 取值非法'])}`
-              : `${status}，操作来源 ${pick(['客户端', 'Web 服务器', '管理员'])}`,
+              ? `协议校验失败：${pick(rand, ['EntrustAmount 必须大于 0', 'TriggerPrice 格式错误', 'ExchangeNum 取值非法'])}`
+              : `${status}，操作来源 ${pick(rand, ['客户端', 'Web 服务器', '管理员'])}`,
       OccurTIme: occur,
-      FromIP: pick(['192.168.1.136', '192.168.1.137', '10.0.0.21', '10.0.0.35', '']),
-      FromMac: pick(['2cea7fd9d5c0', '20474789c674', '5a6b7c8d9e01', '']),
-      FromAccount: pick([...F_ACCOUNTS.map((a) => a.user), 'admin']),
+      FromIP: pick(rand, ['192.168.1.136', '192.168.1.137', '10.0.0.21', '10.0.0.35', '']),
+      FromMac: pick(rand, ['2cea7fd9d5c0', '20474789c674', '5a6b7c8d9e01', '']),
+      FromAccount: pick(rand, [...F_ACCOUNTS.map((a) => a.user), 'admin']),
     })
   }
 

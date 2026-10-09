@@ -145,10 +145,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'trade-server',
         path: '/trade/server',
+        view: 'trade/TradeServer',
         meta: {
           title: '委托服务器',
           icon: ServerOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '委托服务器节点清单与在线状态，以及账号到委托服务器的分配关系。',
           refs: [
             { label: 'Pub/Sub 频道', value: 'tradeserver_online / _beat / _offline（现场另有 _1 后缀一套）' },
@@ -161,10 +162,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'trade-order',
         path: '/trade/order',
+        view: 'trade/TradeOrder',
         meta: {
           title: '委托单',
           icon: ClipboardOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '条件单触发后产生的委托记录。',
           refs: [
             { label: 'MySQL 表', value: 'T_Order（委托下单表） / T_Order_his（历史）' },
@@ -177,10 +179,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'trade-deal',
         path: '/trade/deal',
+        view: 'trade/TradeDeal',
         meta: {
           title: '成交回报',
           icon: CashOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '委托对应的成交明细。',
           refs: [
             { label: 'MySQL 表', value: 'T_Trade（成交数据） / T_Trade_his（历史）' },

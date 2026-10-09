@@ -210,3 +210,52 @@ a:hover {
   gap: 8px;
   font-weight: 600;
 }
+
+/* ==========================================================================
+   Naive UI 数据表格微调
+   ========================================================================== */
+
+/*
+ * 固定列（fixed-left / fixed-right）必须是不透明背景。
+ * naive-ui 默认给的是 thColor（这里是 rgba(15,23,42,.024)）这类半透明色，
+ * 窗口一窄、表格横向滚动时，底下的普通列会从固定列下面透出来，
+ * 文字糊在一起（踩过一次：截图里「委托时间」被「操作」压成了「操托时间」）。
+ *
+ * 注意两个坑：
+ * 1. 不要给祖先加 .n-data-table-base-table-header 之类的前缀 —— 表头的真实
+ *    结构是 table > thead.n-data-table-thead > tr > th，猜错的祖先会静默失效。
+ * 2. naive-ui 自己的规则是 `.n-data-table .n-data-table-th`（两个类，0-2-0），
+ *    所以这里必须也用两/三个类，否则特异性不够会被它盖掉（th 第一次就是这么没生效的）。
+ */
+.n-data-table .n-data-table-th--fixed-left,
+.n-data-table .n-data-table-th--fixed-right {
+  background-color: color-mix(in srgb, var(--text-primary) 4%, var(--bg-surface));
+}
+
+.n-data-table .n-data-table-td--fixed-left,
+.n-data-table .n-data-table-td--fixed-right {
+  background-color: var(--bg-surface);
+}
+
+/* 固定列与滚动区分界处加一条细阴影，提示「这里被固定了」 */
+.n-data-table th.n-data-table-th--fixed-right::after,
+.n-data-table td.n-data-table-td--fixed-right::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+.n-data-table th.n-data-table-th--fixed-left::after,
+.n-data-table td.n-data-table-td--fixed-left::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 1px;
+  background: var(--border);
+}

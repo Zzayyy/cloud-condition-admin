@@ -40,8 +40,8 @@ import {
   SERVER_OFFLINE_AFTER_SEC,
   isServerOnline,
   mockStrategyApi,
-  withDelay,
 } from '@/api/mock/strategy'
+import { withDelay } from '@/api/mock/_shared'
 import type { StrategyServer } from '@/api/domain'
 import { useResource } from '@/composables/useResource'
 import { relativeTime, thousands } from '@/utils/format'

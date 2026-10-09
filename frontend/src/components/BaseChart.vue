@@ -99,13 +99,31 @@ function themedOption(): EChartsOption {
   }
 }
 
+/**
+ * 判断「有没有数据」。
+ *
+ * 不能只看数组长度 —— 全部为 0 的序列（例如买卖各 0 笔）长度也是 2，
+ * 但画出来是个没有意义的空环/空线，应当显示空态。
+ * 所以要求「至少有一个非零数值」。
+ */
 function hasData(): boolean {
   const s = props.option.series
   if (!s) return false
   const list = Array.isArray(s) ? s : [s]
+
   return list.some((item) => {
-    const d = (item as { data?: unknown[] }).data
-    return Array.isArray(d) && d.length > 0
+    const data = (item as { data?: unknown }).data
+    if (!Array.isArray(data) || data.length === 0) return false
+
+    return data.some((point) => {
+      if (typeof point === 'number') return point !== 0
+      if (point && typeof point === 'object') {
+        const v = (point as { value?: unknown }).value
+        if (typeof v === 'number') return v !== 0
+        return v != null
+      }
+      return point != null
+    })
   })
 }
 
