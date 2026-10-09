@@ -4,8 +4,53 @@
 
 技术栈：Vue 3 + Vite + TypeScript + Naive UI + Vue Router + Pinia + Axios + ECharts。
 
-> 当前阶段：**只有菜单和页面骨架**。除「总览」外，其余页面都是占位页，
-> 后端接口尚未实现。占位页会把该页面**真实的数据来源**列出来，方便逐个补齐。
+> 当前阶段：**前端页面开发中，后端未动**。
+> 已实现「总览」与「策略平台管理」3 个页面，其余为占位页。
+> 因为没有后端，页面默认走**演示数据**（见下方「演示数据机制」），
+> 界面上会明确标出「当前为演示数据」，不会跟真实数据混淆。
+
+---
+
+## 已实现的页面
+
+| 页面 | 状态 | 说明 |
+|---|---|---|
+| 总览 | ✅ | 实测快照 + 协议清单 + 建设进度 |
+| 策略平台管理 / 策略服务器 | ✅ | 节点列表、在线状态、负载分布图、详情抽屉、筛选排序分页 |
+| 策略平台管理 / 条件单策略 | ✅ | 三数据源切换、筛选、类型/趋势图、明细抽屉（含原始报文 JSON）、启停/删除入口 |
+| 策略平台管理 / 策略运行日志 | ✅ | 检索筛选、状态分布图、日志详情、条件单轨迹时间线 |
+| 其余 21 个页面 | ⏳ | 占位页，列出数据来源与待办 |
+
+---
+
+## 演示数据机制
+
+后端还没写，但页面要能看效果，所以有一套**显式**的演示数据机制。
+
+### 怎么切换
+
+`.env.development` 里的 `VITE_USE_MOCK`：
+
+| 取值 | 行为 |
+|---|---|
+| `true`（开发默认） | 直接渲染 `src/api/mock/` 下的演示数据 |
+| `false` | 走真实接口；**仅开发环境**下后端不可达时自动降级并提示 |
+
+`.env.production` 里强制 `VITE_USE_MOCK=false`。
+
+### 三条安全约束（重要）
+
+这是管理真实交易系统的后台，宁可报错也不能给假数据：
+
+1. **生产构建绝不自动降级** —— 自动降级只在 `import.meta.env.DEV` 下生效。
+   后端挂掉时生产环境显示红色错误条，不会悄悄拿假数据顶上。
+2. **业务错误不降级** —— 后端答了但返回 `code != 0`（`BizError`）时如实报错；
+   只有「连不上」才考虑降级。
+3. **误开开关会报警** —— 生产构建里若 `VITE_USE_MOCK=true`，控制台打 `console.error`。
+
+演示数据在界面上有**明确的黄色横幅**标注，并写明原因，不会被误认为真实数据。
+数据是按现场真实表/键结构造的（`strategy-srv`、`T_Conditional`、`T_StrategyLog`），
+但**数值是编的**。后端接通后，删掉 `src/api/mock/` 目录与调用处的 `mock` 参数即可。
 
 ---
 
@@ -175,6 +220,38 @@ npm run dev          # http://localhost:5173
 
 ---
 
+## 加一个菜单怎么做
+
+**只需改一个文件**：`src/config/menu.ts`。侧边栏、面包屑、页面标题、路由表全部由它推导。
+
+```ts
+{
+  name: 'monitor-alarm',          // 唯一，同时是路由 name 和菜单 key
+  path: '/monitor/alarm',
+  view: 'monitor/MonitorAlarm',   // 可选；对应 src/views/monitor/MonitorAlarm.vue
+  meta: {
+    title: '告警规则',
+    icon: AlertCircleOutline,     // 来自 @vicons/ionicons5
+    status: 'planned',            // planned 后端待实现 / placeholder 页面待开发 / ready 已完成
+    desc: '一句话说明这个页面干什么',
+    refs: [{ label: 'MySQL 表', value: 'T_Alarm' }],
+    todos: ['规则增删改查', '告警渠道配置'],
+  },
+}
+```
+
+* **不写 `view`** → 自动落到通用占位页（能显示 refs/todos），适合先占位。
+* **写了 `view`** → 去 `src/views/` 下建对应文件即可，路由会自动接上。
+* `status: 'ready'` 后，顶栏的「页面待开发」标签会自动隐藏。
+* 写完不用注册路由，`router/index.ts` 会自动读取。
+
+> ⚠️ **踩坑记录：`n-tab-pane` 不要用 `tab="..."` 属性。**
+> naive-ui 2.45.x 的 `Tabs` 只从 `#tab` **插槽**读取标签，
+> 写成 `tab="基本信息"` 会渲染成**空标签**（不报错，静默失效）。
+> 必须写成 `<template #tab>基本信息</template>`。
+
+---
+
 ## 目录结构
 
 ```
@@ -184,7 +261,13 @@ frontend/
 │   │   ├── http.ts        # Axios 实例、拦截器、统一响应解包、错误类型
 │   │   ├── types.ts       # ApiEnvelope / PageQuery / PageResult
 │   │   ├── domain.ts      # 业务实体类型（按真实表结构整理）
-│   │   └── endpoints.ts   # 按模块拆分的接口定义（全部待后端实现）
+│   │   ├── endpoints.ts   # 按模块拆分的接口定义（全部待后端实现）
+│   │   └── mock/
+│   │       └── strategy.ts# 策略平台演示数据（后端接通后可整个删掉）
+│   ├── composables/
+│   │   └── useResource.ts # ★ 取数：真实接口优先 + 演示数据兜底
+│   ├── utils/
+│   │   └── format.ts      # JSON 格式化、相对时间、空值处理
 │   ├── theme/
 │   │   └── palette.ts     # ★ 模块配色（8 个一级菜单各自主色）
 │   ├── config/
@@ -196,11 +279,14 @@ frontend/
 │   ├── stores/
 │   │   ├── app.ts         # 主题、侧边栏折叠
 │   │   └── tabs.ts        # 多页签
-│   ├── components/
-│   │   └── PagePlaceholder.vue
+│   ├── components/        # StatCard / BaseChart / MockDataAlert / QueryErrorAlert / PagePlaceholder
 │   ├── views/
-│   │   ├── dashboard/DashboardView.vue   # 唯一已实现的页面
-│   │   ├── PlaceholderView.vue           # 通用占位页
+│   │   ├── dashboard/DashboardView.vue
+│   │   ├── strategy/
+│   │   │   ├── StrategyServer.vue   # 策略服务器
+│   │   │   ├── StrategyList.vue     # 条件单策略
+│   │   │   └── StrategyLog.vue      # 策略运行日志
+│   │   ├── PlaceholderView.vue      # 通用占位页
 │   │   └── NotFoundView.vue
 │   ├── assets/styles/global.css
 │   ├── App.vue
@@ -269,6 +355,8 @@ frontend/
 
 - [ ] 后端服务（`backend/` 为空，所有接口待实现）
 - [ ] 登录鉴权：顶栏「退出登录」目前只弹提示，未接真实鉴权
-- [ ] 21 个占位页逐个实现（建议顺序：策略服务器 → 委托服务器 → 消息总线）
-- [ ] ECharts 已装未用，接入「实时指标」时记得在 `vite.config.ts` 打开 `charts` 分包
-- [ ] 「总览」当前是静态快照，接口就绪后换成实时数据
+- [ ] 「策略平台管理」3 个页面的写操作（启停/删除/启用开关）只弹提示，等 set/remove 协议接口
+- [ ] 剩余 21 个占位页逐个实现（建议顺序：委托服务器 → 消息总线 → 数据中台节点）
+- [ ] 后端就绪后删掉 `src/api/mock/`，并把 `.env.development` 的 `VITE_USE_MOCK` 改为 `false`
+- [ ] 「总览」与各页汇总指标当前是「本页口径」，真实汇总应由后端单独出接口
+- [ ] 汇总统计目前只对**当前页**计算，全量口径需后端支持

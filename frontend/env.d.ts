@@ -15,6 +15,8 @@ interface ImportMetaEnv {
   readonly VITE_API_TARGET?: string
   /** 页面标题 */
   readonly VITE_APP_TITLE?: string
+  /** 演示数据开关：'true' 时直接用 src/api/mock 下的假数据 */
+  readonly VITE_USE_MOCK?: string
 }
 
 interface ImportMeta {

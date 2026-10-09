@@ -208,14 +208,15 @@ const parentTitle = computed(() => {
         </div>
 
         <div class="header-right">
-          <n-tooltip trigger="hover">
+          <!-- 只在「未完成」时才显示状态标签。
+               vueuc 要求 NTooltip 的 trigger 槽恰好有一个子节点，
+               若标签被 v-if 全部挡掉就会抛错，所以整个 tooltip 一起判断。 -->
+          <n-tooltip v-if="pageStatus && pageStatus !== 'ready'" trigger="hover">
             <template #trigger>
               <n-tag v-if="pageStatus === 'planned'" size="small" type="warning" round>
                 后端待实现
               </n-tag>
-              <n-tag v-else-if="pageStatus === 'placeholder'" size="small" type="info" round>
-                页面待开发
-              </n-tag>
+              <n-tag v-else size="small" type="info" round> 页面待开发 </n-tag>
             </template>
             该页面的功能尚未开发完成
           </n-tooltip>

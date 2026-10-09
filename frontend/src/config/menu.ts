@@ -88,10 +88,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'strategy-server',
         path: '/strategy/server',
+        view: 'strategy/StrategyServer',
         meta: {
           title: '策略服务器',
           icon: ServerOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '策略平台集群的节点清单、上线/心跳/下线状态与承载的条件单用户数。',
           refs: [
             { label: 'Pub/Sub 频道', value: 'strategyserver_online / _beat / _offline（现场另有 _1 后缀一套）' },
@@ -104,10 +105,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'strategy-list',
         path: '/strategy/list',
+        view: 'strategy/StrategyList',
         meta: {
           title: '条件单策略',
           icon: ListOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '全量云条件单的查询、明细查看与人工干预（启停/删除）。',
           refs: [
             { label: 'MySQL 表', value: 'T_Conditional（运行中） / T_Conditional_his（历史） / V_Conditional（两者并集视图）' },
@@ -120,10 +122,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'strategy-log',
         path: '/strategy/log',
+        view: 'strategy/StrategyLog',
         meta: {
           title: '策略运行日志',
           icon: DocumentTextOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '条件单的运行与触发轨迹。',
           refs: [
             { label: 'MySQL 表', value: 'T_StrategyLog（策略单日志）' },

@@ -58,8 +58,8 @@ export default defineConfig(({ mode }) => {
           manualChunks: {
             vue: ['vue', 'vue-router', 'pinia'],
             naive: ['naive-ui'],
-            // ECharts 体积较大，等真正用到图表时再打开下面这行，避免产生空 chunk
-            // charts: ['echarts', 'vue-echarts'],
+            // ECharts 只在有图表的页面用到，单独分包避免拖累首屏
+            charts: ['echarts', 'echarts/core', 'echarts/charts', 'echarts/components', 'echarts/renderers'],
           },
         },
       },
