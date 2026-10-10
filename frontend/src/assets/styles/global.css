@@ -237,25 +237,17 @@ a:hover {
   background-color: var(--bg-surface);
 }
 
-/* 固定列与滚动区分界处加一条细阴影，提示「这里被固定了」 */
-.n-data-table th.n-data-table-th--fixed-right::after,
-.n-data-table td.n-data-table-td--fixed-right::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 1px;
-  background: var(--border);
-}
-
-.n-data-table th.n-data-table-th--fixed-left::after,
-.n-data-table td.n-data-table-td--fixed-left::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  width: 1px;
-  background: var(--border);
-}
+/*
+ * 不要再自己给固定列加 ::after / ::before 分界线！
+ *
+ * naive-ui 已经用伪元素画「横向滚动时的固定列投影」：
+ *   fixed-left  → ::after  （width:36px; right:-36px，投影盖在**相邻列**上）
+ *   fixed-right → ::before （width:36px; left:-36px）
+ * 它靠 JS 在滚动时给阴影，宽度/定位都是它自己算好的。
+ *
+ * 我曾在 fixed-left 上写 `::after { width:1px; background:var(--border) }`，
+ * 结果**覆盖掉了 naive-ui 那个 36px 投影的宽度**，只留下一条残留灰条，
+ * 正好压在第 2 列上 —— 表现就是「条件单策略/委托单/成交回报 第二列有灰影」
+ * （这三张表恰好都是第一列 fixed:'left'，其余表只有 fixed:'right' 所以没事）。
+ * 需要分界线的话请用 border，不要碰伪元素。
+ */

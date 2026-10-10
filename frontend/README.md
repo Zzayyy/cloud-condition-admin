@@ -256,7 +256,7 @@ npm run dev          # http://localhost:5173
 * `status: 'ready'` 后，顶栏的「页面待开发」标签会自动隐藏。
 * 写完不用注册路由，`router/index.ts` 会自动读取。
 
-> ⚠️ **踩坑记录（两个都静默失效，构建/类型检查发现不了）**
+> ⚠️ **踩坑记录（以下都是静默失效，构建/类型检查发现不了）**
 >
 > **1. `n-tab-pane` 不要用 `tab="..."` 属性。**
 > naive-ui 2.45.x 的 `Tabs` 只从 `#tab` **插槽**读取标签，
@@ -267,6 +267,20 @@ npm run dev          # http://localhost:5173
 > 那样拿到的是 **Ref 对象（永远为真值）**，`v-if` 会无条件通过 ——
 > 实测表现为「数据加载失败」和「当前为演示数据」两个横幅同时出现。
 > 必须解构：`const { data, error, load } = useResource(...)`。
+>
+> **3. 不要给表格固定列写 `::after` / `::before`。**
+> naive-ui 已用伪元素画「横向滚动时的固定列投影」：
+> `fixed-left` 用 `::after`（`width:36px; right:-36px`，投影落在**相邻列**上），
+> `fixed-right` 用 `::before`。我曾想加一条 1px 分界线，结果**覆盖掉了
+> 那个 36px 投影的宽度**，只留一条残留灰条压在第 2 列上 —— 表现就是
+> 「条件单策略 / 委托单 / 成交回报 第二列有灰影」。这三张表恰好都是
+> 第一列 `fixed:'left'`，其余表只有 `fixed:'right'` 所以没事。
+> **需要分界线请用 border，不要碰伪元素。**
+>
+> **4. 给 naive-ui 组件写覆盖样式时注意特异性。**
+> 它的规则常是 `.n-data-table .n-data-table-th`（两个类，0-2-0）。
+> 只写一个类会被静默盖掉（固定列背景第一次就是这么没生效的）。
+> 排查办法：用 CDP 的 `CSS.getMatchedStylesForNode` 看真实级联，别猜。
 
 ---
 
