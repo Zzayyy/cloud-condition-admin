@@ -5,9 +5,13 @@ import type {
   AccountRow,
   Conditional,
   DatahubNodeDetail,
+  MysqlTable,
+  MysqlTableSchema,
   OrderRecord,
   RedisAccount,
   RedisInstance,
+  RedisInstanceInfo,
+  RedisKeyDetail,
   RedisKeyInfo,
   RedisPubSubChannel,
   RedisStreamEntry,
@@ -131,28 +135,60 @@ export const accountApi = {
 export const storageApi = {
   listRedisInstances: () => api.get<RedisInstance[]>('/storage/redis/instances'),
 
-  /** 扫描键（SCAN，务必带 limit，137 的 db0 有 400 万条 stream） */
+  /** 实例概览（对应 INFO：内存、客户端数、各 db 键数） */
+  getRedisInstanceInfo: (instanceId: string) =>
+    api.get<RedisInstanceInfo>('/storage/redis/info', { instanceId }),
+
+  /**
+   * 扫描键（后端必须用 SCAN 而非 KEYS，并强制条数上限）。
+   *
+   * ⚠️ 137 db0 有 457 万条 stream，全量扫描会拖垮实例 ——
+   * 所以接口签名里没有「取全部」的选项。
+   */
   scanKeys: (instanceId: string, db: number, query?: PageQuery) =>
     api.get<PageResult<RedisKeyInfo>>('/storage/redis/keys', { instanceId, db, ...query }),
 
+  /** 单个键的内容（按类型返回不同结构） */
   getKey: (instanceId: string, db: number, key: string) =>
-    api.get<unknown>('/storage/redis/key', { instanceId, db, key }),
+    api.get<RedisKeyDetail>('/storage/redis/key', { instanceId, db, key }),
 
+  /** 删除键（高危，后端需二次确认 + 审计） */
   deleteKey: (instanceId: string, db: number, key: string) =>
     api.delete<void>('/storage/redis/key', { instanceId, db, key }),
 
   listPubSubChannels: (instanceId: string, db: number) =>
     api.get<RedisPubSubChannel[]>('/storage/redis/channels', { instanceId, db }),
 
-  /** MySQL 表清单与结构 */
-  listTables: (database: string) => api.get<unknown[]>('/storage/mysql/tables', { database }),
+  /* ------------------------------- MySQL ------------------------------- */
 
-  /** 通用只读查询（后端必须强制只读 + 分页上限） */
+  /** 表/视图清单（含注释与近似行数） */
+  listTables: (database: string) => api.get<MysqlTable[]>('/storage/mysql/tables', { database }),
+
+  /** 单表结构：字段、索引、DDL */
+  getTableSchema: (database: string, table: string) =>
+    api.get<MysqlTableSchema>('/storage/mysql/schema', { database, table }),
+
+  /**
+   * 分页取表数据（**只读**）。
+   * 后端必须限制 pageSize 上限（建议 ≤ 200）并禁止任意 SQL。
+   */
   queryTable: (database: string, table: string, query?: PageQuery) =>
     api.get<PageResult<Record<string, unknown>>>('/storage/mysql/query', {
       database,
       table,
       ...query,
+    }),
+
+  /**
+   * 只读 SQL 查询。
+   * 后端**必须**校验语句为只读（拒绝 INSERT/UPDATE/DELETE/DROP/ALTER 等），
+   * 并强制结果集上限。
+   */
+  runReadonlyQuery: (database: string, sql: string, limit?: number) =>
+    api.post<PageResult<Record<string, unknown>>>('/storage/mysql/query', {
+      database,
+      sql,
+      limit,
     }),
 }
 

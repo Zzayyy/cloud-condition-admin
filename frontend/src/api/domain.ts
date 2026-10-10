@@ -322,11 +322,29 @@ export type RedisValueType = 'string' | 'list' | 'set' | 'zset' | 'hash' | 'stre
 export interface RedisKeyInfo {
   key: string
   type: RedisValueType
-  /** TTL 秒，-1 表示永不过期 */
-  ttl: number
+  /**
+   * TTL 毫秒：-1 永不过期，-2 键不存在（PTTL 语义）。
+   * 用毫秒是因为现场有 4 秒 / 14 秒这种短 TTL 的锁键，秒级精度会丢信息。
+   */
+  pttl: number
   /** 长度/条目数，非容器类型为 undefined */
   length?: number
+  /** 该键由哪个业务模块使用（按命名规律推断，用于分组显示） */
+  domain?: RedisKeyDomain
 }
+
+/**
+ * 键的业务归属 —— 按现场实测的命名规律推断，用于「按模块分组」。
+ * 仅作归类参考，以 key 的真实前缀为准。
+ */
+export type RedisKeyDomain =
+  | 'account' // acc-*
+  | 'strategy' // strategy-*、strategy-srv、strategysrv-*
+  | 'trade' // traderserver、WT-*
+  | 'stream' // DataHub_*_stream、ST-*
+  | 'lock' // strategy_server_lock_*
+  | 'meta' // unique_id 等
+  | 'other'
 
 export interface RedisInstance {
   id: string
@@ -334,6 +352,106 @@ export interface RedisInstance {
   host: string
   port: number
   db: number
+}
+
+/**
+ * Redis 实例概览（对应 `INFO` 的常用字段 + 各 db 键数）。
+ *
+ * 现场实测值得盯的两个字段：
+ *  - `maxmemory` = 0 且 `maxmemoryPolicy` = noeviction → **内存无上限**，
+ *    写满会直接报错而不是淘汰旧数据。
+ *  - `usedMemoryPeak` 可能远大于当前值（137 曾达 12.45G，当前 1.47G）。
+ */
+export interface RedisInstanceInfo {
+  host: string
+  port: number
+  version: string
+  mode: string
+  os: string
+  /** 运行时长（秒） */
+  uptimeInSeconds: number
+  connectedClients: number
+  usedMemory: number
+  usedMemoryHuman: string
+  usedMemoryPeakHuman: string
+  /** 0 表示无上限 */
+  maxmemory: number
+  maxmemoryPolicy: string
+  totalCommandsProcessed: number
+  keyspaceHits: number
+  keyspaceMisses: number
+  /** 各 db 的键数（只含有键的 db） */
+  dbKeys: Array<{ db: number; keys: number }>
+}
+
+/* -------------------------------- MySQL --------------------------------- */
+
+/**
+ * 单个 Redis 键的内容。
+ * 按类型返回不同结构 —— 页面据此选渲染方式（JSON / 表格 / 原文）。
+ */
+export interface RedisKeyDetail {
+  key: string
+  type: RedisValueType
+  pttl: number
+  length?: number
+  /** string 类型的原始值 */
+  value?: string
+  /** ReJSON-RL / hash 等结构化内容（已解析或格式化后的字符串） */
+  json?: string
+  /** stream 的最近条目（最多若干条） */
+  entries?: Array<{ id: string; fields: Record<string, string> }>
+  /** 集合类类型（list/set/zset）的成员 */
+  members?: string[]
+  /** 内存占用（MEMORY USAGE，字节） */
+  memoryUsage?: number
+  /** 编码方式（OBJECT ENCODING，如 listpack / quicklist / stream） */
+  encoding?: string
+}
+
+/** 表/视图摘要（对应 information_schema.TABLES） */
+export interface MysqlTable {
+  name: string
+  /** BASE TABLE / VIEW */
+  type: string
+  engine: string | null
+  /**
+   * information_schema 报告的近似行数。
+   * ⚠️ **不准**（实测 T_StrategyLog 报 16566、实际 17430），
+   * 需要精确值时用 `exactRows`。
+   */
+  approxRows: number | null
+  /** 真实行数（COUNT(*)），仅对小表自动算；大表由后端按需提供 */
+  exactRows?: number | null
+  dataLength: number | null
+  indexLength: number | null
+  comment: string | null
+}
+
+/** 字段定义（对应 information_schema.COLUMNS） */
+export interface MysqlColumn {
+  name: string
+  /** 完整类型，如 varchar(45) / binary(1) / datetime */
+  columnType: string
+  nullable: boolean
+  key: string
+  defaultValue: string | null
+  comment: string | null
+  /** 是否自增 */
+  extra?: string
+}
+
+/** 表结构 */
+export interface MysqlTableSchema {
+  name: string
+  columns: MysqlColumn[]
+  indexes: Array<{
+    name: string
+    unique: boolean
+    columns: string[]
+  }>
+  /** SHOW CREATE TABLE 的原文 */
+  ddl: string
 }
 
 export interface RedisStreamGroup {

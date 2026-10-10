@@ -316,10 +316,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'storage-redis',
         path: '/storage/redis',
+        view: 'storage/StorageRedis',
         meta: {
           title: 'Redis 管理',
           icon: CloudOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '多实例、多 DB 的 Redis 键浏览与 Stream / 订阅发布监控。',
           refs: [
             { label: '实例', value: '192.168.1.136（86.98M，12 客户端） / 192.168.1.137（1.47G，6 客户端），端口 6379' },
@@ -333,10 +334,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'storage-mysql',
         path: '/storage/mysql',
+        view: 'storage/StorageMysql',
         meta: {
           title: '数据库管理',
           icon: ServerOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: 'qianlong_cloud 库的表结构浏览与数据查询。',
           refs: [
             { label: '连接', value: '192.168.1.136:3306 / qianlong_cloud / 用户 qianlong_cloud（MySQL 8.0.45）' },
@@ -353,12 +355,18 @@ export const menuTree: MenuNode[] = [
           title: '数据维护',
           icon: BuildOutline,
           status: 'planned',
-          desc: '数据清理、归档与一致性核对（高危操作，需二次确认）。',
+          desc: '数据清理、归档与一致性核对（高危操作，需二次确认）。暂缓实现。',
           refs: [
             { label: '归档目标', value: '各主表 → 对应 _his 历史表' },
             { label: '一致性核对', value: 'MySQL T_Conditional 与 Redis strategy-* / T_User 与 acc-* 对照' },
           ],
-          todos: ['主表 → 历史表归档任务与记录', 'MySQL 与 Redis 数据一致性核对', '过期条件单/日志清理', '全部操作写入审计'],
+          todos: [
+            '（已与需求方确认：暂时用不上，后续有需求再做）',
+            '主表 → 历史表归档任务与记录',
+            'MySQL 与 Redis 数据一致性核对 —— 现场核对结果差异极大：MySQL T_Conditional + T_Conditional_his = 0 行，但 Redis strategy-* 键里有 59 条条件单（136 db1 共 55 条：strategy-914900043_7_6 47 条、strategy-300130000461_1_6 6 条、strategy-1000006_1_6 2 条；137 db1 另有 4 条）',
+            '过期条件单/日志清理',
+            '全部操作写入审计',
+          ],
         },
       },
     ],
