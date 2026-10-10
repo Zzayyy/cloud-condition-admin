@@ -15,19 +15,25 @@ import {
   NTag,
   NTooltip,
   useMessage,
+  type DropdownOption,
   type MenuOption,
 } from 'naive-ui'
 import {
+  ArrowBackOutline,
+  ArrowForwardOutline,
   ChevronBackOutline,
   ChevronForwardOutline,
+  CloseCircleOutline,
   CloseOutline,
   DesktopOutline,
   MoonOutline,
   PersonCircleOutline,
+  RefreshOutline,
   SunnyOutline,
+  TrashOutline,
 } from '@vicons/ionicons5'
 
-import { findMenuChainByPath, menuTree, type MenuNode } from '@/config/menu'
+import { findMenuChainByPath, firstLeafPath, menuTree, type MenuNode } from '@/config/menu'
 import { accentOf, moduleKeyFromPath, tintOf } from '@/theme/palette'
 import { useAppStore, type ThemeMode } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -93,9 +99,17 @@ function handleMenuSelect(key: string) {
 
 const breadcrumb = computed(() => findMenuChainByPath(route.path))
 
+const ctxShow = ref(false)
+
 watch(
   () => route.path,
   () => {
+    // 路由一变就收起右键菜单，否则它会浮在刚打开的页面上。
+    // ⚠️ `ctxShow` 必须声明在本 watcher **之前**：watcher 带 `immediate: true`，
+    // 在 setup 阶段就会跑一次，而 `const` 有暂时性死区（TDZ），
+    // 写在下面会抛 ReferenceError 导致整个应用挂不上去 —— 白屏，
+    // 且 typecheck / build 都不报错（踩过：函数声明会提升，`const` 不会）。
+    ctxShow.value = false
     const title = route.meta?.title as string | undefined
     if (!title || route.name === 'not-found' || route.name === 'root') return
     tabsStore.open({ name: route.name as string, path: route.path, title })
@@ -104,7 +118,9 @@ watch(
 )
 
 onMounted(() => {
-  tabsStore.restore()
+  // 页签的恢复已经在 `useTabsStore()` 建店时做掉了（见 stores/tabs.ts 的说明：
+  // 放这里会被上面那个 immediate watcher 的 persist 覆盖，导致刷新丢页签）。
+  // 这里只补记当前页签 —— 恢复出来的列表里可能还没有它。
   const title = route.meta?.title as string | undefined
   if (title && route.name !== 'not-found' && route.name !== 'root') {
     tabsStore.open({ name: route.name as string, path: route.path, title })
@@ -114,6 +130,128 @@ onMounted(() => {
 function closeTab(path: string) {
   const next = tabsStore.close(path)
   if (next) router.push(next)
+}
+
+/* ------------------------------ 页签右键菜单 ------------------------------ */
+
+/**
+ * 页签太多时一个个点关闭很烦，所以给页签加右键菜单。
+ *
+ * 用 `n-dropdown` 的 `trigger="manual"` + `x`/`y` 实现：
+ * 它只是「手动在指定坐标弹一个菜单」，不会自己劫持浏览器右键菜单，
+ * 所以我们要在 `contextmenu` 事件上 `preventDefault()`。
+ *
+ * 三个容易踩的点：
+ *  1. **菜单项要按上下文禁用**，不能一律可点 ——
+ *     只有一个页签时「关闭其他」没有意义，最右一个页签没有「关闭右侧」；
+ *  2. **关完要保证有落脚点**：全关了就回首页，否则会停在一个已关闭的页签上；
+ *  3. **右键某个页签不应先切换过去**（那是左键的行为），
+ *     但菜单操作要作用于**右键的那个**页签，所以目标单独记在 `ctxPath`。
+ *
+ * `ctxShow` 已提到上面的 watcher 之前声明（避免 TDZ 白屏），其余状态放这里。
+ */
+const ctxX = ref(0)
+const ctxY = ref(0)
+const ctxPath = ref('')
+
+const ctxIndex = computed(() => tabsStore.tabs.findIndex((t) => t.path === ctxPath.value))
+const ctxTab = computed(() => tabsStore.tabs.find((t) => t.path === ctxPath.value))
+
+/** 右键目标在列表中的位置决定哪些项可用 */
+const ctxOptions = computed<DropdownOption[]>(() => {
+  const total = tabsStore.tabs.length
+  const i = ctxIndex.value
+  const onlyOne = total <= 1
+  return [
+    {
+      label: '刷新当前页',
+      key: 'reload',
+      icon: () => h(NIcon, null, { default: () => h(RefreshOutline) }),
+    },
+    { type: 'divider', key: 'd1' },
+    {
+      label: '关闭',
+      key: 'close',
+      icon: () => h(NIcon, null, { default: () => h(CloseOutline) }),
+    },
+    {
+      label: '关闭其他',
+      key: 'close-others',
+      disabled: onlyOne,
+      icon: () => h(NIcon, null, { default: () => h(CloseCircleOutline) }),
+    },
+    {
+      label: '关闭右侧',
+      key: 'close-right',
+      disabled: i < 0 || i >= total - 1,
+      icon: () => h(NIcon, null, { default: () => h(ArrowForwardOutline) }),
+    },
+    {
+      label: '关闭左侧',
+      key: 'close-left',
+      disabled: i <= 0,
+      icon: () => h(NIcon, null, { default: () => h(ArrowBackOutline) }),
+    },
+    { type: 'divider', key: 'd2' },
+    {
+      label: '关闭全部',
+      key: 'close-all',
+      icon: () => h(NIcon, null, { default: () => h(TrashOutline) }),
+    },
+  ]
+})
+
+function openCtxMenu(tab: { path: string }, event: MouseEvent) {
+  event.preventDefault()
+  ctxPath.value = tab.path
+  ctxX.value = event.clientX
+  ctxY.value = event.clientY
+  ctxShow.value = true
+}
+
+function closeCtxMenu() {
+  ctxShow.value = false
+}
+
+/**
+ * 关闭若干页签后确保有落脚点。
+ *
+ * `next` 是 store 给出的「应激活路径」；若为 undefined 说明当前激活页还在，
+ * 只有它被关掉时才需要跳转。全部关完就回第一个业务页。
+ */
+function settle(next: string | undefined) {
+  if (!next) return
+  router.push(next)
+}
+
+function handleCtxSelect(key: string) {
+  const path = ctxPath.value
+  closeCtxMenu()
+
+  switch (key) {
+    case 'reload':
+      // 刷新当前页：先确保停在目标页，再整页重载（最简单可靠，不引入 keep-alive 复杂度）
+      if (route.path !== path) router.push(path)
+      window.location.reload()
+      return
+    case 'close':
+      settle(tabsStore.close(path))
+      if (!tabsStore.tabs.length) router.push(firstLeafPath())
+      return
+    case 'close-others':
+      tabsStore.closeOthers(path)
+      if (route.path !== path) router.push(path)
+      return
+    case 'close-right':
+      settle(tabsStore.closeRight(path))
+      return
+    case 'close-left':
+      settle(tabsStore.closeLeft(path))
+      return
+    case 'close-all':
+      tabsStore.closeAll()
+      router.push(firstLeafPath())
+  }
 }
 
 /** 页签也按模块着色 */
@@ -266,13 +404,32 @@ const parentTitle = computed(() => {
           class="tab-item"
           :class="{ active: tab.path === route.path }"
           :style="{ '--tab-accent': tabAccent(tab.path) }"
+          :title="`${tab.title}（右键查看更多操作）`"
           @click="router.push(tab.path)"
+          @contextmenu="openCtxMenu(tab, $event)"
         >
           <span class="tab-dot" />
-          <span>{{ tab.title }}</span>
+          <span class="tab-text">{{ tab.title }}</span>
           <n-icon class="tab-close" :component="CloseOutline" @click.stop="closeTab(tab.path)" />
         </div>
       </div>
+
+      <!--
+        页签右键菜单。trigger="manual" + x/y：自己不劫持浏览器右键菜单，
+        由页签上的 @contextmenu 打开，所以不会和原生菜单打架。
+        `:show` 受控 + `@clickoutside` 保证点别处能关掉。
+      -->
+      <n-dropdown
+        trigger="manual"
+        placement="bottom-start"
+        size="small"
+        :show="ctxShow"
+        :x="ctxX"
+        :y="ctxY"
+        :options="ctxOptions"
+        @select="handleCtxSelect"
+        @clickoutside="closeCtxMenu"
+      />
 
       <n-layout-content class="content" :native-scrollbar="false">
         <div class="page-container">
@@ -407,8 +564,10 @@ const parentTitle = computed(() => {
 
 .tab-item {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 7px;
+  max-width: 200px;
   padding: 5px 10px;
   font-size: 13px;
   white-space: nowrap;
@@ -421,12 +580,22 @@ const parentTitle = computed(() => {
   user-select: none;
 }
 
+/*
+ * 页签多了会一路撑开，所以限宽 + 省略号。
+ * 截断的是标题而不是整个页签：关闭按钮必须始终可见可用。
+ */
+.tab-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tab-item:hover {
   color: var(--text-primary);
   border-color: var(--border-strong);
 }
 
 .tab-dot {
+  flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -448,6 +617,7 @@ const parentTitle = computed(() => {
 }
 
 .tab-close {
+  flex: none;
   font-size: 13px;
   border-radius: 4px;
   opacity: 0.5;

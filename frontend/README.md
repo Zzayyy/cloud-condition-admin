@@ -443,13 +443,13 @@ frontend/
 │   │   ├── menu.ts        # ★ 菜单唯一数据源（含数据来源与待办）
 │   │   └── permissions.ts # ★ 权限键契约（权限树由 menu.ts 推导）
 │   ├── layouts/
-│   │   └── BasicLayout.vue# 侧边栏 + 顶栏 + 面包屑 + 多页签
+│   │   └── BasicLayout.vue# 侧边栏 + 顶栏 + 面包屑 + 多页签（页签可右键批量关闭）
 │   ├── router/
 │   │   └── index.ts       # 由 menu.ts 推导路由
 │   ├── stores/
 │   │   ├── app.ts         # 主题、侧边栏折叠
-│   │   ├── auth.ts        # ★ 当前会话与权限判定（演示身份，不假装已登录）
-│   │   └── tabs.ts        # 多页签
+│   │   ├── auth.ts        # ★ 当前会话与权限判定（登录/登出、登录态持久化）
+│   │   └── tabs.ts        # 多页签（含右键菜单的关闭其他/左/右/全部）
 │   ├── components/        # StatCard / BaseChart / MockDataAlert / QueryErrorAlert / PermissionTree / PagePlaceholder
 │   ├── views/
 │   │   ├── dashboard/DashboardView.vue

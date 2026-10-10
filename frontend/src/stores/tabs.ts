@@ -37,6 +37,17 @@ export const useTabsStore = defineStore('tabs', () => {
     }
   }
 
+  /**
+   * **建店即恢复**，不要等组件 `onMounted` 再调。
+   *
+   * 踩过的坑：`BasicLayout` 里有个 `immediate: true` 的 watcher 会在 setup 阶段
+   * 就 `open()` 当前页签并**立即 persist**；而 `restore()` 原本写在 `onMounted` 里，
+   * 那时 sessionStorage 早被那次 persist 覆盖成「只有当前这一个页签」了 ——
+   * 于是 restore 读到的是自己的覆盖结果，页签永远恢复不出来（刷新即丢）。
+   * 把恢复放在店铺创建时，就再也不可能被顺序问题搞错。
+   */
+  restore()
+
   /** 打开（或激活）一个页签。 */
   function open(tab: TabItem) {
     activePath.value = tab.path
@@ -63,11 +74,49 @@ export const useTabsStore = defineStore('tabs', () => {
     persist()
   }
 
+  /** 关闭某个页签**右侧**的全部页签，返回当前应激活的路径 */
+  function closeRight(path: string): string | undefined {
+    const index = tabs.value.findIndex((t) => t.path === path)
+    if (index < 0) return undefined
+    tabs.value = tabs.value.slice(0, index + 1)
+    persist()
+    // 激活页若被关掉，就落到保留区最后一个（即 path 自己）
+    if (!tabs.value.some((t) => t.path === activePath.value)) {
+      activePath.value = path
+      return path
+    }
+    return undefined
+  }
+
+  /** 关闭某个页签**左侧**的全部页签，返回当前应激活的路径 */
+  function closeLeft(path: string): string | undefined {
+    const index = tabs.value.findIndex((t) => t.path === path)
+    if (index < 0) return undefined
+    tabs.value = tabs.value.slice(index)
+    persist()
+    if (!tabs.value.some((t) => t.path === activePath.value)) {
+      activePath.value = path
+      return path
+    }
+    return undefined
+  }
+
   function closeAll() {
     tabs.value = []
     activePath.value = ''
     persist()
   }
 
-  return { tabs, activePath, cachedNames, restore, open, close, closeOthers, closeAll }
+  return {
+    tabs,
+    activePath,
+    cachedNames,
+    restore,
+    open,
+    close,
+    closeOthers,
+    closeRight,
+    closeLeft,
+    closeAll,
+  }
 })
