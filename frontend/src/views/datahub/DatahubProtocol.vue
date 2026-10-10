@@ -671,7 +671,7 @@ function copyTemplate(name: string) {
         <n-icon :component="WarningOutline" color="#dd7a15" :size="17" />
         <div>
           <b>文档缺口提醒</b>：<code>datahub_online</code> / <code>datahub_beat</code>
-          在文档中**只列了名字、没给报文格式**；<code>OrderStatue</code> 的取值枚举也没有定义。
+          在文档中<b>只列了名字、没给报文格式</b>；<code>OrderStatue</code> 的取值枚举也没有定义。
           这两处需要向现场确认，页面不做臆测。
         </div>
       </div>

@@ -204,6 +204,53 @@ export interface UserLog {
   Info: string | null
 }
 
+/**
+ * 账号类型（T_User.AccType / 协议里的 AccountType）
+ * 照 请求接口字段.txt：1 资金账号，7 客户号。
+ */
+export const ACCOUNT_TYPES: Record<number, string> = {
+  1: '资金账号',
+  7: '客户号',
+}
+
+/**
+ * 渠道（T_User.MainType / 协议里的 AccAtt）
+ * 照 请求接口字段.txt：0 股票，6 期权。
+ *
+ * ⚠️ 注意：T_User.MainType 的**列注释写的是**「0 股票账户 / 1 股票期权账户 / 2 期货账户」，
+ * 但现场实际值 = 6（期权），且账号串形如 `010100011300_7_6`（FAccount_AccountType_AccAtt），
+ * 与协议的 AccAtt 定义一致。**以实际数据为准**，不要按列注释做映射。
+ */
+export const ACC_ATTS: Record<number, string> = {
+  0: '股票',
+  6: '期权',
+}
+
+/** 市场（Shareholders[].ExchangeNum） */
+export const EXCHANGE_NUMS: Record<number, string> = {
+  1: '上海',
+  2: '深圳',
+}
+
+/** 股东号（账号上的 Shareholders 数组元素） */
+export interface Shareholder {
+  /** 股东号 */
+  SAccount: string
+  /** 市场：1 上海，2 深圳 */
+  ExchangeNum: number
+}
+
+/** 登录日志按账号聚合（对应 SQL: GROUP BY Account） */
+export interface AccountLogStat {
+  Account: string
+  /** 日志条数 */
+  count: number
+  /** 最早一条 */
+  firstTime: string | null
+  /** 最近一条 */
+  lastTime: string | null
+}
+
 /** Redis 键 acc-<账号>_<账号类型>_<渠道> 的值 */
 export interface RedisAccount {
   id: number
@@ -225,6 +272,47 @@ export interface RedisAccount {
   onlineflag: number
   syncflag: number | boolean
   traderserver?: TraderServer
+}
+
+/**
+ * 「用户账号」页用的聚合行：把 MySQL 的 T_User 与 Redis 的 acc-* 合并展示。
+ *
+ * 两边字段有重叠也有差异（Redis 侧多了 onlineflag / syncflag / strategyserverid /
+ * traderserver，MySQL 侧多了 Passwd），页面上要能看出「哪边有、哪边没有」。
+ */
+export interface AccountRow {
+  /** 唯一账号，如 300130000461_1_6 */
+  account: string
+  /** 用户账号（FAccount） */
+  useraccount: string
+  /** 客户名称 */
+  name: string | null
+  /** 账号类型：1 资金账号 7 客户号 */
+  accounttype: number | null
+  /** 渠道：0 股票 6 期权 */
+  accatt: number | null
+  tradeAccount: string | null
+  branchNo: string | null
+  regtime: string | null
+  logintime: string | null
+  loginIP: string | null
+  loginMAC: string | null
+  loginOS: string | null
+  shareHolders: Shareholder[]
+  /** 是否已签署协议 */
+  signed: boolean
+  /** 该账号是否有 Redis 实时对象 */
+  hasRedis: boolean
+  /** Redis 侧：在线标志 */
+  onlineflag?: number
+  /** Redis 侧：同步标志 */
+  syncflag?: number | boolean
+  /** Redis 侧：分配到哪台策略服务器 */
+  strategyserverid?: number
+  /** Redis 侧：分配到哪台委托服务器 */
+  traderserver?: TraderServer
+  /** MySQL 侧主键 */
+  userId?: number
 }
 
 /* ---------------------------------- Redis --------------------------------- */

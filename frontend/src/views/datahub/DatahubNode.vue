@@ -649,7 +649,7 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
           <div class="detail-note">
             <n-icon :component="CashOutline" :color="accent" />
             <div>
-              该实例上 <code>unique_id</code> 是 string 键且**各 db 独立**
+              该实例上 <code>unique_id</code> 是 string 键且<b>各 db 独立</b>
               （现场 136 db0=166 / db1=55；137 db1=4）。
               中台没有节点清单键，在线状态只能靠 <code>datahub_*</code> 频道判断。
             </div>

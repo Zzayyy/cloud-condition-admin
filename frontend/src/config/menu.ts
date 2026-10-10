@@ -263,10 +263,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'account-user',
         path: '/account/user',
+        view: 'account/AccountUser',
         meta: {
           title: '用户账号',
           icon: PersonOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '云条件单用户资料与账号维度信息。',
           refs: [
             { label: 'MySQL 表', value: 'T_User（账号、AccType、MainType、Passwd、TradeAccount、ShareHolders、BranchNo）' },
@@ -278,10 +279,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'account-sign',
         path: '/account/sign',
+        view: 'account/AccountSign',
         meta: {
           title: '签署与股东号',
           icon: CreateOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '云条件单协议签署状态与股东号（市场）配置。',
           refs: [
             { label: '相关协议', value: 'acc_sign 账号签署 / acc_query 账号查询 / acc_update 更新 / logout 登出' },
@@ -294,10 +296,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'account-log',
         path: '/account/log',
+        view: 'account/AccountLog',
         meta: {
           title: '登录日志',
           icon: TimeOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '用户登录/登出轨迹与来源设备。',
           refs: [{ label: 'MySQL 表', value: 'T_UserLog（Account、LogTime、LogIP、LogMAC、LogOS、Info）' }],
           todos: ['登录日志检索', '按 IP/MAC 聚合异常登录', '时间范围与账号过滤'],

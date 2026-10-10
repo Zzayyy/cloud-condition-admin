@@ -1,6 +1,8 @@
 import { api } from './http'
 import type { PageQuery, PageResult } from './types'
 import type {
+  AccountLogStat,
+  AccountRow,
   Conditional,
   DatahubNodeDetail,
   OrderRecord,
@@ -14,7 +16,6 @@ import type {
   StrategyServer,
   TradeRecord,
   TraderServer,
-  UserAccount,
   UserLog,
 } from './domain'
 
@@ -105,14 +106,24 @@ export const datahubApi = {
 /* -------------------------------- 账户用户 -------------------------------- */
 
 export const accountApi = {
-  listUsers: (query?: PageQuery) => api.get<PageResult<UserAccount>>('/account/users', query),
+  /**
+   * 用户账号列表。
+   * 返回的是 T_User（MySQL）与 acc-*（Redis）**合并后**的行，
+   * 合并逻辑放后端做，前端不拼两个接口（见 README「前后端约定」）。
+   */
+  listAccounts: (query?: PageQuery) => api.get<PageResult<AccountRow>>('/account/accounts', query),
 
-  getUser: (id: number) => api.get<UserAccount>(`/account/users/${id}`),
+  /** 单个账号详情（含 MySQL 与 Redis 两侧） */
+  getAccount: (account: string) => api.get<AccountRow>(`/account/accounts/${account}`),
 
   /** 账号在 Redis 中的实时状态（acc-* 键） */
   getRedisAccount: (account: string) => api.get<RedisAccount>(`/account/redis/${account}`),
 
+  /** 登录日志（MySQL T_UserLog） */
   listLogs: (query?: PageQuery) => api.get<PageResult<UserLog>>('/account/logs', query),
+
+  /** 登录日志按账号聚合（用于「登录频次」视图） */
+  listLogStats: (query?: PageQuery) => api.get<PageResult<AccountLogStat>>('/account/logs/stats', query),
 }
 
 /* -------------------------------- 数据存储 -------------------------------- */
