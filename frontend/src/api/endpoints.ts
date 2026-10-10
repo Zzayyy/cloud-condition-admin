@@ -2,7 +2,7 @@ import { api } from './http'
 import type { PageQuery, PageResult } from './types'
 import type {
   Conditional,
-  DatahubNode,
+  DatahubNodeDetail,
   OrderRecord,
   RedisAccount,
   RedisInstance,
@@ -85,16 +85,19 @@ export const tradeApi = {
 /* -------------------------------- 数据中台 -------------------------------- */
 
 export const datahubApi = {
-  listNodes: (query?: PageQuery) => api.get<PageResult<DatahubNode>>('/datahub/nodes', query),
+  listNodes: (query?: PageQuery) => api.get<PageResult<DatahubNodeDetail>>('/datahub/nodes', query),
 
-  /** 消息总线总览：各流长度与消费组积压 */
-  listStreams: () => api.get<RedisStreamInfo[]>('/datahub/streams'),
+  /** Pub/Sub 频道总览（含订阅者数，用于判断「有没有人在听」） */
+  listChannels: () => api.get<RedisPubSubChannel[]>('/datahub/channels'),
+
+  /** 消息总线总览：跨实例的各流长度与消费组积压 */
+  listStreams: (query?: PageQuery) => api.get<RedisStreamInfo[]>('/datahub/streams', query),
 
   /** 某个流的条目（分页/范围） */
   listStreamEntries: (key: string, query?: PageQuery) =>
     api.get<PageResult<RedisStreamEntry>>(`/datahub/streams/${encodeURIComponent(key)}/entries`, query),
 
-  /** 按 request_id 串联一次请求的收发 */
+  /** 按 request_id 串联一次请求的收发（入口 → 下发 → 回执） */
   traceRequest: (requestId: string) =>
     api.get<RedisStreamEntry[]>('/datahub/trace', { requestId }),
 }

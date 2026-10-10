@@ -34,15 +34,30 @@ export interface StrategyServer {
   enable: boolean
 }
 
-/** 数据中台节点（由 datahub_* 频道推导，Redis 侧仅有 unique_id） */
+/** 数据中台节点（Redis 侧没有节点清单，靠 datahub_* 频道 + unique_id 推导） */
 export interface DatahubNode {
   id: number
   ip: string
   mac: string
   online: boolean
   lastActiveTime: string
-  /** 该节点已分配的唯一编号水位 */
+}
+
+/**
+ * 节点详情：在基础节点上补充该实例的规模信息。
+ * 这些值来自对 Redis 的只读探查（dbsize / XLEN / PUBSUB CHANNELS / unique_id）。
+ */
+export interface DatahubNodeDetail extends DatahubNode {
+  /** 该实例已分配的唯一编号水位（唯一 string 键 unique_id，各 db 独立） */
   uniqueId?: number
+  /** 该实例上的 Pub/Sub 频道数 */
+  channels?: number
+  /** 该实例上的 stream 数 */
+  streams?: number
+  /** 该实例的 stream 条目总量 */
+  entryTotal?: number
+  /** 是否启用（沿用 traderserver 那套 enable 约定；中台侧暂无此字段，预留） */
+  enable?: boolean
 }
 
 /* ------------------------------- 条件单/策略 ------------------------------- */
@@ -245,6 +260,39 @@ export interface RedisStreamInfo {
   key: string
   length: number
   groups: RedisStreamGroup[]
+  /** 所属实例（数据中台页面要跨 136/137 展示） */
+  instance?: string
+  db?: number
+  /** 流的角色分类 */
+  role?: StreamRole
+}
+
+/**
+ * 流的角色分类 —— 照现场实测的命名规律：
+ *   DataHub_req_stream    委托/策略服务器 → 数据中台（入口）
+ *   DataHub_reply_stream  数据中台回包
+ *   ST-<编号>             中台 → 策略平台（下发）
+ *   ST-<编号>-reply       策略平台回执
+ *   WT-<编号>             中台 → 委托服务器（下发）
+ *   WT-<编号>-reply       委托服务器回执
+ */
+export type StreamRole = 'ingress' | 'reply' | 'downstream' | 'ack' | 'other'
+
+/** 服务端类型（见 DataHub_req_stream 的 server_type 字段） */
+export const SERVER_TYPES: Record<string, string> = {
+  WT: '委托服务器',
+  ST: '策略服务器',
+  STTEST: '策略服务器（测试）',
+}
+
+/** 入口/下发报文的信封字段（照现场实测的字段名） */
+export interface StreamEnvelope {
+  request_id?: string
+  server_id?: string
+  server_type?: string
+  reply_req_stream?: string
+  reply_reply_stream?: string
+  task?: string
 }
 
 export interface RedisStreamEntry {
@@ -256,7 +304,20 @@ export interface RedisPubSubChannel {
   name: string
   /** 订阅者数量 */
   subscribers: number
+  /** 频道分类 */
+  group?: PubSubGroup
+  instance?: string
 }
+
+/**
+ * 频道分组 —— 现场实测 136 上共 14 个，**全部带 `_1` 后缀**：
+ *   tradeserver_*      委托服务器上线/心跳/下线
+ *   strategyserver_*   策略服务器上线/心跳/下线
+ *   datahub_*          中台自身心跳/上下线/选取/点名
+ *   WT-*-<mac>         中台定向发给某个委托服务器的专用频道
+ * 137 上实测 **0 个频道**。
+ */
+export type PubSubGroup = 'trade' | 'strategy' | 'datahub' | 'directed' | 'other'
 
 /* -------------------------------- 协议报文 -------------------------------- */
 
@@ -266,18 +327,22 @@ export interface ProtocolDef {
   title: string
   category: '账号类' | '条件单类'
   desc: string
+  /** 文档里注明「此协议需要进行加密并编码」 */
+  encrypted?: boolean
+  /** 现场是否已有可用的测试样例 */
+  sampleAvailable?: boolean
 }
 
 export const PROTOCOLS: ProtocolDef[] = [
-  { name: 'acc_sign', title: '账号签署', category: '账号类', desc: '为一个云条件单账号完成协议签署' },
-  { name: 'acc_query', title: '账号查询', category: '账号类', desc: '查询账号是否已签署及资料' },
-  { name: 'acc_update', title: '更新账号信息', category: '账号类', desc: '更新账号资料与股东号' },
-  { name: 'logout', title: '账号登出', category: '账号类', desc: '云条件单账号登出' },
-  { name: 'create', title: '创建云条件单', category: '条件单类', desc: '新建一个云条件单' },
-  { name: 'query', title: '查询云条件单', category: '条件单类', desc: '按账号与日期查询条件单' },
-  { name: 'modify', title: '修改云条件单', category: '条件单类', desc: '修改已存在的条件单' },
-  { name: 'set', title: '运行/停止', category: '条件单类', desc: '启停指定条件单' },
-  { name: 'remove', title: '删除云条件单', category: '条件单类', desc: '删除条件单' },
+  { name: 'acc_sign', title: '账号签署', category: '账号类', desc: '为一个云条件单账号完成协议签署', encrypted: true, sampleAvailable: true },
+  { name: 'acc_query', title: '账号查询', category: '账号类', desc: '查询账号是否已签署及资料', encrypted: true, sampleAvailable: true },
+  { name: 'acc_update', title: '更新账号信息', category: '账号类', desc: '更新账号资料与股东号', encrypted: true, sampleAvailable: true },
+  { name: 'logout', title: '账号登出', category: '账号类', desc: '云条件单账号登出', sampleAvailable: true },
+  { name: 'create', title: '创建云条件单', category: '条件单类', desc: '新建一个云条件单', sampleAvailable: true },
+  { name: 'query', title: '查询云条件单', category: '条件单类', desc: '按账号与日期查询条件单', sampleAvailable: true },
+  { name: 'modify', title: '修改云条件单', category: '条件单类', desc: '修改已存在的条件单', sampleAvailable: true },
+  { name: 'set', title: '运行/停止', category: '条件单类', desc: '启停指定条件单', sampleAvailable: true },
+  { name: 'remove', title: '删除云条件单', category: '条件单类', desc: '删除条件单', sampleAvailable: true },
 ]
 
 /** 中台 → 策略平台的 MsgType */

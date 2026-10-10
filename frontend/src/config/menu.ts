@@ -202,10 +202,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'datahub-node',
         path: '/datahub/node',
+        view: 'datahub/DatahubNode',
         meta: {
           title: '中台节点',
           icon: PulseOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '数据中台实例的上线与心跳状态。',
           refs: [
             { label: 'Pub/Sub 频道', value: 'datahub_online / _beat / _offline / _select / _oncall' },
@@ -218,10 +219,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'datahub-stream',
         path: '/datahub/stream',
+        view: 'datahub/DatahubStream',
         meta: {
           title: '消息总线',
           icon: AnalyticsOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: 'Redis Stream 的积压、消费组与报文流量监控。',
           refs: [
             { label: '入口流', value: 'DataHub_req_stream（委托服务器 → 数据中台）' },
@@ -236,10 +238,11 @@ export const menuTree: MenuNode[] = [
       {
         name: 'datahub-protocol',
         path: '/datahub/protocol',
+        view: 'datahub/DatahubProtocol',
         meta: {
           title: '协议报文',
           icon: CodeSlashOutline,
-          status: 'placeholder',
+          status: 'ready',
           desc: '客户端协议清单与报文字段速查，兼作联调工具。',
           refs: [
             { label: '协议文档', value: '请求接口字段.txt（9 个协议）、请求接口doc.txt、数据中台to策略平台.txt' },
