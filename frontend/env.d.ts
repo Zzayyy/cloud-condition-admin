@@ -17,6 +17,11 @@ interface ImportMetaEnv {
   readonly VITE_APP_TITLE?: string
   /** 演示数据开关：'true' 时直接用 src/api/mock 下的假数据 */
   readonly VITE_USE_MOCK?: string
+  /**
+   * 开发服务器的 Host 白名单（逗号分隔），用于内网穿透域名访问。
+   * 以 `.` 开头表示匹配该域名本身 + 任意子域。
+   */
+  readonly VITE_ALLOWED_HOSTS?: string
 }
 
 interface ImportMeta {
