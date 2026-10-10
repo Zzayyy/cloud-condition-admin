@@ -1,8 +1,11 @@
 /**
- * 模块主色 —— 让 8 个一级菜单在视觉上互相区分。
+ * 模块主色 —— 让 7 个一级菜单在视觉上互相区分。
  *
  * 这套颜色不只是装饰：侧边栏图标、页面标题色块、页签小圆点、
  * 总览卡片、占位页强调色都按模块取色，用户扫一眼就能知道自己在哪个模块。
+ *
+ * `monitor` 保留（一级菜单「监控与统计」已删除，但消息总线页的趋势卡
+ * 仍按红色系取色，`monitorApi` 也还在），删掉会让那处回退到品牌蓝。
  */
 const MODULE_COLORS: Record<string, string> = {
   dashboard: '#3b6ff5', // 蓝
@@ -11,7 +14,7 @@ const MODULE_COLORS: Record<string, string> = {
   datahub: '#dd7a15', // 橙
   account: '#d94f8a', // 玫红
   storage: '#2f9e5f', // 绿
-  monitor: '#d6455e', // 红
+  monitor: '#d6455e', // 红（仅趋势卡使用，无一级菜单）
   system: '#5b6b8c', // 石板灰
 }
 

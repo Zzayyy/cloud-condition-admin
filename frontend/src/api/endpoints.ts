@@ -3,11 +3,22 @@ import type { PageQuery, PageResult } from './types'
 import type {
   AccountLogStat,
   AccountRow,
+  AdminLoginLog,
+  AdminRole,
+  AdminRolePayload,
+  AdminUser,
+  AdminUserPayload,
+  AuditActionOption,
+  AuditDailyRow,
+  AuditLog,
   Conditional,
   DatahubNodeDetail,
+  LoginDailyRow,
   MysqlTable,
   MysqlTableSchema,
+  NameValueRow,
   OrderRecord,
+  PasswordPolicy,
   RedisAccount,
   RedisInstance,
   RedisInstanceInfo,
@@ -216,17 +227,143 @@ export const monitorApi = {
 
 /* -------------------------------- 系统管理 -------------------------------- */
 
+/**
+ * 后台管理端账号体系（管理用户 / 角色权限 / 操作审计 / 登录日志）。
+ *
+ * **与 `T_User` 无关**：那是云单业务用户（客户），这里是能登录后台的自己人。
+ * 两条线共用 `/system` 前缀但资源不同名，不要误接。
+ */
+export const adminApi = {
+  /* ---------------------------- 管理用户 ---------------------------- */
+
+  listUsers: (query?: PageQuery) => api.get<PageResult<AdminUser>>('/system/users', query),
+
+  createUser: (payload: AdminUserPayload) => api.post<AdminUser>('/system/users', payload),
+
+  updateUser: (id: number, payload: AdminUserPayload) =>
+    api.put<AdminUser>(`/system/users/${id}`, payload),
+
+  /**
+   * 启用 / 停用。
+   * 停用是**立即生效**的：后端必须同时让该账号已签发的 token 失效，
+   * 只改数据库字段会让已登录的会话继续可用（这是个真实的越权风险）。
+   */
+  setUserEnabled: (id: number, enabled: boolean) =>
+    api.post<void>(`/system/users/${id}/enabled`, { enabled }),
+
+  /** 解除登录失败锁定 */
+  unlockUser: (id: number) => api.post<void>(`/system/users/${id}/unlock`),
+
+  /**
+   * 重置密码。
+   * 明文密码只在这一个请求里出现，**接口不得回显**；
+   * 后端应写审计（谁在什么时候重置了谁），但不记录密码本身。
+   */
+  resetPassword: (id: number, password: string) =>
+    api.post<void>(`/system/users/${id}/password`, { password }),
+
+  /** 重置密码并强制下次登录修改（推荐用法） */
+  resetPasswordAndForceChange: (id: number, password: string) =>
+    api.post<void>(`/system/users/${id}/password`, { password, mustChange: true }),
+
+  deleteUser: (id: number) => api.delete<void>(`/system/users/${id}`),
+
+  /* ---------------------------- 角色与权限 ---------------------------- */
+
+  listRoles: () => api.get<AdminRole[]>('/system/roles'),
+
+  createRole: (payload: AdminRolePayload) => api.post<AdminRole>('/system/roles', payload),
+
+  updateRole: (id: number, payload: AdminRolePayload) =>
+    api.put<AdminRole>(`/system/roles/${id}`, payload),
+
+  deleteRole: (id: number) => api.delete<void>(`/system/roles/${id}`),
+
+  /* ---------------------------- 审计与登录日志 ---------------------------- */
+
+  listAuditLogs: (query?: PageQuery) => api.get<PageResult<AuditLog>>('/system/audit-logs', query),
+
+  /** 审计动作字典（供筛选下拉；也可前端从 permissions.ts 推导，两边都允许） */
+  listAuditActions: () => api.get<AuditActionOption[]>('/system/audit-logs/actions'),
+
+  /**
+   * 审计按天聚合（近 14 天或 `from`/`to` 区间）。
+   *
+   * ⚠️ 必须由后端聚合：明细接口是**分页**的，
+   * 前端拿明细自己「统计」只能算出当前一页，会被误读成全量。
+   */
+  getAuditDaily: (query?: Pick<PageQuery, 'from' | 'to'>) =>
+    api.get<AuditDailyRow[]>('/system/audit-logs/daily', query),
+
+  /** 审计按动作聚合（当前区间的动作分布） */
+  getAuditByAction: (query?: Pick<PageQuery, 'from' | 'to'>) =>
+    api.get<NameValueRow[]>('/system/audit-logs/by-action', query),
+
+  listLoginLogs: (query?: PageQuery) =>
+    api.get<PageResult<AdminLoginLog>>('/system/login-logs', query),
+
+  /** 登录成功/失败按天聚合 */
+  getLoginDaily: (query?: Pick<PageQuery, 'from' | 'to'>) =>
+    api.get<LoginDailyRow[]>('/system/login-logs/daily', query),
+
+  /** 登录失败按 IP 聚合（Top N） */
+  getLoginFailByIp: (query?: Pick<PageQuery, 'from' | 'to'>) =>
+    api.get<NameValueRow[]>('/system/login-logs/fail-by-ip', query),
+
+  /**
+   * 导出审计日志。
+   *
+   * **必须由后端出文件**：明细接口有分页与条数上限，
+   * 前端把「当前页」导出成 CSV 会让人以为拿到了全量。
+   * 后端要同时写一条 `action:system-audit:export` 的审计（导出即离场，需留痕）。
+   */
+  exportAuditLogs: (query?: PageQuery) =>
+    api.post<{ url?: string; filename?: string; total: number }>('/system/audit-logs/export', query),
+
+  /* ---------------------------- 密码策略 ---------------------------- */
+
+  getPasswordPolicy: () => api.get<PasswordPolicy>('/system/password-policy'),
+
+  savePasswordPolicy: (payload: PasswordPolicy) =>
+    api.put<PasswordPolicy>('/system/password-policy', payload),
+}
+
+/* --------------------------- 登录鉴权（预留） --------------------------- */
+
+export const authApi = {
+  /**
+   * 登录。
+   * 后端返回 token，前端存 localStorage（见 `http.ts` 的 TOKEN_KEY），
+   * 由 axios 请求拦截器统一加 `Authorization: Bearer`。
+   */
+  login: (payload: { username: string; password: string }) =>
+    api.post<{ token: string; username: string; displayName?: string; roles: string[]; permissions: string[] }>(
+      '/system/auth/login',
+      payload,
+    ),
+
+  logout: () => api.post<void>('/system/auth/logout'),
+
+  /** 当前登录人的资料与**权限键集合**（权限键见 src/config/permissions.ts） */
+  profile: () =>
+    api.get<{ username: string; displayName?: string; roles: string[]; permissions: string[] }>(
+      '/system/auth/profile',
+    ),
+
+  /** 修改自己的密码（改密成功后后端应使旧 token 失效） */
+  changePassword: (payload: { oldPassword: string; newPassword: string }) =>
+    api.post<void>('/system/auth/password', payload),
+}
+
+/* ------------------------- 连接配置 / 兼容旧接口 ------------------------- */
+
+/**
+ * 保留原 systemApi 形状（连接配置页仍待开发）。
+ * 审计接口已挪到 `adminApi`（路径由 /system/audit 改为 /system/audit-logs，
+ * 避免和「连接配置」的 /system/connections 混在同一个 systemApi 里）。
+ */
 export const systemApi = {
   listConnections: () => api.get<unknown[]>('/system/connections'),
   saveConnection: (payload: unknown) => api.post<void>('/system/connections', payload),
   testConnection: (id: string) => api.post<{ ok: boolean; message: string }>(`/system/connections/${id}/test`),
-
-  listAuditLogs: (query?: PageQuery) => api.get<PageResult<unknown>>('/system/audit', query),
-
-  login: (payload: { username: string; password: string }) =>
-    api.post<{ token: string; username: string }>('/system/auth/login', payload),
-
-  logout: () => api.post<void>('/system/auth/logout'),
-
-  profile: () => api.get<{ username: string; roles: string[] }>('/system/auth/profile'),
 }

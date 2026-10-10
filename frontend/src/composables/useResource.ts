@@ -1,4 +1,4 @@
-import { ref, shallowRef, type Ref, type ShallowRef } from 'vue'
+import { computed, ref, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 
 import { BizError, NotImplementedError } from '@/api/http'
 
@@ -16,6 +16,20 @@ export interface UseResourceReturn<T, P> {
   error: Ref<string | undefined>
   /** 当前展示的是否为演示数据 */
   isMock: Ref<boolean>
+  /**
+   * **判断「该走演示分支还是真实分支」时请用这个，不要直接用 `isMock`。**
+   *
+   * 原因：`isMock` 初值是 `false`，只有在 `load()` 的 `await` **之后**才会被置位。
+   * 页面在 `onMounted` 里 `void reload()`（不 await）时，首个请求返回前
+   * `isMock.value` 仍是 `false` —— 此刻用户点写操作按钮，就会**误判为真实态**、
+   * 去调还没实现的后端接口、然后弹一个「失败」。
+   * 演示延迟（mock 的 `withDelay` 默认 260ms）让这个窗口真实存在。
+   *
+   * 语义：数据还没到手时退回构建期常量 `USE_MOCK`（没有时序问题）；
+   * 数据到手后以 `isMock` 为准（它还能识别「自动降级到演示数据」的中间态）。
+   * 已实测：`load()` 后 await 前 `isMock===false`、`loading===true`、`apiCalls===0`。
+   */
+  usingMock: ComputedRef<boolean>
   /** 为什么在用演示数据 */
   mockReason: Ref<string | undefined>
   /** 是否因为后端不可达而自动降级 */
@@ -91,6 +105,13 @@ export function useResource<T, P>(
   const isMock = ref(false)
   const mockReason = ref<string>()
   const isDegraded = ref(false)
+  const settled = ref(false)
+
+  /**
+   * 判断「演示分支还是真实分支」的正确姿势（见 `UseResourceReturn.usingMock` 的说明）。
+   * 数据未到手时退回构建期常量 `USE_MOCK`，避开 `isMock` 初值 false 的时序窗口。
+   */
+  const usingMock = computed(() => (settled.value ? isMock.value : USE_MOCK))
 
   async function load(params: P) {
     loading.value = true
@@ -121,9 +142,11 @@ export function useResource<T, P>(
         isMock.value = false
       }
     } finally {
+      // `settled` 必须在 `isMock` 落定之后置位，否则 usingMock 会短暂读到旧值
+      settled.value = true
       loading.value = false
     }
   }
 
-  return { data, loading, error, isMock, mockReason, isDegraded, load }
+  return { data, loading, error, isMock, usingMock, mockReason, isDegraded, load }
 }

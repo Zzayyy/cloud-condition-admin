@@ -231,7 +231,7 @@ const milestones = [
   },
   {
     title: '前端骨架与菜单',
-    content: 'Vue3 + Vite + TS + Naive UI，8 个一级菜单 / 24 个页面',
+    content: 'Vue3 + Vite + TS + Naive UI，7 个一级菜单 / 20 个页面',
     type: 'success' as const,
   },
   {

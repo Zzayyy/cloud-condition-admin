@@ -30,11 +30,13 @@ import {
 import { findMenuChainByPath, menuTree, type MenuNode } from '@/config/menu'
 import { accentOf, moduleKeyFromPath, tintOf } from '@/theme/palette'
 import { useAppStore, type ThemeMode } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { useTabsStore } from '@/stores/tabs'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const tabsStore = useTabsStore()
 const message = useMessage()
 
@@ -140,9 +142,16 @@ const userOptions = [
 
 function handleUserSelect(key: string) {
   if (key === 'logout') {
-    message.info('后端鉴权尚未实现，登录/登出功能待对接')
+    // 后端鉴权仍未落地（backend/ 为空），这里**不假装已登出**：
+    // 演示态下说明当前是演示身份；真实态下如实提示待对接。
+    if (authStore.isDemoIdentity) {
+      message.warning('当前是演示身份，登出未接入真实鉴权（后端 /system/auth/login 尚未实现）')
+    } else {
+      authStore.logout()
+      message.info('已清除本地登录态；真实登出需后端 /system/auth/logout')
+    }
   } else {
-    message.info('个人信息页面待开发')
+    message.info('个人信息页面待开发（后端 /system/auth/profile 尚未实现）')
   }
 }
 
@@ -234,7 +243,17 @@ const parentTitle = computed(() => {
               <template #icon>
                 <n-icon :component="PersonCircleOutline" />
               </template>
-              管理员
+              {{ authStore.displayName }}
+              <n-tag
+                v-if="authStore.isDemoIdentity"
+                size="tiny"
+                round
+                :bordered="false"
+                type="warning"
+                style="margin-left: 6px"
+              >
+                演示身份
+              </n-tag>
             </n-button>
           </n-dropdown>
         </div>

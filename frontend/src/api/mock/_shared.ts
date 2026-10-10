@@ -103,3 +103,25 @@ export const asNumber = (v: unknown): number | undefined => {
   const n = Number(v)
   return Number.isFinite(n) ? n : undefined
 }
+
+/**
+ * 布尔查询参数。
+ *
+ * 为什么需要它：筛选参数可能来自下拉框（字符串 `'true'`）也可能来自开关（真布尔），
+ * 页面作者很容易只写其中一种。如果判定函数写成 `q.x === 'true'`，
+ * 传布尔 `true` 时**静默不过滤**（不报错、返回全量），排查成本极高。
+ * 这里把两种写法都认下来，从根上消掉这个陷阱。
+ *
+ * 注意：仍然返回 `undefined` 表示「该条件未设置」，与「设为 false」区分开 ——
+ * 否则「只看已停用」和「不看这个条件」会变成同一件事。
+ */
+export const asBool = (v: unknown): boolean | undefined => {
+  if (typeof v === 'boolean') return v
+  if (typeof v === 'number') return v === 1 ? true : v === 0 ? false : undefined
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase()
+    if (s === 'true' || s === '1') return true
+    if (s === 'false' || s === '0') return false
+  }
+  return undefined
+}

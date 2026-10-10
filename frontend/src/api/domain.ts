@@ -582,3 +582,199 @@ export interface TimeSeriesPoint {
   time: number | string
   value: number
 }
+
+/* ---------------------------- 管理端：用户与权限 ---------------------------- */
+
+/**
+ * 后台管理端**自己的**账号体系。
+ *
+ * ⚠️ 与「账户与用户」模块的云单业务用户 `T_User` **完全无关**：
+ * `T_User` 是客户的钱包账号（会挂在策略/委托服务器上跑条件单），
+ * 这里是自己人登录后台用的账号。两套东西不要混在一个列表里。
+ *
+ * 后端落地时的表：`T_AdminUser` / `T_AdminRole` / `T_AdminRolePermission` /
+ * `T_AdminLoginLog` / `T_AdminPasswordPolicy`（表名待与后端确认）。
+ */
+export interface AdminRole {
+  id: number
+  /** 角色编码，唯一，如 super_admin；建后不建议改（审计要靠它认人） */
+  code: string
+  name: string
+  desc: string | null
+  /** 内置角色：不可删除、不可改名，权限受保护（见菜单页说明） */
+  builtin: boolean
+  /**
+   * 权限键集合，键的生成规则见 `src/config/permissions.ts`
+   * （`menu:<菜单name>` / `action:<模块>:<动作>`，超管为 `['*']`）。
+   */
+  permissions: string[]
+  /** 引用该角色的管理用户数（后端聚合，前端只读） */
+  userCount: number
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+/** 后台管理账号（`T_AdminUser`） */
+export interface AdminUser {
+  id: number
+  /** 登录名，唯一 */
+  username: string
+  displayName: string | null
+  /** 分配的角色 id（与 `AdminRole.id` 对应） */
+  roleIds: number[]
+  /** 启用状态：停用后不能登录 */
+  enabled: boolean
+  /** 是否因连续登录失败被锁定 */
+  locked: boolean
+  /** 当前连续失败次数（用于「还剩几次锁定」提示） */
+  failedAttempts: number
+  /** 是否需要下次登录强制改密 */
+  mustChangePassword: boolean
+  lastLoginTime: string | null
+  lastLoginIP: string | null
+  /** 累计成功登录次数 */
+  loginCount: number
+  createdAt: string | null
+  updatedAt: string | null
+  remark: string | null
+}
+
+/** 新建/编辑管理用户的请求体（密码只写不读，接口永不回显） */
+export interface AdminUserPayload {
+  username: string
+  displayName?: string | null
+  roleIds: number[]
+  enabled: boolean
+  remark?: string | null
+  /** **仅新建时**必填明文密码；编辑时留空表示不改密码 */
+  password?: string
+}
+
+/** 新建/编辑角色的请求体 */
+export interface AdminRolePayload {
+  code: string
+  name: string
+  desc?: string | null
+  permissions: string[]
+}
+
+/** 管理端登录日志（`T_AdminLoginLog`）—— 与云单用户登录日志 `T_UserLog` 不是一张表 */
+export interface AdminLoginLog {
+  id: number
+  username: string
+  loginTime: string | null
+  loginIP: string | null
+  loginOS: string | null
+  /** 登录是否成功；失败时 `info` 是原因 */
+  success: boolean
+  info: string | null
+}
+
+/**
+ * 密码策略 + 登录失败锁定策略。
+ *
+ * 对应菜单待办里的「密码策略与登录失败锁定」：
+ * 前端**只用它做即时校验提示**，真正的判定必须在后端做
+ * （前端校验是体验，不是安全边界）。
+ */
+export interface PasswordPolicy {
+  /** 最小长度 */
+  minLength: number
+  requireUpper: boolean
+  requireLower: boolean
+  requireDigit: boolean
+  requireSymbol: boolean
+  /** 连续失败达到该次数即锁定，0 表示不锁定 */
+  maxFailedAttempts: number
+  /** 锁定时长（分钟） */
+  lockMinutes: number
+  /** 密码有效期（天），0 表示永不过期 */
+  expireDays: number
+  /** 首次登录是否强制改密 */
+  forceChangeOnFirstLogin: boolean
+  /** 禁止与最近 N 次密码重复，0 表示不校验历史 */
+  historySize: number
+}
+
+/** 一条密码策略校验结果（前端即时提示用） */
+export interface PasswordCheckItem {
+  key: string
+  label: string
+  passed: boolean
+}
+
+/**
+ * 管理端操作审计（`T_AdminAudit`）。
+ *
+ * README 里点名的「高危操作必须写审计」就是这张表；
+ * 危险级别不是给人看的装饰，导出/清理类操作要靠它筛。
+ */
+export interface AuditLog {
+  id: number
+  /** 操作人（管理端账号） */
+  operator: string
+  /** 动作键，如 action:storage-redis:delete-key，与 permissions.ts 的权限键同源 */
+  action: string
+  /** 动作中文名 */
+  actionLabel: string
+  /** 归属模块（一级菜单 name，如 storage） */
+  module: string
+  /** high=高危（删除/清理/下发协议），medium=普通写操作，low=只读与导出 */
+  level: AuditLevel
+  /** 目标对象，如键名 / 表名 / 条件单号 */
+  target: string | null
+  /** 结果 */
+  result: 'success' | 'failure'
+  /** 失败原因或补充说明 */
+  message: string | null
+  /** 请求来源 IP */
+  ip: string | null
+  /** 耗时（毫秒） */
+  costMs: number | null
+  /** 操作时间 */
+  createdAt: string | null
+}
+
+export type AuditLevel = 'high' | 'medium' | 'low'
+
+/** 审计动作的可选项（供筛选用，由后端返回或前端从 permissions.ts 推导） */
+export interface AuditActionOption {
+  action: string
+  label: string
+  module: string
+  level: AuditLevel
+}
+
+/* --------------------------- 审计/登录的聚合结果 --------------------------- */
+
+/**
+ * 聚合口径说明（前后端必须一致，否则界面上「最近 14 天」会跟后端对不上）：
+ *  - 聚合接口接收与列表接口**同一套** `from` / `to` 字符串（`YYYY-MM-DD HH:mm:ss`），
+ *    含义是 **[from, to] 闭区间**；
+ *  - 未传 `from`/`to` 时默认「最近 14 个自然日」（含今天）。
+ *
+ * 为什么单独出聚合接口、而不是让前端拿明细自己算：
+ * 明细接口是**分页**的，前端硬凑只能统计「当前这一页」，
+ * 会被当成全量读（这类误读在运维场景里很危险）。
+ */
+export interface AuditDailyRow {
+  /** `YYYY-MM-DD` */
+  date: string
+  /** 当天高危操作数（level = high） */
+  high: number
+  /** 当天其余操作数（level = medium / low） */
+  other: number
+}
+
+export interface LoginDailyRow {
+  /** `YYYY-MM-DD` */
+  date: string
+  success: number
+  failure: number
+}
+
+/** 通用「名称 → 计数」聚合行（动作分布、失败 IP Top 都用它） */
+export interface NameValueRow {
+  name: string
+  value: number
+}

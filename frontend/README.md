@@ -31,8 +31,14 @@
 | 数据存储 / Redis 管理 | ✅ | 实例 INFO、DB 树、SCAN 键浏览（类型/TTL/归属）、键内容按类型渲染、删键（二次确认） |
 | 数据存储 / 数据库管理 | ✅ | 表清单（近似 vs 真实行数）、表结构（字段/注释/索引/DDL）、只读 SQL 查询 |
 | 数据存储 / 数据维护 | ⏸ | **已与需求方确认暂缓**（占位页保留，页面上写明原因与已发现的疑点） |
-| 监控与统计 / 实时指标 | ✅ | 11 项指标卡（带阈值着色）、趋势曲线（可切指标与时间窗）、6 条需关注信号、自动刷新 |
-| 其余 10 个页面 | ⏳ | 占位页，列出数据来源与待办 |
+| 系统管理 / 管理用户与权限 | ✅ | 后台管理账号 CRUD、角色分配、启停/解锁/重置密码、密码策略即时校验（**与 `T_User` 无关**） |
+| 系统管理 / 角色与权限 | ✅ | 角色列表 + 权限树（**由菜单树推导**）、内置角色保护、危险操作权限点标记、改权限写审计 |
+| 系统管理 / 操作审计 | ✅ | 高危操作审计（含动作键与权限键同源）+ 管理端登录日志（与 `T_UserLog` 分开）+ CSV 导出 |
+| 系统管理 / 连接配置 | ⏳ | 占位页（后端待实现），列出数据来源与待办 |
+
+上表 **20 行 = `flattenMenu()` 的 20 个叶子**（`总览` 本身就是叶子，所以叶子数比 19 个子节点多 1）。
+其中 **18 个已实现**（`status: 'ready'`），**2 个占位**：`数据维护`（已与需求方确认暂缓）、`连接配置`（待开发）。
+占位页不写 `view`，会自动落到 `PlaceholderView`。
 
 > **已删除的菜单：「性能压测」「破坏测试」**（2026-10-14 与需求方确认）。
 > 删除理由：那两项是研发发版前用命令行工具做的活
@@ -162,11 +168,15 @@ npm run dev          # http://localhost:5173
 数据中台管理      ← 中台节点、消息总线、协议报文
 账户与用户        ← 用户账号、签署与股东号、登录日志
 数据存储          ← Redis 管理、数据库管理、数据维护
-监控与统计        ← 性能压测、破坏测试、实时指标
-系统管理          ← 连接配置、管理用户与权限、操作审计
+系统管理          ← 连接配置、管理用户与权限、角色与权限、操作审计
 ```
 
-共 **8 个一级菜单 / 24 个页面**。
+共 **7 个一级菜单 / 20 个页面**（`总览` 自己就是一个页面，所以叶子数 = 20）。
+
+> 「监控与统计」这个一级菜单已整体删除（2026-10-14）：其中
+> 「性能压测」「破坏测试」是研发发版前的命令行活（`datahub_test/`、`strategy_test/` 里已有 GUI），
+> 「实时指标」的 11 项指标逐项核对后**没有一项是别处看不到的**，
+> 唯一独有的时间趋势已并入「消息总线」。详见下方「已删除的菜单」。
 
 这样划分的原因：
 
@@ -175,13 +185,68 @@ npm run dev          # http://localhost:5173
 2. **每个菜单都有真实数据兜底**（见下表），不是空壳。
 3. **账户与用户是隐藏的第五个维度**：`T_User` / `acc-*` 既不属于平台也不属于存储，
    但条件单必须挂在账号上，所以单独成组。
-4. **监控与统计单独成组**：你们已有的 `datahub_test`、`strategy_test` 工具
-   已经在做性能压测和破坏测试，把它搬进后台比留在命令行更合适。
+4. **系统管理收口「管后台的人」**：连接配置、管理用户与权限、角色与权限、操作审计。
+   这一组管的是**后台自己**（谁能登录、能点哪些按钮、干了什么），
+   与「账户与用户」那组管的**云单客户**（`T_User`）是两条完全不同的线，不要混。
 
 ### 第三步：把数据来源写进菜单
 
 每个菜单项在 `src/config/menu.ts` 里都带 `refs`（数据来源）和 `todos`（待办功能），
 占位页会直接把它们渲染出来。**所以打开任意一个页面，就能知道这个页面该连哪张表、哪个键。**
+
+---
+
+## 权限体系（系统管理）
+
+三个页面（管理用户与权限 / 角色与权限 / 操作审计）共用一套权限键，
+**权限不是另造一套字符串，而是挂在已有的菜单树上**（`src/config/permissions.ts`）：
+
+| 类型 | 键格式 | 例子 | 说明 |
+|---|---|---|---|
+| 菜单权限 | `menu:<菜单 name>` | `menu:storage-redis` | `name` 就是 `src/config/menu.ts` 里的路由 name，所以「加一个菜单」权限树自动多一个节点，不会两处对不上 |
+| 操作权限 | `action:<模块>:<动作>` | `action:storage-redis:delete-key` | 菜单里**看不见**的高危动作（删键、执行只读 SQL、启停节点） |
+| 通配符 | `*` | — | 超管专用，代表全部权限，菜单新增后自动覆盖，不用回填 |
+
+三条刻意的设计决定：
+
+1. **父级菜单权限不隐式覆盖操作权限。** 勾了 `menu:storage-redis` 不等于自动拥有
+   `action:storage-redis:delete-key` —— 否则「能看到页面」就等于「能删键」，
+   操作权限点就白加了。界面上靠显式按钮帮管理员一并勾上，
+   而不是靠运行时隐式放行（`hasPermission()` 只认精确键与 `*`）。
+2. **权限树里所有父节点一律不可勾选（`checkboxDisabled`）。**
+   这是堵一条**静默提权**路径：naive-ui 的 Tree（treemate）在 `cascade` 模式下，
+   会给任何被勾选的**父节点**自动展开勾上它的**全部子孙**
+   （`treemate/es/check.js` 的 `getExtendedCheckedKeySet`，第 166~196 行）。
+   而权限树的父节点是**分组**（「数据存储」）和**页面**（「Redis 管理」）——
+   它们的标签**不会**告诉用户「勾上我还会授出删除 Redis 键」。
+   如果允许勾父节点，管理员只想给「页面访问」，实际却授了高危操作权限，
+   而且此后随便勾一下别的项，这个被隐式点亮的键会被回写进角色 —— 权限悄悄放大。
+   所以：**显示即授权**，父节点不可勾，批量授权走显式按钮（危险项二次确认）。
+   另外，权限树在 emit 时用 `allPermissionKeys()` 做白名单过滤，
+   作为纵深防御，即使父节点被程序化设为 checked 也不会写进角色。
+3. **权限点只列真正危险的动作。** 连「查看详情」都算权限的话，
+   管理员会图省事全勾上，等于没有控制。清单见 `ACTION_PERMISSIONS`。
+4. **写错菜单名会直接报错。** `assertActionPermissions()` 在模块加载时自检
+   「操作权限引用的菜单是否存在、键是否重复」——这类错误本来是**静默失效**
+   （某个权限点永远勾不上），改成加载时就 `console.error` 打出来。
+5. **`can('')` 不是有效守卫。** 演示态下 `authStore.can()` 无条件放行，
+   传空键会返回 `true`。守卫一律要传真实的权限键，不要用空串/未定义值兜底。
+
+> 权限键总数（可用 `allPermissionKeys()` 核对）：菜单叶子数 + `ACTION_PERMISSIONS` 条数。
+> 当前是 **20 + 7 = 27** 个键（菜单叶子含 `总览` 自己 —— 它也是一个页面）。
+
+### 关于鉴权状态（重要，别被界面骗了）
+
+`src/stores/auth.ts` 管理当前会话。**它没有假装登录成功**：
+
+* **演示态**（`VITE_USE_MOCK=true`）：给一个明确标注为「演示身份」的身份
+  （顶栏会显示 `演示身份` 标签），权限为通配符，这样三个页面的按钮可见性逻辑
+  能真实跑起来，而不是一片灰按钮看不出效果。
+* **非演示态**：没有真实资料就是「未登录」，权限为空，
+  **所有写操作一律不可用** —— 宁可点不动，也不能在没有鉴权的情况下放开高危入口。
+* 后端 `backend/` 仍然是空的，`/system/auth/login` 没人实现，
+  所以 README「已知待办」里那条「登录鉴权未接」**依然成立**，
+  顶栏「退出登录」依旧不假装已登出。
 
 ---
 
@@ -191,8 +256,9 @@ npm run dev          # http://localhost:5173
 
 ### 模块配色
 
-8 个一级菜单各有主色，侧边栏图标、页面标题竖条、页签圆点、
-总览指标卡、占位页强调色都跟着走，扫一眼就知道自己在哪个模块：
+7 个一级菜单各有主色，侧边栏图标、页面标题竖条、页签圆点、
+总览指标卡、占位页强调色都跟着走，扫一眼就知道自己在哪个模块
+（`监控与统计` 一级菜单已删，其红色仍被消息总线页的趋势卡沿用）：
 
 | 模块 | 颜色 | 模块 | 颜色 |
 |---|---|---|---|
@@ -225,34 +291,11 @@ npm run dev          # http://localhost:5173
 
 ---
 
-
-**只需改一个文件**：`src/config/menu.ts`。侧边栏、面包屑、页面标题、路由表全部由它推导。
-
-```ts
-{
-  name: 'monitor-alarm',          // 唯一，同时是路由 name 和菜单 key
-  path: '/monitor/alarm',
-  view: 'monitor/MonitorAlarm',   // 可选；对应 src/views/monitor/MonitorAlarm.vue
-  meta: {
-    title: '告警规则',
-    icon: AlertCircleOutline,     // 来自 @vicons/ionicons5
-    status: 'planned',            // planned 后端待实现 / placeholder 页面待开发
-    desc: '一句话说明这个页面干什么',
-    refs: [{ label: 'MySQL 表', value: 'T_Alarm' }],
-    todos: ['规则增删改查', '告警渠道配置'],
-  },
-}
-```
-
-* **不写 `view`** → 自动落到通用占位页（能显示 refs/todos），适合先占位。
-* **写了 `view`** → 去 `src/views/` 下建对应文件即可，路由会自动接上。
-* 写完不用注册路由，`router/index.ts` 会自动读取。
-
----
-
 ## 加一个菜单怎么做
 
 **只需改一个文件**：`src/config/menu.ts`。侧边栏、面包屑、页面标题、路由表全部由它推导。
+**权限树（`src/config/permissions.ts`）也从同一棵树推导**，
+所以加菜单时权限页会自动多出对应节点，不需要再去权限那边补一份。
 
 ```ts
 {
@@ -308,11 +351,47 @@ npm run dev          # http://localhost:5173
 > 实测表现：节点表显示演示数据，但「Pub/Sub 频道」却是 **0 个**。
 > 正确做法是每个数据源都走同一个 `useResource`，让降级逻辑自己保持一致。
 >
+> **5b. 判断「走演示分支还是真实分支」要用 `usingMock`，不要用 `isMock`。**
+> `isMock` 的初值是 `false`，只有 `load()` 的 `await` **之后**才置位。
+> 页面在 `onMounted` 里 `void reload()`（不 await）时，首个请求返回前
+> （mock 的 `withDelay` 默认 260ms）`isMock.value` 仍是 `false` ——
+> 此刻用户点写操作按钮，就会**误判为真实态**、去调还没实现的后端、然后弹一个「失败」。
+> 实测：`load()` 后 await 前 `isMock===false`、`loading===true`、`apiCalls===0`。
+> `useResource` 因此额外返回 `usingMock`：
+> ```ts
+> const usingMock = computed(() => (settled.value ? isMock.value : USE_MOCK))
+> ```
+> 数据未到手时退回**构建期常量** `USE_MOCK`（没有时序问题），
+> 到手后以 `isMock` 为准（还能识别「自动降级到演示数据」的中间态）。
+> **注意分工**：`usingMock` 用于**分支判定**（该调接口还是该改本地演示数据）；
+> 而 `isMock` 继续用于**事实展示**（「当前为演示数据」横幅、演示密码按钮的显隐）——
+> 横幅本来就该等数据到手后才显示，不要跟着改成 `usingMock`。
+>
 > **6. 模板里不要写 Markdown 语法。**
 > `<div>**重点**</div>` 不会加粗，而是**把两个星号原样显示出来**。
 > 要在 `.vue` 的 `<template>` 里加粗请用 `<b>` / `<strong>`；
 > `**` 只对 Markdown 渲染器有效（注释里随便用）。
 > 排查：`grep '\*\*[^*]+\*\*'` 只看 `<template>` 之后的部分。
+
+> **7. 筛选参数的「类型」会静默吃掉筛选条件。**
+> mock / 后端判定常常写成 `asString(q.x)`，这时页面传**布尔** `true`（来自开关或未转字符串的下拉）
+> 会被判成空字符串 → **不过滤、返回全量、不报错**。实测踩到过两次：
+> 登录日志「结果」筛选传 `'success'`（复用了审计侧的取值）导致**永远只显示失败的行**；
+> 审计「结果」传布尔 `true` 导致 220 条全返回。
+> 处理办法：布尔参数一律用 `_shared.ts` 的 `asBool()`（布尔 / `'true'` / `'1'` / `1` 都认，
+> `undefined` 仍表示「未筛选」）；**同一概念在不同模块的取值要写清楚**，
+> 比如审计 `result` 是 `'success'|'failure'`，登录 `success` 是布尔 —— 两者不能互相复用。
+>
+> **8. 时间范围筛选的字符串格式必须定宽且一致。**
+> 演示态/后端若用字符串比较（`row.time < from`），传 ISO（`2026-10-01T00:00:00.000Z`）
+> 或 `YYYY-M-D` 会**静默筛错**（实测 ISO 筛出 37 行、统一格式筛出 45 行，都不报错）。
+> 一律用 `YYYY-MM-DD HH:mm:ss` 零填充，且**聚合接口与列表接口共用同一口径**
+> （mock 里已抽成同一个 `filterByRange`，避免两处各写一遍各错一遍）。
+>
+> **9. 分页接口不能拿来「统计」。**
+> 明细接口是分页的，前端硬凑只统计到当前一页，却会被当成全量读（运维场景里很危险）。
+> 图表与导出必须走后端聚合/导出接口（`getAuditDaily`、`exportAuditLogs` 等），
+> 不要用 `list*` 在前端算。
 
 ---
 
@@ -326,30 +405,42 @@ frontend/
 │   │   ├── types.ts       # ApiEnvelope / PageQuery / PageResult
 │   │   ├── domain.ts      # 业务实体类型（按真实表结构整理）
 │   │   ├── endpoints.ts   # 按模块拆分的接口定义（全部待后端实现）
-│   │   └── mock/
-│   │       └── strategy.ts# 策略平台演示数据（后端接通后可整个删掉）
+│   │   └── mock/          # 各模块演示数据（后端接通后可整个删掉）
+│   │       ├── strategy.ts
+│   │       ├── trade.ts
+│   │       ├── datahub.ts
+│   │       ├── account.ts
+│   │       ├── storage.ts
+│   │       ├── monitor.ts
+│   │       └── system.ts  # 后台管理账号 / 角色 / 审计 / 登录日志
 │   ├── composables/
 │   │   └── useResource.ts # ★ 取数：真实接口优先 + 演示数据兜底
 │   ├── utils/
 │   │   └── format.ts      # JSON 格式化、相对时间、空值处理
 │   ├── theme/
-│   │   └── palette.ts     # ★ 模块配色（8 个一级菜单各自主色）
+│   │   └── palette.ts     # ★ 模块配色（一级菜单各自主色）
 │   ├── config/
-│   │   └── menu.ts        # ★ 菜单唯一数据源（含数据来源与待办）
+│   │   ├── menu.ts        # ★ 菜单唯一数据源（含数据来源与待办）
+│   │   └── permissions.ts # ★ 权限键契约（权限树由 menu.ts 推导）
 │   ├── layouts/
 │   │   └── BasicLayout.vue# 侧边栏 + 顶栏 + 面包屑 + 多页签
 │   ├── router/
 │   │   └── index.ts       # 由 menu.ts 推导路由
 │   ├── stores/
 │   │   ├── app.ts         # 主题、侧边栏折叠
+│   │   ├── auth.ts        # ★ 当前会话与权限判定（演示身份，不假装已登录）
 │   │   └── tabs.ts        # 多页签
-│   ├── components/        # StatCard / BaseChart / MockDataAlert / QueryErrorAlert / PagePlaceholder
+│   ├── components/        # StatCard / BaseChart / MockDataAlert / QueryErrorAlert / PermissionTree / PagePlaceholder
 │   ├── views/
 │   │   ├── dashboard/DashboardView.vue
 │   │   ├── strategy/
 │   │   │   ├── StrategyServer.vue   # 策略服务器
 │   │   │   ├── StrategyList.vue     # 条件单策略
 │   │   │   └── StrategyLog.vue      # 策略运行日志
+│   │   ├── system/
+│   │   │   ├── SystemUser.vue       # 管理用户与权限
+│   │   │   ├── SystemRole.vue       # 角色与权限
+│   │   │   └── SystemAudit.vue      # 操作审计
 │   │   ├── PlaceholderView.vue      # 通用占位页
 │   │   └── NotFoundView.vue
 │   ├── assets/styles/global.css
@@ -388,12 +479,30 @@ frontend/
 | 策略平台 | `/strategy/servers`、`/strategy/conditionals`、`/strategy/logs` |
 | 委托服务器 | `/trade/servers`、`/trade/assignments`、`/trade/orders`、`/trade/trades` |
 | 数据中台 | `/datahub/nodes`、`/datahub/streams`、`/datahub/trace` |
-| 账户用户 | `/account/users`、`/account/redis/{account}`、`/account/logs` |
+| 账户用户 | `/account/accounts`、`/account/redis/{account}`、`/account/logs` |
 | 数据存储 | `/storage/redis/keys`、`/storage/redis/channels`、`/storage/mysql/query` |
-| 监控统计 | `/monitor/performance/tasks`、`/monitor/destroy/cases`、`/monitor/realtime/*` |
-| 系统管理 | `/system/connections`、`/system/audit`、`/system/auth/*` |
+| 系统管理（连接配置） | `/system/connections` |
+| 系统管理（管理用户/权限/审计） | `/system/users`、`/system/roles`、`/system/audit-logs`、`/system/login-logs`、`/system/password-policy`、`/system/auth/*` |
 
 > 路径只是**建议**，改动时同步改 `endpoints.ts` 即可。
+
+### 2.1 管理端账号体系要新加的表（后端参考）
+
+`T_User` 那条线是**云单客户**，后台管理账号必须另建表，别复用：
+
+| 建议表 | 关键字段 | 说明 |
+|---|---|---|
+| `T_AdminUser` | `username`(唯一) / `displayName` / `enabled` / `locked` / `failedAttempts` / `mustChangePassword` / `lastLoginTime` / `lastLoginIP` / `loginCount` | 密码只存哈希，**接口永不回显** |
+| `T_AdminRole` | `code` / `name` / `desc` / `builtin` | `builtin=true` 不可删（删超管角色 = 后台再也进不去） |
+| `T_AdminRolePermission` | `roleId` / `permissionKey` | 键格式见「权限体系」一节 |
+| `T_AdminAudit` | `operator` / `action` / `module` / `level` / `target` / `result` / `message` / `ip` / `costMs` | 高危操作必写 |
+| `T_AdminLoginLog` | `username` / `loginTime` / `loginIP` / `loginOS` / `success` / `info` | **不同于** `T_UserLog` |
+
+后端实现这组接口时，有三件事**必须**做到（前端已经按这个前提写，靠前端把关等于没有把关）：
+
+1. **停用/改权限要让已签发的 token 失效**，只改数据库字段的话，已经登录的会话还能继续用，是个真实的越权口子。
+2. **权限校验必须在后端做**。前端的 `authStore.can()` 只用来控制按钮可见性，任何人都能直接打接口，前端判断不是安全边界。
+3. **改权限、重置密码、管理账号这三类操作本身也要写审计**（否则「谁给自己提了权」查不到）。
 
 ### 3. 开发环境代理
 
@@ -418,9 +527,16 @@ frontend/
 ## 已知待办
 
 - [ ] 后端服务（`backend/` 为空，所有接口待实现）
-- [ ] 登录鉴权：顶栏「退出登录」目前只弹提示，未接真实鉴权
+- [ ] 登录鉴权：顶栏「退出登录」仍**不假装已登出**（真实态只清本地 token），未接真实鉴权；
+      登录页也还没做 —— `authStore.login()` 已按契约写好，后端 `/system/auth/login` 一通就能接上
 - [ ] 「策略平台管理」「委托服务器管理」共 6 个页面的写操作（启停/删除/启用开关）只弹提示，等接口
-- [ ] 剩余 10 个占位页逐个实现（建议顺序：系统管理 → 数据维护（已暂缓））
+- [ ] **系统管理的三个页面只做了管理端自身**，还有两件必须由后端兜住的事（前端已按此前提写注释）：
+      1. 停用账号 / 改权限后要让**已签发的 token 失效**，否则旧会话继续可用；
+      2. **权限判定必须在后端做** —— `authStore.can()` 只管按钮可见性，
+         能直接打接口的人不受它约束。
+- [ ] 系统管理的写操作（建账号/改角色/重置密码）目前**演示态改本地、真实态如实报错**，
+      接口落地后要补：乐观更新回滚、并发编辑冲突提示（两个管理员同时改同一角色）
+- [ ] 剩余占位页逐个实现（`连接配置` 待开发；`数据维护` 已与需求方确认暂缓）
 - [ ] 后端就绪后删掉 `src/api/mock/`，并把 `.env.development` 的 `VITE_USE_MOCK` 改为 `false`
 - [ ] 各页汇总指标当前是「本页口径」，真实汇总应由后端单独出接口
 - [ ] **`OrderStatue` 枚举未知**：协议文档没定义，现场 `T_Order_his` 只有 1 条测试数据，
@@ -456,9 +572,9 @@ frontend/
 - [ ] **`information_schema.TABLE_ROWS` 不可信**：实测 `T_StrategyLog` 报 16566、
       真实 `COUNT` = 17430，`T_UserLog` 报 190500、真实 191002。
       后端若用该字段做分页总数会不一致，必须以 `COUNT(*)` 为准（大表需估算方案）。
-- [ ] **实时指标的「趋势曲线」在演示态下是生成的、不是真实历史**：
+- [ ] **趋势曲线在演示态下是生成的、不是真实历史**：
       现场没有时序库（Prometheus 之类），真实曲线需要后端接入指标存储后提供。
-      页面已用黄条明确标注。
-- [ ] 实时指标的**口径需与后端对齐**：目前指标定义（label/单位/阈值）写在
+      「消息总线」页已用黄条明确标注。
+- [ ] 趋势指标的**口径需与后端对齐**：目前指标定义（label/单位/阈值）写在
       `src/api/mock/monitor.ts` 里当展示元数据，真实接口只返回数值。
-      后端落地时应把这 11 项指标与 4 个阈值作为前后端共同契约确认一次。
+      后端落地时应把这三项指标与阈值作为前后端共同契约确认一次。
