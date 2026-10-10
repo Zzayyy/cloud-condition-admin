@@ -1,6 +1,5 @@
 import type { Component } from 'vue'
 import {
-  AlertCircleOutline,
   AnalyticsOutline,
   BuildOutline,
   CashOutline,
@@ -18,7 +17,6 @@ import {
   PulseOutline,
   ServerOutline,
   SettingsOutline,
-  SpeedometerOutline,
   SwapHorizontalOutline,
   TerminalOutline,
   TimeOutline,
@@ -367,61 +365,6 @@ export const menuTree: MenuNode[] = [
             '过期条件单/日志清理',
             '全部操作写入审计',
           ],
-        },
-      },
-    ],
-  },
-  {
-    name: 'monitor',
-    path: '/monitor',
-    meta: { title: '监控与统计', icon: SpeedometerOutline, desc: '性能压测、破坏测试与实时指标图表。' },
-    children: [
-      {
-        name: 'monitor-perf',
-        path: '/monitor/performance',
-        meta: {
-          title: '性能压测',
-          icon: SpeedometerOutline,
-          status: 'placeholder',
-          desc: '压测任务的发起、进度与性能指标统计。',
-          refs: [
-            { label: '现有工具', value: 'datahub_test/（委托服务器→中台）、strategy_test/（中台→策略平台）' },
-            { label: '统计口径', value: '每秒请求数、每秒收发字节数、客户端 CPU 利用率、平均响应时间(微秒)' },
-            { label: '结果产物', value: '各项目 out/performance/ 下的统计 JSON 与 Excel' },
-          ],
-          todos: ['压测任务列表与进度', '指标图表：QPS、吞吐字节、延迟分布（ECharts）', '历史压测结果对比', '一键导出 Excel'],
-        },
-      },
-      {
-        name: 'monitor-destroy',
-        path: '/monitor/destroy',
-        meta: {
-          title: '破坏测试',
-          icon: AlertCircleOutline,
-          status: 'placeholder',
-          desc: '直写 Redis 发送异常报文，验证数据中台健壮性（高危操作）。',
-          refs: [
-            { label: '写入方式', value: "XADD DataHub_req_stream * request_id ... task '<data>' 直写" },
-            { label: '流位置', value: '137 db2 的 DataHub_req_stream（与生产流隔离）' },
-            { label: '两档强度', value: 'type1：核心字段正确、task 乱写；type2：核心字段与 task 全部乱填' },
-            { label: '现有用例', value: 'datahub_test/data/*.xlsx 中的 destroy 类用例（__LONG__ / __CTRL__ / __UNI__ / __MAXINT__）' },
-          ],
-          todos: ['破坏用例维护（Excel 导入/导出）', '按用例编号或范围指定发送', '任务进度与中台存活状态监控', '必须二次确认 + 操作审计'],
-        },
-      },
-      {
-        name: 'monitor-realtime',
-        path: '/monitor/realtime',
-        meta: {
-          title: '实时指标',
-          icon: PulseOutline,
-          status: 'placeholder',
-          desc: '基于 ECharts 的实时曲线：吞吐、延迟、在线节点数。',
-          refs: [
-            { label: '指标来源', value: 'Redis INFO（内存/客户端数）、XLEN、消费组 lag、Pub/Sub 订阅数' },
-            { label: '刷新方式', value: '前端定时轮询后端聚合接口（后端待实现）' },
-          ],
-          todos: ['吞吐曲线（req/reply 流增速）', '延迟曲线与分位值', '在线委托/策略/中台节点数', '可配置刷新间隔与时间窗'],
         },
       },
     ],

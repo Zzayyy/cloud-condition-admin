@@ -562,26 +562,21 @@ export const MSG_TYPES = {
 
 /* -------------------------------- 监控统计 -------------------------------- */
 
-/** 性能压测指标（口径来自现有测试工具） */
-export interface PerfMetrics {
-  /** 每秒请求数 */
-  qps: number
-  /** 每秒发送字节数 */
-  sendBytesPerSec: number
-  /** 每秒接收字节数 */
-  recvBytesPerSec: number
-  /** 平均响应时间（微秒） */
-  avgLatencyUs: number
-  /** 客户端 CPU 利用率（0~1） */
-  cpuUsage: number
-  /** 已发送总数 */
-  totalSent: number
-  /** 成功数 */
-  totalOk: number
-  /** 失败数 */
-  totalFail: number
-}
+/**
+ * 可画趋势的**指标键**（供「消息总线」的趋势卡使用）。
+ *
+ * 只保留「积压与消费健康」三类 —— 这正是消息总线那一页回答的问题。
+ * 内存类指标归属 Redis 管理页，不在这里。
+ */
+export type TrendMetricKey =
+  /** 入口流积压条目数（DataHub_req_stream 的 XLEN 合计） */
+  | 'ingressBacklog'
+  /** 消费组 lag 合计（已写入未投递） */
+  | 'consumerLag'
+  /** pending 合计（已投递未确认） */
+  | 'consumerPending'
 
+/** 时序指标点（供 ECharts） */
 export interface TimeSeriesPoint {
   /** 时间戳（毫秒）或时间字符串 */
   time: number | string

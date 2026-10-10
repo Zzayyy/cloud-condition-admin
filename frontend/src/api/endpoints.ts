@@ -18,6 +18,7 @@ import type {
   RedisStreamInfo,
   StrategyLog,
   StrategyServer,
+  TimeSeriesPoint,
   TradeRecord,
   TraderServer,
   UserLog,
@@ -194,23 +195,23 @@ export const storageApi = {
 
 /* -------------------------------- 监控统计 -------------------------------- */
 
+/**
+ * 只保留时序接口 —— 供「消息总线」的趋势卡画曲线。
+ *
+ * **性能压测 / 破坏测试 / 实时指标页面的接口都已删除**：
+ *  - 压测与破坏测试是研发发版前用命令行工具做的活（`datahub_test`、
+ *    `strategy_test` 里已有完整 PySide6 GUI），且破坏测试能让数据中台崩溃，
+ *    做成网页按钮会让高危操作变成「登录就能点」。
+ *  - 「实时指标」页面的 11 项指标经逐项核对，**没有一项是其它页面看不到的**，
+ *    已删除；它唯一独有的「时间趋势」搬到了消息总线。
+ */
 export const monitorApi = {
-  /** 性能压测任务列表 */
-  listPerfTasks: (query?: PageQuery) => api.get<PageResult<unknown>>('/monitor/performance/tasks', query),
-
-  /** 破坏测试用例列表 */
-  listDestroyCases: (query?: PageQuery) => api.get<PageResult<unknown>>('/monitor/destroy/cases', query),
-
-  /** 触发破坏测试（高危） */
-  startDestroyTask: (payload: { caseIds?: string[]; range?: [number, number]; mode: 'type1' | 'type2' }) =>
-    api.post<{ taskId: string }>('/monitor/destroy/tasks', payload),
-
-  /** 实时指标快照 */
-  getRealtimeMetrics: () => api.get<Record<string, number>>('/monitor/realtime/metrics'),
-
-  /** 时序指标（供 ECharts） */
+  /**
+   * 时序指标（供 ECharts 画趋势）。
+   * window 为时间窗，如 '15m' / '1h'。
+   */
   getTimeSeries: (metric: string, window?: string) =>
-    api.get<{ time: number | string; value: number }[]>('/monitor/realtime/series', { metric, window }),
+    api.get<TimeSeriesPoint[]>('/monitor/series', { metric, window }),
 }
 
 /* -------------------------------- 系统管理 -------------------------------- */

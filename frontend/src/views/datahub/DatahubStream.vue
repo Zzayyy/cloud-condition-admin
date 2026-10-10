@@ -14,6 +14,8 @@ import {
   NIcon,
   NInput,
   NProgress,
+  NRadioButton,
+  NRadioGroup,
   NSelect,
   NTag,
   NTooltip,
@@ -32,6 +34,7 @@ import {
   RefreshOutline,
   SearchOutline,
   TimeOutline,
+  TrendingUpOutline,
   WarningOutline,
 } from '@vicons/ionicons5'
 
@@ -39,10 +42,17 @@ import BaseChart from '@/components/BaseChart.vue'
 import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
-import { datahubApi } from '@/api/endpoints'
+import { datahubApi, monitorApi } from '@/api/endpoints'
 import { mockDatahubApi } from '@/api/mock/datahub'
+import { TREND_METRICS, trendSeries } from '@/api/mock/monitor'
 import { withDelay } from '@/api/mock/_shared'
-import { SERVER_TYPES, type RedisStreamEntry, type RedisStreamInfo, type StreamRole } from '@/api/domain'
+import {
+  SERVER_TYPES,
+  type RedisStreamEntry,
+  type RedisStreamInfo,
+  type StreamRole,
+  type TimeSeriesPoint,
+} from '@/api/domain'
 import { useResource } from '@/composables/useResource'
 import { formatJson, thousands } from '@/utils/format'
 
@@ -133,6 +143,110 @@ const summary = computed(() => {
     noGroupEntries: noGroup.reduce((s, x) => s + x.length, 0),
     pending: list.reduce((s, x) => s + (x.groups[0]?.pending ?? 0), 0),
     lag: list.reduce((s, x) => s + (x.groups[0]?.lag ?? 0), 0),
+  }
+})
+
+/* ------------------------------ 趋势卡 ------------------------------ */
+
+/**
+ * 趋势卡的指标与数据。
+ *
+ * ⚠️ 这里**必须**给趋势单独走一个 useResource，不能在 onMounted 里读
+ * 列表那个资源的 `isMock` —— 那样会因为请求还没回来而读到 false，
+ * 于是去调真实接口、失败后返回空图（这个坑在别处踩过，见 README 第 5 条）。
+ * 每个数据源各自解析，降级逻辑才一致。
+ */
+const trendKey = ref<string>(TREND_METRICS[1]?.key ?? 'consumerLag')
+const trendWindow = ref(15)
+
+const {
+  data: trendData,
+  isMock: trendIsMock,
+  load: loadTrendSeries,
+} = useResource(
+  (params: { metric: string; windowMin: number }) =>
+    monitorApi.getTimeSeries(params.metric, `${params.windowMin}m`),
+  {
+    mock: (params: { metric: string; windowMin: number }) =>
+      withDelay(trendSeries(params.metric, Math.max(10, params.windowMin)), 120),
+  },
+)
+
+const trendPoints = computed<TimeSeriesPoint[]>(() => trendData.value ?? [])
+/** 趋势是否为演示态 —— 用于决定是否显示「非真实历史」提示 */
+const trendIsDemo = computed(() => trendIsMock.value)
+
+function loadTrend() {
+  loadTrendSeries({ metric: trendKey.value, windowMin: trendWindow.value })
+}
+
+function changeTrend(key: string) {
+  trendKey.value = key
+  loadTrend()
+}
+
+function changeTrendWindow(min: number) {
+  trendWindow.value = min
+  loadTrend()
+}
+
+onMounted(loadTrend)
+
+const trendOption = computed(() => {
+  const def = TREND_METRICS.find((t) => t.key === trendKey.value)
+  const data = trendPoints.value
+
+  return {
+    grid: { left: 8, right: 20, top: 24, bottom: 8, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: Array<{ value: number; axisValue: string }>) => {
+        const p = params[0]
+        if (!p) return ''
+        return `${p.axisValue}<br/>${def?.label ?? ''}：${thousands(Math.round(p.value))}`
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: data.map((d) => {
+        const t = typeof d.time === 'number' ? new Date(d.time) : new Date(String(d.time))
+        return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
+      }),
+      axisLabel: { fontSize: 11 },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { fontSize: 11, formatter: (v: number) => thousands(v) },
+    },
+    series: [
+      {
+        type: 'line',
+        smooth: true,
+        symbol: 'none',
+        data: data.map((d) => d.value),
+        lineStyle: { width: 2.5, color: accent },
+        itemStyle: { color: accent },
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(221,122,21,0.28)' },
+              { offset: 1, color: 'rgba(221,122,21,0.02)' },
+            ],
+          },
+        },
+        markLine: def?.warnAt
+          ? {
+              silent: true,
+              symbol: 'none',
+              lineStyle: { color: '#d6455e', type: 'dashed', width: 1 },
+              label: { formatter: '告警阈值', fontSize: 10, color: '#d6455e' },
+              data: [{ yAxis: def.warnAt }],
+            }
+          : undefined,
+      },
+    ],
   }
 })
 
@@ -500,6 +614,41 @@ const traceHint = computed(() => {
       </n-gi>
     </n-grid>
 
+    <!-- 趋势卡：给出「积压与消费健康」的时间维度。
+         原先独立成一个「实时指标」菜单，但经逐项核对，那页 11 项指标
+         没有一项是别处看不到的，唯一独有的就是这个时间趋势，故合并到这里。 -->
+    <n-card class="page-card" size="small" :bordered="false">
+      <template #header>
+        <span class="section-title">
+          <n-icon :component="TrendingUpOutline" :color="accent" :size="17" />
+          指标趋势
+        </span>
+      </template>
+      <template #header-extra>
+        <div class="trend-ctrl">
+          <n-radio-group :value="trendKey" size="small" @update:value="(v: string) => changeTrend(v)">
+            <n-radio-button v-for="t in TREND_METRICS" :key="t.key" :value="t.key">
+              {{ t.label }}
+            </n-radio-button>
+          </n-radio-group>
+          <n-radio-group :value="trendWindow" size="small" @update:value="(v: number) => changeTrendWindow(v)">
+            <n-radio-button :value="15">15 分</n-radio-button>
+            <n-radio-button :value="60">60 分</n-radio-button>
+          </n-radio-group>
+        </div>
+      </template>
+
+      <BaseChart :option="trendOption" :height="240" empty-text="暂无数据" />
+
+      <div v-if="trendIsDemo" class="trend-note">
+        <n-icon :component="InformationCircleOutline" color="#dd7a15" />
+        <span>
+          现场<b>没有时序库</b>，这条曲线在演示态下是围绕当前基线生成的、<b>不是真实历史</b>；
+          真实历史需要后端接入指标存储（如 Prometheus）后提供。
+        </span>
+      </div>
+    </n-card>
+
     <!-- 流列表 -->
     <n-card class="page-card" size="small" :bordered="false">
       <template #header>
@@ -738,6 +887,31 @@ const traceHint = computed(() => {
 
 .num {
   font-variant-numeric: tabular-nums;
+}
+
+/* 趋势卡 */
+.trend-ctrl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.trend-note {
+  display: flex;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  background: var(--bg-body);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--warning);
+}
+
+.trend-note b {
+  color: var(--warning);
 }
 
 .prog-cell {
