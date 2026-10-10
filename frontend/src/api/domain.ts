@@ -778,3 +778,37 @@ export interface NameValueRow {
   name: string
   value: number
 }
+
+/* ------------------------------ 登录鉴权 ------------------------------ */
+
+/**
+ * 登录失败的业务错误码。
+ *
+ * 前端按 **code** 分派提示文案，不去匹配 message 字符串 ——
+ * 后端换一次措辞就会让前端的判断静默失效（这类坑项目里已经踩过）。
+ *
+ * ⚠️ `BAD_CREDENTIALS` 刻意把「账号不存在」与「密码错误」**合并**成同一个码：
+ * 分开返回等于给攻击者一个**账号枚举**接口（能逐个试出哪些账号真实存在）。
+ * 真实后端也必须这么合并，前端提示文案也要写成「账号或密码错误」。
+ */
+export const LOGIN_ERROR_CODES = {
+  BAD_CREDENTIALS: 40101,
+  /** 账号已停用 */
+  DISABLED: 40102,
+  /** 账号因连续失败被锁定 */
+  LOCKED: 40103,
+} as const
+
+export type LoginErrorCode = (typeof LOGIN_ERROR_CODES)[keyof typeof LOGIN_ERROR_CODES]
+
+/** 登录成功返回（`POST /system/auth/login`） */
+export interface LoginResult {
+  token: string
+  username: string
+  displayName?: string
+  roles: string[]
+  /** 权限键集合，见 `src/config/permissions.ts` */
+  permissions: string[]
+  /** 是否需要下次登录强制改密 */
+  mustChangePassword?: boolean
+}

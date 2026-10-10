@@ -140,16 +140,13 @@ const userOptions = [
   { label: '退出登录', key: 'logout' },
 ]
 
-function handleUserSelect(key: string) {
+async function handleUserSelect(key: string) {
   if (key === 'logout') {
-    // 后端鉴权仍未落地（backend/ 为空），这里**不假装已登出**：
-    // 演示态下说明当前是演示身份；真实态下如实提示待对接。
-    if (authStore.isDemoIdentity) {
-      message.warning('当前是演示身份，登出未接入真实鉴权（后端 /system/auth/login 尚未实现）')
-    } else {
-      authStore.logout()
-      message.info('已清除本地登录态；真实登出需后端 /system/auth/logout')
-    }
+    // 真的登出：清本地凭证并回登录页（守卫会把没身份的人拦在那儿）。
+    // 后端 /system/auth/logout 未实现也不影响登出 —— 不能因为接口挂了就登不出去。
+    await authStore.logout()
+    message.success('已退出登录')
+    router.replace({ name: 'login' })
   } else {
     message.info('个人信息页面待开发（后端 /system/auth/profile 尚未实现）')
   }
@@ -244,15 +241,17 @@ const parentTitle = computed(() => {
                 <n-icon :component="PersonCircleOutline" />
               </template>
               {{ authStore.displayName }}
+              <!-- 显示角色而不是「演示身份」：现在是真的登录过了，
+                   角色名能解释「为什么有些按钮是灰的」 -->
               <n-tag
-                v-if="authStore.isDemoIdentity"
+                v-if="authStore.roleNames.length"
                 size="tiny"
                 round
                 :bordered="false"
-                type="warning"
+                type="info"
                 style="margin-left: 6px"
               >
-                演示身份
+                {{ authStore.roleNames.join(' / ') }}
               </n-tag>
             </n-button>
           </n-dropdown>

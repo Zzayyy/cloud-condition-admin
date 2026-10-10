@@ -24,17 +24,54 @@ import type {
   AuditLevel,
   AuditLog,
   LoginDailyRow,
+  LoginResult,
   NameValueRow,
   PasswordPolicy,
 } from '../domain'
+import { LOGIN_ERROR_CODES } from '../domain'
 import type { PageQuery, PageResult } from '../types'
-import { actionPermissionKey, menuPermissionKey } from '../../config/permissions'
+import { BizError } from '../http'
+import { PERMISSION_WILDCARD, actionPermissionKey, menuPermissionKey } from '../../config/permissions'
 import { asBool, asNumber, asString, fmt, intBetween, paginate, pick, seededRandom, type Rand } from './_shared'
 
 const rand: Rand = seededRandom(20261015)
 
 /** 演示用明文密码。**仅演示态使用**，真实环境由后端下发/重置。 */
-export const DEMO_ADMIN_PASSWORD = 'Demo#2026'
+export const DEMO_ADMIN_PASSWORD = 'Admin@2026'
+
+/**
+ * 演示账号的密码表（**写死几个够用就行**）。
+ *
+ * 三个可登录账号，覆盖三档权限 —— 换个账号登录就能看出按钮变灰：
+ *   admin          → 超级管理员（通配符 *，全部权限）
+ *   yangsh         → 运维（能启停，不能删键/改账号/读任意 SQL）
+ *   zhangguochang  → 只读观察者（能进页面，写操作全点不动）
+ *
+ * 另外两个**故意登不进去**，用来验证登录页的错误分支（光跑成功路径不算数）：
+ *   liuyi     → 账号已停用
+ *   test_tmp  → 账号已锁定
+ *
+ * 密码是**编的**，只存在于前端演示数据里；现场真实密码绝不写进仓库。
+ */
+const DEMO_PASSWORDS: Record<string, string> = {
+  admin: 'Admin@2026',
+  yangsh: 'Ops@2026',
+  zhangguochang: 'View@2026',
+  liuyi: 'Ops@2026',
+  test_tmp: 'Ops@2026',
+}
+
+/** 登录页上直接展示的三个可登录账号（含权限说明），避免用户去翻代码 */
+export const DEMO_LOGIN_HINTS: Array<{
+  username: string
+  password: string
+  label: string
+  desc: string
+}> = [
+  { username: 'admin', password: 'Admin@2026', label: '超级管理员', desc: '全部权限' },
+  { username: 'yangsh', password: 'Ops@2026', label: '运维', desc: '可启停，不能删除' },
+  { username: 'zhangguochang', password: 'View@2026', label: '只读观察者', desc: '写得动才怪' },
+]
 
 /* ------------------------------ 内置角色 ------------------------------ */
 
@@ -449,6 +486,82 @@ export const mockAdminApi = {
   /** 角色下拉 / 用户列表里的角色名解析都用得到 */
   listRoles(): AdminRole[] {
     return ROLES
+  },
+
+  /* ------------------------------ 登录鉴权 ------------------------------ */
+
+  /**
+   * 演示态登录校验。
+   *
+   * ⚠️ 这是**演示替身**，不是安全实现：密码是明文比较、token 是假的。
+   * 它存在的意义是让登录页的**每条分支**都能被真正走一遍
+   * （成功 / 密码错 / 账号停用 / 已锁定），而不是只能看到成功路径。
+   *
+   * 与真实后端的三点约定（前端按 `code` 分派，不匹配 message）：
+   *  1. 账号不存在与密码错误**返回同一个码** `BAD_CREDENTIALS`（防账号枚举）；
+   *  2. 停用 / 锁定**先于**密码校验返回，否则管理员会以为是密码错了；
+   *  3. 失败要累计 `failedAttempts`，达到策略阈值自动置 `locked`。
+   */
+  login(username: string, password: string): LoginResult {
+    const name = username.trim()
+    const user = USERS.find((u) => u.username === name)
+
+    // 1) 账号不存在 → 与密码错误同码（不泄露账号是否存在）
+    if (!user) {
+      throw new BizError('账号或密码错误', LOGIN_ERROR_CODES.BAD_CREDENTIALS)
+    }
+
+    // 2) 已锁定 → 先于密码校验，避免管理员误以为「密码错了」
+    if (user.locked) {
+      throw new BizError(
+        `账号已被锁定（连续失败 ${user.failedAttempts} 次），请联系管理员解锁`,
+        LOGIN_ERROR_CODES.LOCKED,
+      )
+    }
+
+    // 3) 已停用
+    if (!user.enabled) {
+      throw new BizError('账号已停用，请联系管理员', LOGIN_ERROR_CODES.DISABLED)
+    }
+
+    // 4) 密码
+    if (DEMO_PASSWORDS[name] !== password) {
+      user.failedAttempts += 1
+      const max = POLICY.maxFailedAttempts
+      if (max > 0 && user.failedAttempts >= max) {
+        user.locked = true
+        throw new BizError(
+          `账号或密码错误。连续失败 ${user.failedAttempts} 次，账号已被锁定`,
+          LOGIN_ERROR_CODES.LOCKED,
+        )
+      }
+      const left = max > 0 ? `，还可尝试 ${Math.max(0, max - user.failedAttempts)} 次` : ''
+      throw new BizError(`账号或密码错误${left}`, LOGIN_ERROR_CODES.BAD_CREDENTIALS)
+    }
+
+    // 5) 成功：累计登录次数并刷新审计用的最后登录信息
+    user.failedAttempts = 0
+    user.loginCount += 1
+    user.lastLoginTime = fmt(new Date())
+    user.lastLoginIP = '127.0.0.1'
+
+    return {
+      token: `demo-token-${user.username}-${Date.now()}`,
+      username: user.username,
+      displayName: user.displayName ?? user.username,
+      roles: user.roleIds.map((id) => ROLES.find((r) => r.id === id)?.code ?? String(id)),
+      // 超管是通配符，其余取其角色的权限键并集
+      permissions: user.roleIds.includes(1)
+        ? [PERMISSION_WILDCARD]
+        : [
+            ...new Set(
+              user.roleIds.flatMap(
+                (id) => ROLES.find((r) => r.id === id)?.permissions ?? [],
+              ),
+            ),
+          ],
+      mustChangePassword: user.mustChangePassword,
+    }
   },
 
   roleNameOf(roleId: number): string {

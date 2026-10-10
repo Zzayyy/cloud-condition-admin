@@ -14,6 +14,7 @@ import type {
   Conditional,
   DatahubNodeDetail,
   LoginDailyRow,
+  LoginResult,
   MysqlTable,
   MysqlTableSchema,
   NameValueRow,
@@ -335,20 +336,24 @@ export const authApi = {
    * 登录。
    * 后端返回 token，前端存 localStorage（见 `http.ts` 的 TOKEN_KEY），
    * 由 axios 请求拦截器统一加 `Authorization: Bearer`。
+   *
+   * 失败时后端返回 `code` ∈ `LOGIN_ERROR_CODES`（见 `domain.ts`）：
+   * 账号不存在与密码错误**必须同码**（防账号枚举），停用/锁定各有独立码。
    */
   login: (payload: { username: string; password: string }) =>
-    api.post<{ token: string; username: string; displayName?: string; roles: string[]; permissions: string[] }>(
-      '/system/auth/login',
-      payload,
-    ),
+    api.post<LoginResult>('/system/auth/login', payload),
 
   logout: () => api.post<void>('/system/auth/logout'),
 
   /** 当前登录人的资料与**权限键集合**（权限键见 src/config/permissions.ts） */
   profile: () =>
-    api.get<{ username: string; displayName?: string; roles: string[]; permissions: string[] }>(
-      '/system/auth/profile',
-    ),
+    api.get<{
+      username: string
+      displayName?: string
+      roles: string[]
+      permissions: string[]
+      mustChangePassword?: boolean
+    }>('/system/auth/profile'),
 
   /** 修改自己的密码（改密成功后后端应使旧 token 失效） */
   changePassword: (payload: { oldPassword: string; newPassword: string }) =>
