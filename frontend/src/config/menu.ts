@@ -348,9 +348,7 @@ export const menuTree: MenuNode[] = [
           title: '数据库管理',
           icon: ServerOutline,
           status: 'ready',
-          // 与「条件单/委托单/成交回报/策略日志」四个业务表页面的分工：
-          // 这里是 DBA 视角（通用结构 + 临时查询），那边是业务视角（带筛选与动作）。
-          desc: 'qianlong_cloud 库的表结构浏览与只读 SQL 查询（DBA 视角）。业务表的日常查询请走对应的条件单 / 委托单 / 成交回报 / 策略日志页面。',
+          desc: 'qianlong_cloud 库的表结构浏览与只读 SQL 查询。',
           refs: [
             { label: '连接', value: '192.168.1.136:3306 / qianlong_cloud / 用户 qianlong_cloud（MySQL 8.0.45）' },
             { label: '表清单', value: 'T_Conditional、T_Conditional_his、T_Order、T_Order_his、T_Trade、T_Trade_his、T_User、T_UserLog、T_StrategyLog + 视图 V_Conditional' },

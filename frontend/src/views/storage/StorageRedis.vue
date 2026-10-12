@@ -428,20 +428,6 @@ function deleteKey(row: RedisKeyInfo) {
   <div>
     <QueryErrorAlert v-if="keyError" :message="keyError" :loading="keyLoading" @retry="reloadKeys" />
 
-    <!-- 本页定位说明 -->
-    <n-alert class="page-card" type="info" :bordered="false" size="small">
-      <template #header>这一页和业务页有什么不同</template>
-      <div class="fact">
-        策略服务器 / 委托服务器 / 用户账号等页面是按<b>业务语义</b>展示的（过滤掉了无关的键）。
-        本页是<b>原始浏览器</b>：<b>所有</b>键都能看到，包括没有业务页面覆盖的，
-        例如现场仅有的两个带 TTL 的键 <code>strategy_server_lock_0</code> /
-        <code>strategy_server_lock_1001</code>，以及垃圾键 <code>a</code>。
-        <br />
-        ⚠️ 为避免拖垮实例，扫描一律用 <code>SCAN</code> 且<b>强制条数上限</b> ——
-        现场 137 db0 有 <b>457 万</b>条 stream，全量扫描会出事。
-      </div>
-    </n-alert>
-
     <!-- 实例与 DB 选择 -->
     <n-card class="page-card" size="small" :bordered="false">
       <div class="toolbar">
@@ -830,12 +816,6 @@ function deleteKey(row: RedisKeyInfo) {
   color: var(--text-muted);
 }
 
-.fact {
-  font-size: 12.5px;
-  line-height: 1.9;
-}
-
-.fact code,
 .detail-note code {
   padding: 1px 5px;
   border-radius: 4px;
@@ -844,7 +824,6 @@ function deleteKey(row: RedisKeyInfo) {
   font-size: 12px;
 }
 
-.fact b,
 .detail-note b {
   color: var(--warning);
 }

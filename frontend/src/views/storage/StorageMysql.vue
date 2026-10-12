@@ -514,18 +514,6 @@ function useSample(s: string) {
   <div>
     <QueryErrorAlert v-if="tableError" :message="tableError" :loading="tableLoading" @retry="() => loadTables()" />
 
-    <n-alert class="page-card" type="info" :bordered="false" size="small">
-      <template #header>这一页和业务页有什么不同</template>
-      <div class="fact">
-        条件单 / 委托 / 成交 / 账号 / 日志都有各自的<b>业务页面</b>（按业务语义做好筛选与展示）。
-        本页是<b>库表浏览器</b>：看表清单、<b>表结构（字段/注释/索引/DDL）</b>，
-        并能手工跑一条<b>只读 SQL</b> 查任意数据 —— 包括还没有业务页面的表。
-        <br />
-        ⚠️ <code>information_schema.TABLE_ROWS</code> <b>不准</b>：实测 <code>T_StrategyLog</code>
-        报 16566、真实 <code>COUNT</code> 是 17430。页面两列都显示，差异会标黄。
-      </div>
-    </n-alert>
-
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>
         <StatCard label="表 / 视图" :value="summary.total" suffix="个" :icon="GridOutline" :color="accent" hint="qianlong_cloud" />
@@ -826,12 +814,6 @@ function useSample(s: string) {
   margin-bottom: 14px;
 }
 
-.fact {
-  font-size: 12.5px;
-  line-height: 1.9;
-}
-
-.fact code,
 .json-head code,
 .detail-note code {
   padding: 1px 5px;
@@ -841,7 +823,6 @@ function useSample(s: string) {
   font-size: 12px;
 }
 
-.fact b,
 .detail-note b {
   color: var(--warning);
 }
