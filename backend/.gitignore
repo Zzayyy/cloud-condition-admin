@@ -1,0 +1,28 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# 验证脚本的临时产物
+scripts/__pycache__/
+*.pyc
+
+# 审计导出文件（落在系统临时目录，但以防有人改成项目内）
+*.csv
+
+# 日志
+logs/
+*.log
+
+# 构建产物
+build/
+out/

@@ -1,0 +1,85 @@
+server:
+  # 与前端 Vite 代理的 VITE_API_BASE_URL=/api 对齐：前端发 /api/system/users，
+  # 这里如果不再加 /api 前缀就会 404。context-path 让 Controller 里只写 /system/users。
+  port: 8000
+  servlet:
+    context-path: /api
+    encoding:
+      charset: UTF-8
+      force: true
+  # 管理端在 Nginx 之后，务必让容器/网关如实回传真实 IP，否则审计里的 IP 全是网关地址
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: cloud-condition-admin-backend
+
+  datasource:
+    url: jdbc:mysql://192.168.1.136:3306/qianlong_cloud?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    username: qianlong_cloud
+    password: Qianlong@2026
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: adminHikari
+      minimum-idle: 5
+      maximum-pool-size: 20
+      connection-timeout: 10000
+      # 注意：库里 T_UserLog 有 19 万行、T_StrategyLog 1.6 万行。
+      # 本模块只查 T_Admin* 表，但将来接业务表页面时这些超时必须留着。
+      max-lifetime: 1200000
+
+  jackson:
+    default-property-inclusion: always
+    time-zone: Asia/Shanghai
+
+  threads:
+    virtual:
+      # JDK 21 虚拟线程：后台管理是 IO 密集（查库为主），虚拟线程能显著提高并发下的吞吐，
+      # 且不需要调线程池参数。本项目没有 ThreadLocal 依赖（Sa-Token 用 SaStorage 抽象）。
+      enabled: true
+
+mybatis-plus:
+  configuration:
+    # ⚠️ 这两个开关必须同时关掉，原因见 README「踩坑记录」：
+    # 本模块的表沿用了前端的驼峰列名（lastLoginIP / loginIP / permissionKey ...），
+    # 而 MyBatis-Plus 默认会把驼峰字段名转成下划线列名 ——
+    #   lastLoginIP → last_login_i_p  ← 连续大写会被逐字符拆开，生成一个不存在的列
+    # 关掉 table-underline 后，字段名即列名，与 DDL 严格一致，不存在猜测。
+    map-underscore-to-camel-case: false
+    # 打印慢 SQL 便于运维排查；开发期可改成 StdOutImpl 看完整语句
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      table-underline: false
+      id-type: auto
+      logic-delete-field: null
+
+sa-token:
+  # token 名称：前端 axios 拦截器固定发 Authorization: Bearer <token>
+  token-name: Authorization
+  # token 前缀：与前端 `Bearer ${token}` 对应
+  token-prefix: Bearer
+  # 有效期 8 小时（管理端一个工作日），-1 表示永不过期（这里不采用）
+  timeout: 28800
+  # 最低活跃频率 -1：不做「多久没操作就失效」，避免运维开着页面看行情时被踢
+  active-timeout: -1
+  # 允许同一账号多端登录（运维常在跳板机与本地同时开）
+  is-concurrent: true
+  # 多端登录时共用一个 token（便于停用时一次性踢掉全部会话）
+  is-share: true
+  # 从请求头读取（不用 cookie：前后端分离，且避免 CSRF）
+  is-read-cookie: false
+  is-read-header: true
+  token-style: uuid
+  # 关闭控制台 banner，日志干净些
+  is-print: false
+
+logging:
+  level:
+    root: INFO
+    com.qianlong.cloud.admin: DEBUG
+    # 打开后可看到每次权限校验查库的 SQL
+    com.qianlong.cloud.admin.mapper: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"

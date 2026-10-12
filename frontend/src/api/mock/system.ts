@@ -412,12 +412,22 @@ const AUDIT_LOGS = buildAuditLogs()
 
 /* ------------------------------ 密码策略 ------------------------------ */
 
+/**
+ * 演示态密码策略。
+ *
+ * ⚠️ 必须与后端 `T_AdminPasswordPolicy` 的实际取值保持一致，
+ * 否则「演示态能建、真实态被拒」（或反过来）会让排查方向完全跑偏。
+ *
+ * 2026-10-12 按需求方要求放宽复杂度：只保留长度 ≥ 6，
+ * 不再要求大小写 / 数字 / 符号。「密码不得与登录名相同」是固定规则，不在此表里。
+ * 锁定与历史密码保留 —— 那是防暴力破解的手段，与密码复杂度无关。
+ */
 let POLICY: PasswordPolicy = {
-  minLength: 10,
-  requireUpper: true,
-  requireLower: true,
-  requireDigit: true,
-  requireSymbol: true,
+  minLength: 6,
+  requireUpper: false,
+  requireLower: false,
+  requireDigit: false,
+  requireSymbol: false,
   maxFailedAttempts: 5,
   lockMinutes: 30,
   expireDays: 90,
