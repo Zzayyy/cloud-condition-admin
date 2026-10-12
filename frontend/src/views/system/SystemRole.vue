@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import {
   NAlert,
   NButton,
@@ -21,8 +21,6 @@ import {
 } from 'naive-ui'
 import {
   AddOutline,
-  CheckmarkCircleOutline,
-  CloseOutline,
   CreateOutline,
   KeyOutline,
   LockClosedOutline,
@@ -33,7 +31,6 @@ import {
   ShieldCheckmarkOutline,
   StarOutline,
   TrashOutline,
-  WarningOutline,
 } from '@vicons/ionicons5'
 
 import PermissionTree from '@/components/PermissionTree.vue'
@@ -127,11 +124,6 @@ function isWildcardRole(role: AdminRole | null | undefined): boolean {
   return !!role && role.permissions.includes(PERMISSION_WILDCARD)
 }
 
-function permissionCountText(role: AdminRole): string {
-  if (isWildcardRole(role)) return '全部（通配符 *）'
-  return `${role.permissions.length} 个`
-}
-
 /* ------------------------------ 汇总 ------------------------------ */
 
 const summary = computed(() => {
@@ -146,52 +138,15 @@ const summary = computed(() => {
   }
 })
 
-/* ------------------------------ 选中角色 + 权限草稿 ------------------------------ */
+/* ------------------------------ 权限草稿（编辑器用） ------------------------------ */
 
-const activeRoleId = ref<number | null>(null)
-const activeRole = computed(() => roles.value.find((role) => role.id === activeRoleId.value) ?? null)
-
-/** 右侧权限树的草稿集合：改动只落到这里，点「保存权限」才写回角色 */
-const draftPermissions = ref<string[]>([])
-
-function normalizeKeys(keys: readonly string[]): string[] {
-  return [...new Set(keys)].sort()
-}
-
-function sameKeys(a: readonly string[], b: readonly string[]): boolean {
-  const left = normalizeKeys(a)
-  const right = normalizeKeys(b)
-  return left.length === right.length && left.every((key, index) => key === right[index])
-}
-
-watch(
-  activeRole,
-  (role) => {
-    draftPermissions.value = role && !isWildcardRole(role) ? [...role.permissions] : []
-  },
-  { immediate: true },
-)
-
-// 列表变化时保证总有选中项：优先选内置角色，避免右侧一片空白
-watch(roles, (list) => {
-  if (!list.length) {
-    activeRoleId.value = null
-    return
-  }
-  if (activeRoleId.value === null || !list.some((role) => role.id === activeRoleId.value)) {
-    activeRoleId.value = (list.find((role) => role.builtin) ?? list[0]).id
-  }
-})
-
-const permissionsDirty = computed(() => {
-  const role = activeRole.value
-  if (!role || isWildcardRole(role)) return false
-  return !sameKeys(draftPermissions.value, role.permissions)
-})
-
-function selectRole(role: AdminRole) {
-  activeRoleId.value = role.id
-}
+/**
+ * 权限编辑**只在「编辑角色」抽屉里做**。
+ *
+ * 此前页面右侧还常驻一块「权限分配」面板，与抽屉里的权限树功能重复
+ * （两处都能改同一份 permissions），且把 7 列的角色表格挤到横向滚动。
+ * 现已删除右侧面板：列表保持全宽，改权限一律走操作列的「编辑」抽屉。
+ */
 
 /* ------------------------------ 本地写入（演示态） ------------------------------ */
 
@@ -256,47 +211,6 @@ function reload() {
 
 onMounted(reload)
 
-/* ------------------------------ 右侧：保存权限 ------------------------------ */
-
-async function savePermissions() {
-  const role = activeRole.value
-  if (!role || isWildcardRole(role) || !canManage.value) return
-  if (!draftPermissions.value.length) {
-    message.error('至少选择一个权限点：一个权限都没有的角色，登录后什么都看不到')
-    return
-  }
-
-  const payload: AdminRolePayload = {
-    code: role.code,
-    name: role.name,
-    desc: role.desc,
-    permissions: [...draftPermissions.value],
-  }
-
-  saving.value = true
-  try {
-    if (usingMock.value) {
-      applyLocalUpdate(role.id, payload)
-      message.success('权限已保存（演示态：仅更新本地列表，未调用真实接口）')
-    } else {
-      await adminApi.updateRole(role.id, payload)
-      message.success(`已保存「${role.name}」的权限`)
-      reload()
-    }
-  } catch (err) {
-    // 真实态失败绝不伪造成功
-    message.error(`保存权限失败：${errText(err)}`)
-  } finally {
-    saving.value = false
-  }
-}
-
-function resetDraft() {
-  const role = activeRole.value
-  if (!role) return
-  draftPermissions.value = [...role.permissions]
-}
-
 /* ------------------------------ 删除角色 ------------------------------ */
 
 async function removeRole(role: AdminRole) {
@@ -316,7 +230,6 @@ async function removeRole(role: AdminRole) {
       message.success(`已删除角色「${role.name}」`)
       reload()
     }
-    if (activeRoleId.value === role.id) activeRoleId.value = null
   } catch (err) {
     message.error(`删除角色失败：${errText(err)}`)
   } finally {
@@ -332,12 +245,25 @@ const editingBuiltin = ref(false)
 const form = reactive({ code: '', name: '', desc: '' })
 const formPermissions = ref<string[]>([])
 
-const editingWildcard = computed(() => formPermissions.value.includes(PERMISSION_WILDCARD))
+/**
+ * 正在编辑的角色是否为通配符角色。
+ *
+ * ⚠️ **不能用 `formPermissions.value.includes('*')` 判断。**
+ * `openEdit` 对通配符角色会把草稿置空（树里只有真实键，`*` 不在树里），
+ * 于是那个判断恒为 `false`，连锁造成两个错误：
+ *   1. 编辑超管角色时不显示「这是通配符角色」的提示，而是渲染一棵空权限树；
+ *   2. 提交时走 `[...formPermissions]` 分支 —— 若用户顺手勾了几项再保存，
+ *      `*` 会被替换成那几个具体键，**超管被静默降权**（后端若也照此落库，
+ *      等于后台再也进不去）。
+ * 所以这里必须独立记录「被编辑的角色本身是不是通配符」，与草稿无关。
+ */
+const editingWildcard = ref(false)
 const isCreating = computed(() => editingId.value === null)
 
 function openCreate() {
   editingId.value = null
   editingBuiltin.value = false
+  editingWildcard.value = false
   form.code = ''
   form.name = ''
   form.desc = ''
@@ -348,10 +274,11 @@ function openCreate() {
 function openEdit(role: AdminRole) {
   editingId.value = role.id
   editingBuiltin.value = role.builtin
+  editingWildcard.value = isWildcardRole(role)
   form.code = role.code
   form.name = role.name
   form.desc = role.desc ?? ''
-  // 通配符角色不走树（树里只有真实键），草稿保持空，提交时不动它的 permissions
+  // 通配符角色不走树（树里只有真实键），草稿保持空，提交时原样保留 `*`
   formPermissions.value = isWildcardRole(role) ? [] : [...role.permissions]
   showForm.value = true
 }
@@ -394,19 +321,16 @@ async function submitForm() {
   try {
     if (usingMock.value) {
       if (creating) {
-        const row = applyLocalCreate(payload)
-        activeRoleId.value = row.id
+        applyLocalCreate(payload)
         message.success('角色已新建（演示态：仅更新本地列表，未调用真实接口）')
       } else if (target) {
         applyLocalUpdate(target.id, payload)
-        activeRoleId.value = target.id
         message.success('角色已保存（演示态：仅更新本地列表，未调用真实接口）')
       }
     } else if (creating) {
-      const created = await adminApi.createRole(payload)
+      await adminApi.createRole(payload)
       message.success(`已新建角色「${payload.name}」`)
       reload()
-      if (created?.id != null) activeRoleId.value = created.id
     } else if (target) {
       await adminApi.updateRole(target.id, payload)
       message.success(`已保存角色「${target.name}」`)
@@ -432,7 +356,8 @@ const columns: DataTableColumns<AdminRole> = [
       h('div', { class: 'role-name-cell' }, [
         h(
           NButton,
-          { text: true, type: 'primary', size: 'small', onClick: () => selectRole(row) },
+          // 角色名直接打开编辑抽屉（原先只是「选中」给右侧面板用，面板已删）
+          { text: true, type: 'primary', size: 'small', onClick: () => openEdit(row) },
           { default: () => row.name },
         ),
         row.builtin
@@ -569,14 +494,6 @@ const columns: DataTableColumns<AdminRole> = [
     },
   },
 ]
-
-function rowProps(row: AdminRole) {
-  return {
-    class: row.id === activeRoleId.value ? 'role-row--active' : '',
-    style: 'cursor: pointer',
-    onClick: () => selectRole(row),
-  }
-}
 </script>
 
 <template>
@@ -671,105 +588,14 @@ function rowProps(row: AdminRole) {
           :single-line="false"
           size="small"
           :row-key="(row: AdminRole) => row.id"
-          :row-props="rowProps"
           :scroll-x="1000"
           :pagination="false"
         />
 
         <div class="table-foot">
           共 {{ filteredRoles.length }} 个角色<template v-if="keyword.trim()">（已按关键词过滤）</template>。
-          点任意一行即可在右侧查看 / 调整它的权限。
+          点操作列的「编辑」即可调整它的基本信息与权限。
         </div>
-      </n-card>
-
-      <!-- 右：权限分配 -->
-      <n-card class="page-card role-perm-card" size="small" :bordered="false">
-        <template #header>
-          <span class="section-title">
-            <n-icon :component="KeyOutline" :color="accent" :size="17" />
-            权限分配
-          </span>
-        </template>
-
-        <template v-if="activeRole">
-          <div class="role-head">
-            <div class="role-head-main">
-              <span class="role-head-name">{{ activeRole.name }}</span>
-              <code class="role-head-code">{{ activeRole.code }}</code>
-              <n-tag v-if="activeRole.builtin" size="tiny" round :bordered="false" type="info">
-                <template #icon>
-                  <n-icon :component="LockClosedOutline" />
-                </template>
-                内置角色
-              </n-tag>
-              <n-tag v-else size="tiny" round :bordered="false" type="success">自定义角色</n-tag>
-            </div>
-            <div class="role-head-meta">
-              <span>引用人数：<b>{{ activeRole.userCount }}</b></span>
-              <span>权限点：<b>{{ permissionCountText(activeRole) }}</b></span>
-              <span>更新：{{ shortDateTime(activeRole.updatedAt) }}</span>
-            </div>
-            <div v-if="activeRole.desc" class="role-head-desc">{{ activeRole.desc }}</div>
-          </div>
-
-          <n-alert v-if="isWildcardRole(activeRole)" type="warning" :bordered="false" size="small">
-            该角色权限是通配符 <code>*</code> —— 拥有<b>全部</b>权限，菜单新增后自动覆盖，
-            所以这里不需要（也不允许）逐个勾选。要收紧它的权限，请先把 <code>permissions</code>
-            换成具体权限键；但<b>删掉超管角色会让后台进不去</b>。
-          </n-alert>
-
-          <template v-else>
-            <n-alert v-if="!canManage" type="warning" :bordered="false" size="small">
-              当前身份没有 <code>action:system-role:manage</code> 权限，权限树为只读。
-            </n-alert>
-
-            <PermissionTree
-              v-model:permissions="draftPermissions"
-              :disabled="!canManage"
-              :color="accent"
-            />
-
-            <div class="perm-actions">
-              <n-button
-                size="small"
-                type="primary"
-                :loading="saving"
-                :disabled="!canManage || !permissionsDirty"
-                @click="savePermissions"
-              >
-                <template #icon>
-                  <n-icon :component="CheckmarkCircleOutline" />
-                </template>
-                保存权限
-              </n-button>
-              <n-button size="small" :disabled="!permissionsDirty" @click="resetDraft">
-                <template #icon>
-                  <n-icon :component="CloseOutline" />
-                </template>
-                还原
-              </n-button>
-              <span v-if="permissionsDirty" class="dirty-hint">
-                <n-icon :component="WarningOutline" />
-                有未保存的改动
-              </span>
-              <span v-else class="text-muted dirty-hint">权限与已保存的一致</span>
-            </div>
-
-            <div class="role-foot-actions">
-              <n-button size="small" :disabled="!canManage" @click="openEdit(activeRole)">
-                <template #icon>
-                  <n-icon :component="CreateOutline" />
-                </template>
-                编辑基本信息
-              </n-button>
-            </div>
-          </template>
-        </template>
-
-        <n-alert v-else type="info" :bordered="false" size="small">
-          <template #header>还没有选中角色</template>
-          在左侧角色列表里点一行，即可查看并调整它的菜单权限与操作权限。
-        </n-alert>
       </n-card>
     </div>
 
@@ -862,20 +688,18 @@ function rowProps(row: AdminRole) {
   margin-bottom: 14px;
 }
 
+/**
+ * 角色列表占满整行。
+ *
+ * 原先这里是「左列表 + 右权限分配」的两栏布局（`flex: 3 1 680px` /
+ * `flex: 2 1 470px`），但右侧面板与编辑抽屉功能重复，已删除。
+ * 列表 7 列合计约 986px，独占整行后不再需要横向滚动。
+ */
 .role-layout {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
   margin-top: 16px;
 }
 
 .role-list-card {
-  flex: 1 1 520px;
-  min-width: 0;
-}
-
-.role-perm-card {
-  flex: 1 1 460px;
   min-width: 0;
 }
 
@@ -901,69 +725,6 @@ function rowProps(row: AdminRole) {
   align-items: center;
 }
 
-.role-head {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-
-.role-head-main {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.role-head-name {
-  font-size: 15px;
-  font-weight: 650;
-  color: var(--text-primary);
-}
-
-.role-head-code {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--bg-code);
-  font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.role-head-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.role-head-desc {
-  font-size: 12.5px;
-  line-height: 1.75;
-  color: var(--text-secondary);
-}
-
-.perm-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  margin-top: 12px;
-}
-
-.role-foot-actions {
-  margin-top: 12px;
-}
-
-.dirty-hint {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  font-size: 12.5px;
-  color: var(--warning);
-}
-
 .field-hint {
   margin: -8px 0 14px;
   font-size: 11.5px;
@@ -984,14 +745,5 @@ function rowProps(row: AdminRole) {
   display: flex;
   gap: 10px;
   justify-content: flex-end;
-}
-
-/*
- * 选中行高亮。选择器带两个类 + 元素，避免被 naive-ui 的
- * `.n-data-table .n-data-table-td`（0-2-0）静默盖掉。
- * 只改背景，不碰固定列的 ::before / ::after（README 第 3 条踩坑）。
- */
-.role-table :deep(.n-data-table-tr.role-row--active td) {
-  background: var(--bg-active);
 }
 </style>

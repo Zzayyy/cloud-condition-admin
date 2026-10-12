@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, h, ref, type VNodeChild } from 'vue'
-import { NAlert, NButton, NIcon, NTag, NTooltip, NTree, useDialog, type TreeOption } from 'naive-ui'
+import { NButton, NIcon, NTag, NTooltip, NTree, useDialog, type TreeOption } from 'naive-ui'
 import {
   ChevronDownOutline,
   ChevronUpOutline,
+  HelpCircleOutline,
   KeyOutline,
   LayersOutline,
   WarningOutline,
@@ -413,36 +414,36 @@ function renderSuffix(info: { option: TreeOption }): VNodeChild {
           </template>
           {{ expandedKeys.length ? '全部收起' : '全部展开' }}
         </n-button>
+        <n-tooltip trigger="hover" :delay="150" style="max-width: 420px">
+          <template #trigger>
+            <n-icon :component="HelpCircleOutline" :size="16" class="perm-help" />
+          </template>
+          <!--
+            tooltip 内容是挂到 body 上的 portal，scoped 样式够不到它，
+            而本项目的约定是禁用 :global()（见下方样式注释），
+            所以这里用行内样式控制排版。
+          -->
+          <div style="display: grid; gap: 8px; font-size: 12.5px; line-height: 1.75">
+            <div>
+              只有<b>叶子上的勾选框</b>能改权限；分组行与页面行没有勾选框，
+              批量改动用行尾的<b>显式按钮</b> —— 避免「勾一个名字，却授出看不见的深层权限」。
+            </div>
+            <div>
+              勾<b>「页面访问（菜单权限）」</b>只给 <code>menu:&lt;页面&gt;</code>：
+              能进页面，但页里的写操作仍点不动。
+            </div>
+            <div>
+              后端<b>不做父级隐式放行</b>：只有 <code>menu:*</code> 不会自动获得
+              <code>action:*</code>，所以这里<b>显示勾上 = 真的有权限</b>。
+            </div>
+            <div>
+              标<b>高危</b>的是删除 / 下发协议 / 改账号与权限一类操作；
+              批量勾选若会授出高危权限，会弹窗<b>逐条列出键名</b>并二次确认。
+            </div>
+          </div>
+        </n-tooltip>
       </div>
     </div>
-
-    <n-alert class="perm-hint" type="info" :bordered="false" size="small">
-      <template #header>勾选规则（与后端判定一致，请先读完再勾）</template>
-      <ul class="perm-hint-list">
-        <li>
-          只有叶子上的<b>勾选框</b>能改权限；<b>分组行与页面行没有勾选框</b>（灰的），
-          批量改动用行尾的<b>显式按钮</b> —— 这样不会出现「勾一个名字，却授出看不见的深层权限」。
-        </li>
-        <li>
-          勾<b>「页面访问（菜单权限）」</b>只给 <code>menu:&lt;页面&gt;</code>：
-          能进页面，但页里的写操作仍然点不动。
-        </li>
-        <li>
-          页面行尾的<b>「勾上本页全部权限」</b>按钮会一次性勾上该页的
-          <code>menu:*</code> 与<b>全部</b> <code>action:*</code>。
-          这只是给运维省事的<b>界面批量勾选</b>，不是运行时放行。
-        </li>
-        <li>
-          后端<b>不做父级隐式放行</b>：只有 <code>menu:*</code> 绝不会自动获得
-          <code>action:*</code>（见 <code>hasPermission</code>）。
-          所以这里<b>显示勾上 = 真的有权限</b>。
-        </li>
-        <li>
-          标<b>高危</b>的是删除 / 下发协议 / 改账号与权限一类操作；
-          批量勾选时若会授出高危权限，会弹窗<b>逐条列出键名</b>并二次确认。
-        </li>
-      </ul>
-    </n-alert>
 
     <div class="perm-tree-scroll">
       <n-tree
@@ -494,11 +495,14 @@ function renderSuffix(info: { option: TreeOption }): VNodeChild {
   align-items: center;
 }
 
-.perm-hint-list {
-  margin: 0;
-  padding-left: 18px;
-  font-size: 12.5px;
-  line-height: 1.85;
+/* 说明改成悬停图标：原先是一整块常驻 alert，太占纵向空间 */
+.perm-help {
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.perm-help:hover {
+  color: var(--text-secondary);
 }
 
 .perm-tree-scroll {
