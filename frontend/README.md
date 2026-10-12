@@ -6,8 +6,8 @@
 
 > 当前阶段：**前端页面开发中，后端未动**。
 > 已实现「总览」与「业务数据」下的 4 个页面，其余为占位页。
-> 因为没有后端，页面默认走**演示数据**（见下方「演示数据机制」），
-> 界面上会明确标出「当前为演示数据」，不会跟真实数据混淆。
+> 因为没有后端，页面默认走**演示数据**（见下方「演示数据机制」）。
+> > 演示数据横幅已于 2026-10-15 按要求移除，界面上不再标注。
 
 ---
 
@@ -89,7 +89,14 @@
    `[{value:0},{value:0}]` 长度是 2，会画出一个没有意义的空环
    （已修：`BaseChart.hasData()` 现在要求至少一个非零值）。
 
-演示数据在界面上有**明确的黄色横幅**标注，并写明原因，不会被误认为真实数据。
+> **2026-10-15：演示数据横幅已移除。**
+> 原先演示态会在每个页面顶部显示黄色 `MockDataAlert` 横幅
+> （「当前为演示数据 / 已开启演示数据开关 VITE_USE_MOCK」）。
+> 因需求方要求「影响美观」，该组件已删除，16 个页面的引用与随之无用的
+> `isMock` / `mockReason` 变量一并清理。
+> **注意：判断取数分支仍必须用 `usingMock`**（见下方说明），这部分逻辑没有变；
+> 只是不再向用户展示横幅。`isMock` 仍保留给少数页面内部的事实判断使用。
+
 数据是按现场真实表/键结构造的（`strategy-srv`、`T_Conditional`、`T_StrategyLog`、
 `traderserver`、`T_Order`、`T_Trade`），但**数值是编的**。
 后端接通后，删掉 `src/api/mock/` 目录与调用处的 `mock` 参数即可。
@@ -407,8 +414,10 @@ npm run dev          # http://localhost:5173
 > 数据未到手时退回**构建期常量** `USE_MOCK`（没有时序问题），
 > 到手后以 `isMock` 为准（还能识别「自动降级到演示数据」的中间态）。
 > **注意分工**：`usingMock` 用于**分支判定**（该调接口还是该改本地演示数据）；
-> 而 `isMock` 继续用于**事实展示**（「当前为演示数据」横幅、演示密码按钮的显隐）——
-> 横幅本来就该等数据到手后才显示，不要跟着改成 `usingMock`。
+> 而 `isMock` 用于**事实展示**（页面内的演示态说明、演示密码按钮的显隐）——
+> 这类判断本来就该等数据到手后才成立，不要跟着改成 `usingMock`。
+> > 演示数据横幅（`MockDataAlert`）已于 2026-10-15 移除，
+> > 但 `isMock` 的其余事实展示用途不受影响。
 >
 > **6. 模板里不要写 Markdown 语法。**
 > `<div>**重点**</div>` 不会加粗，而是**把两个星号原样显示出来**。
@@ -473,7 +482,7 @@ frontend/
 │   │   ├── app.ts         # 主题、侧边栏折叠
 │   │   ├── auth.ts        # ★ 当前会话与权限判定（登录/登出、登录态持久化）
 │   │   └── tabs.ts        # 多页签（含右键菜单的关闭其他/左/右/全部）
-│   ├── components/        # StatCard / BaseChart / MockDataAlert / QueryErrorAlert / PermissionTree / PagePlaceholder
+│   ├── components/        # StatCard / BaseChart / QueryErrorAlert / PermissionTree / PagePlaceholder
 │   ├── views/
 │   │   ├── dashboard/DashboardView.vue
 │   │   ├── strategy/

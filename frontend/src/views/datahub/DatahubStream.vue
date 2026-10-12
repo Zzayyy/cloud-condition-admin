@@ -39,7 +39,6 @@ import {
 } from '@vicons/ionicons5'
 
 import BaseChart from '@/components/BaseChart.vue'
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { datahubApi, monitorApi } from '@/api/endpoints'
@@ -76,7 +75,6 @@ const {
   loading,
   error,
   isMock,
-  mockReason,
   load,
 } = useResource(
   (params: Record<string, unknown>) => datahubApi.listStreams(params),
@@ -551,7 +549,6 @@ const traceHint = computed(() => {
 <template>
   <div>
     <QueryErrorAlert v-if="error" :message="error" :loading="loading" @retry="reload" />
-    <MockDataAlert v-if="isMock" :reason="mockReason" />
 
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>

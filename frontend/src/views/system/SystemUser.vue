@@ -44,7 +44,6 @@ import {
   TrashOutline,
 } from '@vicons/ionicons5'
 
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { adminApi } from '@/api/endpoints'
@@ -103,7 +102,7 @@ const pageSize = ref(10)
  * `usingMock` 在数据未到手时退回构建期常量 `USE_MOCK`，避开这个时序窗口；
  * 数据到手后以 `isMock` 为准（还能识别「自动降级」中间态）。
  *
- * `isMock` 仅保留给**「当前展示的是不是演示数据」这类事实展示**（如 `MockDataAlert` 横幅）。
+ * `isMock` 仅保留给**「当前展示的是不是演示数据」这类事实展示**（如页面上的演示态说明）。
  */
 const {
   data: usersData,
@@ -111,7 +110,6 @@ const {
   error,
   isMock,
   usingMock,
-  mockReason,
   load: loadUsers,
 } = useResource(
   (params: Record<string, unknown>) => adminApi.listUsers(params),
@@ -945,7 +943,6 @@ async function submitReset() {
       :loading="rolesLoading"
       @retry="loadRoles(undefined)"
     />
-    <MockDataAlert v-if="isMock" :reason="mockReason" />
 
     <n-alert v-if="partialMockNote" class="page-card" type="warning" :bordered="false" size="small">
       <template #header>部分数据源已降级到演示数据</template>

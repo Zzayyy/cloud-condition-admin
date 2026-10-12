@@ -38,7 +38,6 @@ import {
 } from '@vicons/ionicons5'
 
 import BaseChart from '@/components/BaseChart.vue'
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { storageApi } from '@/api/endpoints'
@@ -79,7 +78,6 @@ const {
   loading: tableLoading,
   error: tableError,
   isMock,
-  mockReason,
   load: loadTables,
 } = useResource(
   () => storageApi.listTables(DATABASE),
@@ -515,7 +513,6 @@ function useSample(s: string) {
 <template>
   <div>
     <QueryErrorAlert v-if="tableError" :message="tableError" :loading="tableLoading" @retry="() => loadTables()" />
-    <MockDataAlert v-if="isMock" :reason="mockReason" />
 
     <n-alert class="page-card" type="info" :bordered="false" size="small">
       <template #header>这一页和业务页有什么不同</template>

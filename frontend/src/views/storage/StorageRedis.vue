@@ -39,7 +39,6 @@ import {
 } from '@vicons/ionicons5'
 
 import BaseChart from '@/components/BaseChart.vue'
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { storageApi } from '@/api/endpoints'
@@ -122,7 +121,6 @@ const {
   loading: keyLoading,
   error: keyError,
   isMock,
-  mockReason,
   load: loadKeys,
 } = useResource(
   (params: { instanceId: string; db: number } & Record<string, unknown>) => storageApi.scanKeys(params.instanceId, params.db, params),
@@ -429,7 +427,6 @@ function deleteKey(row: RedisKeyInfo) {
 <template>
   <div>
     <QueryErrorAlert v-if="keyError" :message="keyError" :loading="keyLoading" @retry="reloadKeys" />
-    <MockDataAlert v-if="isMock" :reason="mockReason" />
 
     <!-- 本页定位说明 -->
     <n-alert class="page-card" type="info" :bordered="false" size="small">

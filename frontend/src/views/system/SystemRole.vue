@@ -36,7 +36,6 @@ import {
   WarningOutline,
 } from '@vicons/ionicons5'
 
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import PermissionTree from '@/components/PermissionTree.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
@@ -91,7 +90,7 @@ const totalPermissionKeys = allPermissionKeys().length
 
 /* ------------------------------ 角色列表取数 ------------------------------ */
 
-const { data, loading, error, isMock, usingMock, mockReason, load } = useResource(
+const { data, loading, error, usingMock, load } = useResource(
   () => adminApi.listRoles(),
   // 演示态返回副本：本页的写操作要就地改列表，不能污染 mock 模块里的原始数组
   { mock: () => withDelay(mockAdminApi.listRoles().map((role) => ({ ...role, permissions: [...role.permissions] }))) },
@@ -583,7 +582,6 @@ function rowProps(row: AdminRole) {
 <template>
   <div>
     <QueryErrorAlert v-if="error" :message="error" :loading="loading" @retry="reload" />
-    <MockDataAlert v-if="isMock" :reason="mockReason" />
 
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>

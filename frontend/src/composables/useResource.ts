@@ -30,8 +30,6 @@ export interface UseResourceReturn<T, P> {
    * 已实测：`load()` 后 await 前 `isMock===false`、`loading===true`、`apiCalls===0`。
    */
   usingMock: ComputedRef<boolean>
-  /** 为什么在用演示数据 */
-  mockReason: Ref<string | undefined>
   /** 是否因为后端不可达而自动降级 */
   isDegraded: Ref<boolean>
   load: (params: P) => Promise<void>
@@ -103,7 +101,6 @@ export function useResource<T, P>(
   const loading = ref(false)
   const error = ref<string>()
   const isMock = ref(false)
-  const mockReason = ref<string>()
   const isDegraded = ref(false)
   const settled = ref(false)
 
@@ -122,20 +119,17 @@ export function useResource<T, P>(
         data.value = await options.mock(params)
         isMock.value = true
         isDegraded.value = false
-        mockReason.value = '已开启演示数据开关 VITE_USE_MOCK'
         return
       }
 
       data.value = await apiCall(params)
       isMock.value = false
       isDegraded.value = false
-      mockReason.value = undefined
     } catch (err) {
       if (ALLOW_DEGRADE && options.mock && isUnreachable(err)) {
         data.value = await options.mock(params)
         isMock.value = true
         isDegraded.value = true
-        mockReason.value = describe(err)
       } else {
         error.value = describe(err)
         data.value = undefined
@@ -148,5 +142,5 @@ export function useResource<T, P>(
     }
   }
 
-  return { data, loading, error, isMock, usingMock, mockReason, isDegraded, load }
+  return { data, loading, error, isMock, usingMock, isDegraded, load }
 }

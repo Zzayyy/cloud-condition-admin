@@ -35,7 +35,6 @@ import {
 } from '@vicons/ionicons5'
 
 import BaseChart from '@/components/BaseChart.vue'
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { accountApi } from '@/api/endpoints'
@@ -74,7 +73,6 @@ const {
   loading: logLoading,
   error: logError,
   isMock,
-  mockReason,
   load: loadLogs,
 } = useResource(
   (params: Record<string, unknown>) => accountApi.listLogs(params),
@@ -345,7 +343,6 @@ function openDetail(row: UserLog) {
 <template>
   <div>
     <QueryErrorAlert v-if="logError" :message="logError" :loading="logLoading" @retry="reload" />
-    <MockDataAlert v-if="isMock" :reason="mockReason" />
 
     <!-- 关键：如实说明这三列查不到 -->
     <n-alert class="page-card" type="warning" :bordered="false" size="small">

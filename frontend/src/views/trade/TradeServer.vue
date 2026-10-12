@@ -36,7 +36,6 @@ import {
 } from '@vicons/ionicons5'
 
 import BaseChart from '@/components/BaseChart.vue'
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { tradeApi } from '@/api/endpoints'
@@ -80,7 +79,6 @@ const {
   loading: serverLoading,
   error: serverError,
   isMock: serverIsMock,
-  mockReason: serverMockReason,
   load: loadServers,
 } = useResource(
   (params: Record<string, unknown>) => tradeApi.listServers(params),
@@ -131,8 +129,6 @@ const accPageSize = ref(10)
 const {
   data: accData,
   loading: accLoading,
-  isMock: accIsMock,
-  mockReason: accMockReason,
   load: loadAssignments,
 } = useResource(
   (params: Record<string, unknown>) => tradeApi.listAssignments(params),
@@ -167,10 +163,6 @@ const serverRows = computed(() => serverData.value?.list ?? [])
 const serverTotal = computed(() => serverData.value?.total ?? 0)
 const accRows = computed(() => accData.value?.list ?? [])
 const accTotal = computed(() => accData.value?.total ?? 0)
-
-/** 页面级：任一数据源处于演示态即提示一次 */
-const isMock = computed(() => serverIsMock.value || accIsMock.value)
-const mockReason = computed(() => serverMockReason.value ?? accMockReason.value)
 
 /**
  * 已分配账号总数。
@@ -456,7 +448,6 @@ const heartbeatAge = computed(() => {
 <template>
   <div>
     <QueryErrorAlert v-if="serverError" :message="serverError" :loading="serverLoading" @retry="reloadServers" />
-    <MockDataAlert v-if="isMock" :reason="mockReason" />
 
     <!-- 汇总指标 -->
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>

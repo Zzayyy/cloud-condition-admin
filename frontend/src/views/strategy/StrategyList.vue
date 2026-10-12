@@ -41,7 +41,6 @@ import {
 } from '@vicons/ionicons5'
 
 import BaseChart from '@/components/BaseChart.vue'
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { strategyApi } from '@/api/endpoints'
@@ -68,7 +67,7 @@ const source = ref<'running' | 'history' | 'all'>('running')
 const page = ref(1)
 const pageSize = ref(10)
 
-const { data, loading, error, isMock, mockReason, load } = useResource(
+const { data, loading, error, isMock, load } = useResource(
   (params: Record<string, unknown>) => strategyApi.listConditionals(params),
   { mock: (params: Record<string, unknown>) => withDelay(mockStrategyApi.listConditionals(params)) },
 )
@@ -384,7 +383,6 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
 <template>
   <div>
     <QueryErrorAlert v-if="error" :message="error" :loading="loading" @retry="reload" />
-    <MockDataAlert v-if="isMock" :reason="mockReason" />
 
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>

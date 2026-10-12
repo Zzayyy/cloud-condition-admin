@@ -34,7 +34,6 @@ import {
 } from '@vicons/ionicons5'
 
 import BaseChart from '@/components/BaseChart.vue'
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { strategyApi } from '@/api/endpoints'
@@ -54,7 +53,7 @@ const fromIp = ref('')
 const page = ref(1)
 const pageSize = ref(15)
 
-const { data, loading, error, isMock, mockReason, load } = useResource(
+const { data, loading, error, load } = useResource(
   (params: Record<string, unknown>) => strategyApi.listLogs(params),
   { mock: (params: Record<string, unknown>) => withDelay(mockStrategyApi.listLogs(params)) },
 )
@@ -243,7 +242,6 @@ const relatedTimeline = computed(() => {
 <template>
   <div>
     <QueryErrorAlert v-if="error" :message="error" :loading="loading" @retry="reload" />
-    <MockDataAlert v-if="isMock" :reason="mockReason" />
 
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>

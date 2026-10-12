@@ -47,7 +47,6 @@ import {
 } from '@vicons/ionicons5'
 
 import BaseChart from '@/components/BaseChart.vue'
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 
@@ -186,7 +185,6 @@ const {
   error: auditError,
   isMock: auditIsMock,
   usingMock: auditUsingMock,
-  mockReason: auditMockReason,
   load: loadAudit,
 } = useResource(
   (params: Record<string, unknown>) => adminApi.listAuditLogs(params),
@@ -419,8 +417,6 @@ const {
   data: loginData,
   loading: loginLoading,
   error: loginError,
-  isMock: loginIsMock,
-  mockReason: loginMockReason,
   load: loadLogin,
 } = useResource(
   (params: Record<string, unknown>) => adminApi.listLoginLogs(params),
@@ -578,13 +574,9 @@ const failIpOption = computed(() => {
 
 const tab = ref<'audit' | 'login'>('audit')
 
-/** 当前页签对应的「加载失败 / 演示数据」状态 —— 只影响横幅，不影响取数逻辑 */
+/** 当前页签对应的「加载失败」状态 —— 只影响横幅，不影响取数逻辑 */
 const activeError = computed(() => (tab.value === 'audit' ? auditError.value : loginError.value))
 const activeLoading = computed(() => (tab.value === 'audit' ? auditLoading.value : loginLoading.value))
-const activeIsMock = computed(() => (tab.value === 'audit' ? auditIsMock.value : loginIsMock.value))
-const activeMockReason = computed(() =>
-  tab.value === 'audit' ? auditMockReason.value : loginMockReason.value,
-)
 
 function reloadActive() {
   if (tab.value === 'audit') {
@@ -959,7 +951,6 @@ function openLoginDetail(row: AdminLoginLog) {
       :loading="activeLoading"
       @retry="reloadActive"
     />
-    <MockDataAlert v-if="activeIsMock" :reason="activeMockReason" />
 
     <n-card class="page-card" size="small" :bordered="false">
       <n-tabs v-model:value="tab" type="segment" size="small">

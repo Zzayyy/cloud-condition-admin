@@ -41,7 +41,6 @@ import {
 } from '@vicons/ionicons5'
 
 import BaseChart from '@/components/BaseChart.vue'
-import MockDataAlert from '@/components/MockDataAlert.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { accountApi } from '@/api/endpoints'
@@ -80,7 +79,7 @@ const onlineFilter = ref<'all' | 'online' | 'offline'>('all')
 const page = ref(1)
 const pageSize = ref(10)
 
-const { data, loading, error, isMock, mockReason, load } = useResource(
+const { data, loading, error, isMock, load } = useResource(
   (params: Record<string, unknown>) => accountApi.listAccounts(params),
   { mock: (params: Record<string, unknown>) => withDelay(mockAccountApi.listAccounts(params)) },
 )
@@ -399,7 +398,6 @@ const shareholderColumns: DataTableColumns<Shareholder> = [
 <template>
   <div>
     <QueryErrorAlert v-if="error" :message="error" :loading="loading" @retry="reload" />
-    <MockDataAlert v-if="isMock" :reason="mockReason" />
 
     <!-- 现场数据现状提示 -->
     <n-alert class="page-card" type="warning" :bordered="false" size="small">
