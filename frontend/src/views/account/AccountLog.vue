@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import {
-  NAlert,
   NButton,
   NCard,
   NDataTable,
@@ -31,7 +30,6 @@ import {
   RefreshOutline,
   SearchOutline,
   TimeOutline,
-  WarningOutline,
 } from '@vicons/ionicons5'
 
 import BaseChart from '@/components/BaseChart.vue'
@@ -344,19 +342,6 @@ function openDetail(row: UserLog) {
   <div>
     <QueryErrorAlert v-if="logError" :message="logError" :loading="logLoading" @retry="reload" />
 
-    <!-- 关键：如实说明这三列查不到 -->
-    <n-alert class="page-card" type="warning" :bordered="false" size="small">
-      <template #header>现场数据现状：来源设备信息不可用</template>
-      <div class="fact">
-        MySQL <code>T_UserLog</code> 现场有 <b>19.1 万行</b>，但
-        <code>LogIP</code> / <code>LogMAC</code> / <code>LogOS</code> <b>三列全部为 NULL</b>（无一行例外），
-        <code>Info</code> 实测只有 <code>"user registed"</code> 一种值（原文拼写如此）。
-        <br />
-        所以本页<b>查不到来源设备</b>，这不是筛选条件的问题。
-        表格里缺值显示为 <code>NULL</code>，并可用「设备信息」筛选单独查看。
-      </div>
-    </n-alert>
-
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>
         <StatCard
@@ -634,12 +619,6 @@ function openDetail(row: UserLog) {
   margin-bottom: 14px;
 }
 
-.fact {
-  font-size: 12.5px;
-  line-height: 1.9;
-}
-
-.fact code,
 .detail-note code,
 .toolbar code {
   padding: 1px 5px;
@@ -647,10 +626,6 @@ function openDetail(row: UserLog) {
   background: var(--bg-code);
   font-family: 'JetBrains Mono', Consolas, monospace;
   font-size: 12px;
-}
-
-.fact b {
-  color: var(--warning);
 }
 
 .num {

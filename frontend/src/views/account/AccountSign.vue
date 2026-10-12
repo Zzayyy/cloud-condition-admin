@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import {
-  NAlert,
   NButton,
   NCard,
   NCode,
@@ -29,11 +28,9 @@ import {
   CodeSlashOutline,
   CopyOutline,
   CreateOutline,
-  InformationCircleOutline,
   KeyOutline,
   LockClosedOutline,
   PeopleOutline,
-  PersonOutline,
   RefreshOutline,
   SearchOutline,
   SwapHorizontalOutline,
@@ -391,16 +388,6 @@ const protocolColumns: DataTableColumns<(typeof PROTOCOL_ROWS)[number]> = [
   <div>
     <QueryErrorAlert v-if="error" :message="error" :loading="loading" @retry="reload" />
 
-    <n-alert class="page-card" type="info" :bordered="false" size="small">
-      <template #header>签署状态是怎么判断的</template>
-      <div class="fact">
-        MySQL 侧看 <code>T_User.RegProtocol</code>，Redis 侧看 <code>acc-*.regprotocal</code>。
-        <br />
-        ⚠️ 现场实测 <code>RegProtocol</code> 是 <code>binary(1)</code>，值为 <code>0x31</code>（字符 <code>'1'</code>），
-        <b>不是 0/1 数字</b> —— 所以页面按「有值即已签署」判断，不把它当数字比。
-      </div>
-    </n-alert>
-
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>
         <StatCard label="已签署" :value="summary.signed" suffix="个" :icon="CheckmarkCircleOutline" color="#2f9e5f" hint="本页口径" />
@@ -697,12 +684,6 @@ const protocolColumns: DataTableColumns<(typeof PROTOCOL_ROWS)[number]> = [
   margin-bottom: 14px;
 }
 
-.fact {
-  font-size: 12.5px;
-  line-height: 1.9;
-}
-
-.fact code,
 .json-head code,
 .detail-note code,
 .market-body code {

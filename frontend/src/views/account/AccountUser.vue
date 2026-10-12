@@ -22,7 +22,6 @@ import {
   type DataTableColumns,
 } from 'naive-ui'
 import {
-  AlertCircleOutline,
   BusinessOutline,
   CheckmarkCircleOutline,
   CloseOutline,
@@ -399,24 +398,6 @@ const shareholderColumns: DataTableColumns<Shareholder> = [
   <div>
     <QueryErrorAlert v-if="error" :message="error" :loading="loading" @retry="reload" />
 
-    <!-- 现场数据现状提示 -->
-    <n-alert class="page-card" type="warning" :bordered="false" size="small">
-      <template #header>现场数据现状（实测，非缺陷）</template>
-      <ul class="fact-list">
-        <li>
-          MySQL <code>T_User</code> 现场<b>只有 1 行</b>，而 Redis <code>acc-*</code> 键有 14 个 ——
-          多数账号只在 Redis 里，页面上用「数据来源」列标出。
-        </li>
-        <li>
-          <code>T_User.MainType</code> 实际存的是<b>渠道 AccAtt</b>（0 股票 / 6 期权），
-          与列注释「0 股票/1 股票期权/2 期货」<b>矛盾</b>，本页以实际数据为准。
-        </li>
-        <li>
-          <code>Passwd</code> 是加密串，页面只显示「已设置 / 未设置」，<b>不回显任何内容</b>。
-        </li>
-      </ul>
-    </n-alert>
-
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>
         <StatCard label="账号总数" :value="summary.total" suffix="个" :icon="PeopleOutline" :color="accent" hint="T_User ∪ acc-*" />
@@ -700,14 +681,6 @@ const shareholderColumns: DataTableColumns<Shareholder> = [
   margin-bottom: 14px;
 }
 
-.fact-list {
-  margin: 0;
-  padding-left: 18px;
-  font-size: 12.5px;
-  line-height: 1.9;
-}
-
-.fact-list code,
 .json-head code,
 .detail-note code {
   padding: 1px 5px;
