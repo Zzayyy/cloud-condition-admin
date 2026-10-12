@@ -12,6 +12,7 @@ import type {
   AuditDailyRow,
   AuditLog,
   Conditional,
+  DashboardOverview,
   DatahubNodeDetail,
   LoginDailyRow,
   LoginResult,
@@ -42,6 +43,20 @@ import type {
  * 命名按「资源 + 动作」，统一挂在 /api 下，后端可用任何语言实现。
  * 每个函数都对应一个具体的页面需求，不做无意义封装。
  */
+
+/* -------------------------------- 总览 --------------------------------- */
+
+/**
+ * 总览页。
+ *
+ * **一个接口返回整页所需的全部数据**（汇总 + 数据来源 + 近 14 天趋势）。
+ * 为什么不拆成多个接口让页面并发拉：总览是「一眼看全局」的页面，
+ * 拆开后会出现「一半卡片有数、一半转圈」的中间态，反而更难读；
+ * 而且这些汇总都在同一份数据上算，后端一次扫描更省。
+ */
+export const dashboardApi = {
+  getOverview: () => api.get<DashboardOverview>('/dashboard/overview'),
+}
 
 /* ------------------------------ 策略平台管理 ------------------------------ */
 

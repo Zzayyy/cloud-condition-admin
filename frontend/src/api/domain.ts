@@ -583,6 +583,100 @@ export interface TimeSeriesPoint {
   value: number
 }
 
+/* --------------------------------- 总览页 --------------------------------- */
+
+/**
+ * 总览页的汇总数据。
+ *
+ * **为什么单独出一个汇总接口、而不是让前端把各业务页的列表拼起来**：
+ * 列表接口都是**分页**的，前端拿列表自己数只能得到「当前这一页」，
+ * 很容易被当成全量读 —— 这类误读在运维场景里会直接导致误判
+ * （项目里已经踩过这个坑，见 README 的汇总口径说明）。
+ * 所以汇总一律由后端用一个接口给出全量口径，前端只负责展示。
+ */
+export interface DashboardSummary {
+  /** 服务器节点健康度（三类节点分开统计） */
+  nodes: {
+    /** 委托服务器：总数 / 在线数 */
+    tradeTotal: number
+    tradeOnline: number
+    /** 策略服务器：总数 / 在线数 */
+    strategyTotal: number
+    strategyOnline: number
+    /** 数据中台：总数 / 在线数 */
+    datahubTotal: number
+    datahubOnline: number
+  }
+  /** 条件单（T_Conditional） */
+  conditional: {
+    total: number
+    /** Mode = 1 运行中 */
+    running: number
+    /** Status = 1 已触发 */
+    triggered: number
+  }
+  /** 委托单（T_Order） */
+  order: {
+    total: number
+    /** 已产生成交的委托单数（与成交表按 OrderNo 关联，真实可算） */
+    filled: number
+  }
+  /** 成交回报（T_Trade） */
+  trade: {
+    total: number
+    /** 成交量合计 */
+    volume: number
+  }
+  /** 云单账号 */
+  account: {
+    total: number
+    online: number
+  }
+  /** 消息总线（Redis Stream） */
+  stream: {
+    /** stream 条数 */
+    count: number
+    /** 入口流积压条目（DataHub_req_stream 的 XLEN 合计） */
+    ingressBacklog: number
+    /** 消费组 lag 合计 */
+    consumerLag: number
+    /** pending 合计 */
+    pending: number
+    /** **没有消费组**的流数量 —— 现场 137 的入口流就是这种，最危险 */
+    groupLess: number
+  }
+}
+
+/** 数据来源的一行（总览页的「数据来源与规模」表） */
+export interface DashboardSourceRow {
+  name: string
+  kind: 'redis' | 'mysql'
+  kindLabel: string
+  scale: string
+  /** 数值口径，便于排序或后续接后端时对齐 */
+  hint: string
+}
+
+/** 近 N 天的一条趋势（条件单新增 / 委托 / 成交三条线共用） */
+export interface DashboardDailyRow {
+  /** YYYY-MM-DD */
+  date: string
+  conditional: number
+  order: number
+  trade: number
+}
+
+/** 总览页一次性返回的全部内容 */
+export interface DashboardOverview {
+  summary: DashboardSummary
+  /** 数据来源与规模 */
+  sources: DashboardSourceRow[]
+  /** 近 14 天趋势 */
+  daily: DashboardDailyRow[]
+  /** 数据生成时间（页面据此显示「快照于 …」） */
+  generatedAt: string
+}
+
 /* ---------------------------- 管理端：用户与权限 ---------------------------- */
 
 /**
