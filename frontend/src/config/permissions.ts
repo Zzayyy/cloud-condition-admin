@@ -53,14 +53,14 @@ export interface ActionPermissionDef {
 
 export const ACTION_PERMISSIONS: ActionPermissionDef[] = [
   {
-    menu: 'strategy-list',
+    menu: 'conditional',
     action: 'write',
     label: '启停 / 删除条件单',
     desc: '对应 set / remove 协议，会直接改变客户正在运行的条件单，并下发到策略平台。',
     dangerous: true,
   },
   {
-    menu: 'trade-server',
+    menu: 'server-trade',
     action: 'toggle',
     label: '启停委托服务器',
     desc: '改写 Redis 键 traderserver 里的 enable 字段。停用后该节点不再接受新账号分配。',

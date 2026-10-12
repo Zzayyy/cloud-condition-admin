@@ -94,9 +94,8 @@ const authStore = useAuthStore()
 
 const MODULE_LABEL: Record<string, string> = {
   dashboard: '总览',
-  strategy: '策略平台管理',
-  trade: '委托服务器管理',
-  datahub: '数据中台管理',
+  server: '服务器管理',
+  bizdata: '业务数据',
   account: '账户与用户',
   storage: '数据存储',
   monitor: '监控与统计',

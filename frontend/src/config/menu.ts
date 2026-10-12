@@ -1,11 +1,10 @@
 import type { Component } from 'vue'
 import {
+  AlbumsOutline,
   AnalyticsOutline,
-  BuildOutline,
   CashOutline,
   ClipboardOutline,
   CloudOutline,
-  CodeSlashOutline,
   CreateOutline,
   DocumentTextOutline,
   GitNetworkOutline,
@@ -20,7 +19,6 @@ import {
   SettingsOutline,
   ShieldCheckmarkOutline,
   SwapHorizontalOutline,
-  TerminalOutline,
   TimeOutline,
 } from '@vicons/ionicons5'
 
@@ -68,6 +66,21 @@ export interface MenuNode {
   children?: MenuNode[]
 }
 
+/**
+ * 菜单树按**数据形态**分组，不按原先的子系统分组。
+ *
+ * 改动原因：原先按子系统分（策略平台 / 委托服务器 / 数据中台），
+ * 但每个子系统里都混着两类性质完全不同的页面：
+ *   - **节点类**：只读 Redis JSON 键 + 订阅 Pub/Sub 频道，不碰 MySQL；
+ *   - **业务表类**：直接查 MySQL 表（T_Conditional / T_Order / T_Trade / T_StrategyLog）。
+ * 运维找页面时的心智是「我要看某张表」或「我要看哪台服务器」，
+ * 而不是「这张表属于哪个子系统」，所以把表页面独立出来、节点类收进「服务器管理」。
+ *
+ * ⚠️ **改菜单 name 会连带改权限键。** `menu:<name>` 由 name 推导（见 `permissions.ts`），
+ * 所以 `ACTION_PERMISSIONS.menu`、角色的权限数组（`api/mock/system.ts`）
+ * 以及审计动作键必须同步改，否则相关角色会**静默**看不到页面
+ * —— `hasPermission` 是精确匹配，键对不上不会报错，只在权限自检里提示。
+ */
 export const menuTree: MenuNode[] = [
   {
     name: 'dashboard',
@@ -83,17 +96,55 @@ export const menuTree: MenuNode[] = [
     },
   },
   {
-    name: 'strategy',
-    path: '/strategy',
-    meta: { title: '策略平台管理', icon: LayersOutline, desc: '策略服务器（策略平台）的注册、在线状态与条件单承载情况。' },
+    name: 'server',
+    path: '/server',
+    meta: {
+      title: '服务器管理',
+      icon: ServerOutline,
+      desc: '三类服务器节点（委托 / 策略 / 数据中台）的注册、在线状态与承载关系，外加消息总线运行状态。',
+    },
     children: [
       {
-        name: 'strategy-server',
-        path: '/strategy/server',
+        name: 'server-trade',
+        path: '/server/trade',
+        view: 'trade/TradeServer',
+        meta: {
+          title: '委托服务器',
+          icon: SwapHorizontalOutline,
+          status: 'ready',
+          desc: '委托服务器节点清单与在线状态，以及账号到委托服务器的分配关系。',
+          refs: [
+            { label: 'Pub/Sub 频道', value: 'tradeserver_online / _beat / _offline（现场另有 _1 后缀一套）' },
+            { label: 'Redis JSON 键', value: 'traderserver（节点数组：id / ip / mac / enable / last-active-time）' },
+            { label: '协议说明', value: '请求接口doc.txt 第 1~3 条' },
+          ],
+          todos: ['节点列表：ID、IP、MAC、启用状态、最后活跃时间', 'enable 启停开关', '账号分配关系（acc-* 键里的 traderserver 字段）', '心跳超时告警'],
+        },
+      },
+      {
+        name: 'server-datahub',
+        path: '/server/datahub',
+        view: 'datahub/DatahubNode',
+        meta: {
+          title: '数据中台',
+          icon: GitNetworkOutline,
+          status: 'ready',
+          desc: '数据中台实例的上线与心跳状态。',
+          refs: [
+            { label: 'Pub/Sub 频道', value: 'datahub_online / _beat / _offline / _select / _oncall' },
+            { label: 'Redis JSON 键', value: 'unique_id（已分配的最大唯一编号）' },
+            { label: '协议说明', value: '请求接口doc.txt 第 7~9 条' },
+          ],
+          todos: ['中台实例列表与心跳', 'unique_id 分配水位查看', '向在线节点下发心跳（datahub → WT/ST 频道）'],
+        },
+      },
+      {
+        name: 'server-strategy',
+        path: '/server/strategy',
         view: 'strategy/StrategyServer',
         meta: {
           title: '策略服务器',
-          icon: ServerOutline,
+          icon: LayersOutline,
           status: 'ready',
           desc: '策略平台集群的节点清单、上线/心跳/下线状态与承载的条件单用户数。',
           refs: [
@@ -105,11 +156,52 @@ export const menuTree: MenuNode[] = [
         },
       },
       {
-        name: 'strategy-list',
-        path: '/strategy/list',
+        name: 'server-stream',
+        path: '/server/stream',
+        view: 'datahub/DatahubStream',
+        meta: {
+          title: '消息总线',
+          icon: AnalyticsOutline,
+          status: 'ready',
+          desc: 'Redis Stream 的积压、消费组与报文流量监控 —— 节点之间的数据都从这里过，所以与服务器同组。',
+          refs: [
+            { label: '入口流', value: 'DataHub_req_stream（委托服务器 → 数据中台）' },
+            { label: '出口流', value: 'DataHub_reply_stream' },
+            { label: '下发流', value: 'ST-<编号> / ST-<编号>-reply（中台 → 策略平台）' },
+            { label: '回包流', value: 'WT-<编号> / WT-<编号>-reply（中台 → 委托服务器）' },
+            { label: '消费组', value: '固定 user_group，consumer 名 = 流名本身' },
+          ],
+          todos: ['各流的 XLEN / 消费组 lag / pending 实时看板', '积压告警阈值', '报文原样查看与 JSON 格式化', '按 request_id 串联一次请求的收发'],
+        },
+      },
+    ],
+  },
+  {
+    /**
+     * 业务数据：四个直接对应 MySQL 表的查询页面。
+     *
+     * 为什么不保持顶级平铺：它们平铺后侧边栏会出现 4 个「某某管理」同类项
+     * 挤在中间，与其余「分组 + 子页面」的结构不一致。收进一个分组后
+     * 侧边栏回到 6 个顶级项，且与「服务器管理 / 账户与用户」的层级对称。
+     *
+     * ⚠️ 四个叶子的 `name` **刻意保持不变**（conditional / order / deal /
+     * strategy-log）：`menu:<name>` 是权限键（见 permissions.ts），
+     * 改名会让 ops / viewer 角色的权限静默失效。这里只改 path 与层级。
+     */
+    name: 'bizdata',
+    path: '/bizdata',
+    meta: {
+      title: '业务数据',
+      icon: AlbumsOutline,
+      desc: '四类业务表数据的查询与下钻：条件单、委托单、成交回报与策略日志，均直接对应 MySQL 表。',
+    },
+    children: [
+      {
+        name: 'conditional',
+        path: '/bizdata/conditional',
         view: 'strategy/StrategyList',
         meta: {
-          title: '条件单策略',
+          title: '条件单管理',
           icon: ListOutline,
           status: 'ready',
           desc: '全量云条件单的查询、明细查看与人工干预（启停/删除）。',
@@ -122,51 +214,11 @@ export const menuTree: MenuNode[] = [
         },
       },
       {
-        name: 'strategy-log',
-        path: '/strategy/log',
-        view: 'strategy/StrategyLog',
-        meta: {
-          title: '策略运行日志',
-          icon: DocumentTextOutline,
-          status: 'ready',
-          desc: '条件单的运行与触发轨迹。',
-          refs: [
-            { label: 'MySQL 表', value: 'T_StrategyLog（策略单日志）' },
-            { label: '关键字段', value: 'Strategy 策略编号、Status 状态、Info、OccurTIme、FromIP / FromMac / FromAccount' },
-          ],
-          todos: ['日志检索：按策略编号、状态、时间、来源 IP', '按策略单聚合查看生命周期', '触发设备（IP/MAC）溯源'],
-        },
-      },
-    ],
-  },
-  {
-    name: 'trade',
-    path: '/trade',
-    meta: { title: '委托服务器管理', icon: SwapHorizontalOutline, desc: '委托服务器（交易通道）的注册、在线状态与分配关系。' },
-    children: [
-      {
-        name: 'trade-server',
-        path: '/trade/server',
-        view: 'trade/TradeServer',
-        meta: {
-          title: '委托服务器',
-          icon: ServerOutline,
-          status: 'ready',
-          desc: '委托服务器节点清单与在线状态，以及账号到委托服务器的分配关系。',
-          refs: [
-            { label: 'Pub/Sub 频道', value: 'tradeserver_online / _beat / _offline（现场另有 _1 后缀一套）' },
-            { label: 'Redis JSON 键', value: 'traderserver（节点数组：id / ip / mac / enable / last-active-time）' },
-            { label: '协议说明', value: '请求接口doc.txt 第 1~3 条' },
-          ],
-          todos: ['节点列表：ID、IP、MAC、启用状态、最后活跃时间', 'enable 启停开关', '账号分配关系（acc-* 键里的 traderserver 字段）', '心跳超时告警'],
-        },
-      },
-      {
-        name: 'trade-order',
-        path: '/trade/order',
+        name: 'order',
+        path: '/bizdata/order',
         view: 'trade/TradeOrder',
         meta: {
-          title: '委托单',
+          title: '委托单管理',
           icon: ClipboardOutline,
           status: 'ready',
           desc: '条件单触发后产生的委托记录。',
@@ -179,11 +231,11 @@ export const menuTree: MenuNode[] = [
         },
       },
       {
-        name: 'trade-deal',
-        path: '/trade/deal',
+        name: 'deal',
+        path: '/bizdata/deal',
         view: 'trade/TradeDeal',
         meta: {
-          title: '成交回报',
+          title: '成交回报管理',
           icon: CashOutline,
           status: 'ready',
           desc: '委托对应的成交明细。',
@@ -194,65 +246,20 @@ export const menuTree: MenuNode[] = [
           todos: ['成交列表与委托单关联下钻', '按策略单统计成交均价与总量', '成交回报时延统计'],
         },
       },
-    ],
-  },
-  {
-    name: 'datahub',
-    path: '/datahub',
-    meta: { title: '数据中台管理', icon: GitNetworkOutline, desc: '数据中台节点、消息总线与协议报文。' },
-    children: [
       {
-        name: 'datahub-node',
-        path: '/datahub/node',
-        view: 'datahub/DatahubNode',
+        name: 'strategy-log',
+        path: '/bizdata/strategy-log',
+        view: 'strategy/StrategyLog',
         meta: {
-          title: '中台节点',
-          icon: PulseOutline,
+          title: '策略日志管理',
+          icon: DocumentTextOutline,
           status: 'ready',
-          desc: '数据中台实例的上线与心跳状态。',
+          desc: '条件单的运行与触发轨迹。',
           refs: [
-            { label: 'Pub/Sub 频道', value: 'datahub_online / _beat / _offline / _select / _oncall' },
-            { label: 'Redis JSON 键', value: 'unique_id（已分配的最大唯一编号）' },
-            { label: '协议说明', value: '请求接口doc.txt 第 7~9 条' },
+            { label: 'MySQL 表', value: 'T_StrategyLog（策略单日志）' },
+            { label: '关键字段', value: 'Strategy 策略编号、Status 状态、Info、OccurTIme、FromIP / FromMac / FromAccount' },
           ],
-          todos: ['中台实例列表与心跳', 'unique_id 分配水位查看', '向在线节点下发心跳（datahub → WT/ST 频道）'],
-        },
-      },
-      {
-        name: 'datahub-stream',
-        path: '/datahub/stream',
-        view: 'datahub/DatahubStream',
-        meta: {
-          title: '消息总线',
-          icon: AnalyticsOutline,
-          status: 'ready',
-          desc: 'Redis Stream 的积压、消费组与报文流量监控。',
-          refs: [
-            { label: '入口流', value: 'DataHub_req_stream（委托服务器 → 数据中台）' },
-            { label: '出口流', value: 'DataHub_reply_stream' },
-            { label: '下发流', value: 'ST-<编号> / ST-<编号>-reply（中台 → 策略平台）' },
-            { label: '回包流', value: 'WT-<编号> / WT-<编号>-reply（中台 → 委托服务器）' },
-            { label: '消费组', value: '固定 user_group，consumer 名 = 流名本身' },
-          ],
-          todos: ['各流的 XLEN / 消费组 lag / pending 实时看板', '积压告警阈值', '报文原样查看与 JSON 格式化', '按 request_id 串联一次请求的收发'],
-        },
-      },
-      {
-        name: 'datahub-protocol',
-        path: '/datahub/protocol',
-        view: 'datahub/DatahubProtocol',
-        meta: {
-          title: '协议报文',
-          icon: CodeSlashOutline,
-          status: 'ready',
-          desc: '客户端协议清单与报文字段速查，兼作联调工具。',
-          refs: [
-            { label: '协议文档', value: '请求接口字段.txt（9 个协议）、请求接口doc.txt、数据中台to策略平台.txt' },
-            { label: '账号类', value: 'acc_sign 签署 / acc_query 查询 / acc_update 更新 / logout 登出' },
-            { label: '条件单类', value: 'create 创建 / query 查询 / modify 修改 / set 运行停止 / remove 删除' },
-            { label: '平台侧 MsgType', value: '4=create 8=remove 11=modify 17=pwdUpdate 18=account' },
-          ],
-          todos: ['协议字段速查表（含类型、取值说明）', '报文模板一键复制', '在线构造报文并发往 DataHub_req_stream（联调用）'],
+          todos: ['日志检索：按策略编号、状态、时间、来源 IP', '按策略单聚合查看生命周期', '触发设备（IP/MAC）溯源'],
         },
       },
     ],
@@ -313,7 +320,7 @@ export const menuTree: MenuNode[] = [
   {
     name: 'storage',
     path: '/storage',
-    meta: { title: '数据存储', icon: ServerOutline, desc: 'Redis 与 MySQL 的实例、键空间与表数据管理。' },
+    meta: { title: '数据存储', icon: CloudOutline, desc: 'Redis 与 MySQL 的实例、键空间与表结构管理。' },
     children: [
       {
         name: 'storage-redis',
@@ -321,7 +328,7 @@ export const menuTree: MenuNode[] = [
         view: 'storage/StorageRedis',
         meta: {
           title: 'Redis 管理',
-          icon: CloudOutline,
+          icon: PulseOutline,
           status: 'ready',
           desc: '多实例、多 DB 的 Redis 键浏览与 Stream / 订阅发布监控。',
           refs: [
@@ -341,7 +348,9 @@ export const menuTree: MenuNode[] = [
           title: '数据库管理',
           icon: ServerOutline,
           status: 'ready',
-          desc: 'qianlong_cloud 库的表结构浏览与数据查询。',
+          // 与「条件单/委托单/成交回报/策略日志」四个业务表页面的分工：
+          // 这里是 DBA 视角（通用结构 + 临时查询），那边是业务视角（带筛选与动作）。
+          desc: 'qianlong_cloud 库的表结构浏览与只读 SQL 查询（DBA 视角）。业务表的日常查询请走对应的条件单 / 委托单 / 成交回报 / 策略日志页面。',
           refs: [
             { label: '连接', value: '192.168.1.136:3306 / qianlong_cloud / 用户 qianlong_cloud（MySQL 8.0.45）' },
             { label: '表清单', value: 'T_Conditional、T_Conditional_his、T_Order、T_Order_his、T_Trade、T_Trade_his、T_User、T_UserLog、T_StrategyLog + 视图 V_Conditional' },
@@ -350,50 +359,13 @@ export const menuTree: MenuNode[] = [
           todos: ['表/视图列表与结构（字段、类型、注释）', '通用分页查询与条件过滤', 'SQL 只读查询窗口（默认禁止写）', '导出查询结果'],
         },
       },
-      {
-        name: 'storage-data',
-        path: '/storage/data',
-        meta: {
-          title: '数据维护',
-          icon: BuildOutline,
-          status: 'planned',
-          desc: '数据清理、归档与一致性核对（高危操作，需二次确认）。暂缓实现。',
-          refs: [
-            { label: '归档目标', value: '各主表 → 对应 _his 历史表' },
-            { label: '一致性核对', value: 'MySQL T_Conditional 与 Redis strategy-* / T_User 与 acc-* 对照' },
-          ],
-          todos: [
-            '（已与需求方确认：暂时用不上，后续有需求再做）',
-            '主表 → 历史表归档任务与记录',
-            'MySQL 与 Redis 数据一致性核对 —— 现场核对结果差异极大：MySQL T_Conditional + T_Conditional_his = 0 行，但 Redis strategy-* 键里有 59 条条件单（136 db1 共 55 条：strategy-914900043_7_6 47 条、strategy-300130000461_1_6 6 条、strategy-1000006_1_6 2 条；137 db1 另有 4 条）',
-            '过期条件单/日志清理',
-            '全部操作写入审计',
-          ],
-        },
-      },
     ],
   },
   {
     name: 'system',
     path: '/system',
-    meta: { title: '系统管理', icon: SettingsOutline, desc: '系统参数、连接配置、操作审计与权限。' },
+    meta: { title: '系统管理', icon: SettingsOutline, desc: '管理端账号、角色权限与操作审计。' },
     children: [
-      {
-        name: 'system-connection',
-        path: '/system/connection',
-        meta: {
-          title: '连接配置',
-          icon: TerminalOutline,
-          status: 'planned',
-          desc: 'Redis / MySQL 连接信息与后端 API 地址维护。',
-          refs: [
-            { label: '现有配置来源', value: 'DataHub.ini（DBHOST/DBUSER/DBPWD、REDISHOST/REDISPWD/REDISSELECT）' },
-            { label: 'MySQL', value: '192.168.1.136:3306 / qianlong_cloud' },
-            { label: 'Redis', value: '192.168.1.136 与 192.168.1.137:6379' },
-          ],
-          todos: ['连接配置的增删改查与连通性测试', '密码加密存储，不回显明文', '配置变更审计'],
-        },
-      },
       {
         name: 'system-user',
         path: '/system/user',
