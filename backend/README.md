@@ -12,6 +12,7 @@
 | 业务数据 | 成交回报管理 | ✅ 只读 |
 | 业务数据 | 策略日志管理 | ✅ 只读 |
 | 数据存储 | Redis 管理 | ✅ 只读 + 删键（高危，需权限点） |
+| 数据存储 | 数据库管理 | ✅ 只读（表清单 / 结构 / 分页读表 / 只读 SQL） |
 
 | 项 | 版本 |
 |---|---|
@@ -480,6 +481,104 @@ AUTO_INCREMENT 已到 160707，说明历史上写过多行；
 **若将来真涨到几十万行，必须改成下推式**：先在 MySQL 按条件取候选、
 Redis 侧按前缀筛，再归并，不能继续全量读到内存里。
 `AccountService` 里已就地留了说明。
+
+### 数据存储：MySQL 管理 `storageApi`
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/storage/mysql/tables` | 表/视图清单（含注释与行数） | 登录即可 |
+| GET | `/storage/mysql/schema` | 单表结构（字段 / 索引 / DDL 原文） | 登录即可 |
+| GET | `/storage/mysql/query` | **分页读一张表的数据** | `action:storage-mysql:readonly-sql` |
+| POST | `/storage/mysql/query` | **执行一条只读 SQL** | `action:storage-mysql:readonly-sql` |
+
+GET 与 POST 同路径，靠 HTTP 方法区分（前端就是这么定义的）。
+
+> ## ⚠️ 这是全项目最高危的模块
+>
+> 现场的应用数据库账号是：
+> ```
+> GRANT ALL PRIVILEGES ON `qianlong_cloud`.* TO `qianlong_cloud`@`%`
+> ```
+> **一条没被拦住的 SQL 就能删表。**
+>
+> 而实测发现**数据库自己的只读事务挡不住 DDL**：
+> ```
+> START TRANSACTION READ ONLY;
+>   INSERT / UPDATE / DELETE  -> errno 1792 被挡 ✅
+>   CREATE TABLE              -> 成功了 ❌
+>   DROP TABLE                -> 成功了 ❌
+> ```
+> 原因：DDL 会**隐式提交**，从而结束只读事务，之后就在普通会话里执行了。
+> （实测在临时库对象上验证，已确认无残留：库内对象数始终为 18。）
+>
+> ### 所以用三层防护，且第 1 层是主要防线
+>
+> | 层 | 做什么 | 能挡住什么 |
+> |---|---|---|
+> | 1. **应用层白名单**（`ReadOnlySqlGuard`） | 只放行 `SELECT / WITH / SHOW / DESC / DESCRIBE / EXPLAIN`；拒绝多语句、可执行注释、危险关键字 | **主要防线** |
+> | 2. 数据库只读事务 | `START TRANSACTION READ ONLY` | DML（挡不住 DDL） |
+> | 3. 结果集上限 + 查询超时 | `maxRows=200`、`timeout=15s` | 拉全表 / `SLEEP` 拖死连接 |
+>
+> **黑名单覆盖**：DML/DDL、权限（`GRANT`/`REVOKE`）、文件（`INTO OUTFILE`/`LOAD_FILE`）、
+> 锁（`FOR UPDATE`/`LOCK`）、会话与事务（`SET`/`CALL`/`PREPARE`/`COMMIT`）、
+> 管理（`FLUSH`/`KILL`/`SHUTDOWN`）、拖慢实例（`BENCHMARK`/`SLEEP`）。
+>
+> ### 两个必须记住的实现坑（都真实踩到）
+>
+> **坑 1：剥掉字面量做校验，但执行必须用原文。**
+> 为避免 `SELECT 'DROP TABLE x'` 误报，校验前会剥掉字符串字面量。
+> 但**执行**必须用用户写的原文 —— 第一版返回了「剥掉字面量的版本」，后果是：
+> ```
+> SELECT 'HELLO' AS note                  -> 返回空字符串
+> SELECT * FROM T_User WHERE Name='张国昌' -> 一行都查不到
+> ```
+> **所有字符串字面量被静默清空，且不报错。** 已改为「校验用剥过的文本、执行用原文」。
+>
+> **坑 2：可执行注释必须直接拒绝。**
+> MySQL 的 `/*! ... */` 里的内容会被**真的执行**，而它长得像注释。
+> 「剥注释校验 + 执行原文」会被它绕过（校验看到 `SELECT 1`，执行时跑了别的东西）。
+> 所以含 `/*!` 的 SQL **直接拒绝**，而不是剥掉后执行。
+>
+> ### `SHOW CREATE TABLE` 要放行（它含 CREATE）
+> 它是纯只读语句、也是 DBA 最常用的看结构方式。做法是**精确放行这一种形状**
+> （`SHOW CREATE <TABLE|VIEW|DATABASE|...>`），而不是把 `CREATE` 从黑名单拿掉。
+>
+> ### 视图的 DDL 要取第 2 列
+> `SHOW CREATE TABLE` 返回 2 列，而 `SHOW CREATE VIEW` 返回 **4 列**
+> （视图名, DDL, character_set_client, collation_connection）。
+> 取「最后一列」在视图上会拿到字符集 —— 页面显示 `utf8mb4`（已修：固定取第 2 列）。
+>
+> ### `binary` 列要可读化
+> 现场 `T_User.RegProtocol` 是 `binary(1)`，值是 `'1'`。
+> 不处理的话 Jackson 会序列化成 Base64，页面显示乱码；现已按可打印 ASCII 输出。
+
+> ### 表清单的两个行数字段（`approxRows` vs `exactRows`）
+> `information_schema.TABLES.TABLE_ROWS` **不准** ——
+> 现场实测 `T_StrategyLog` 报 16566、实际 17430。
+> 所以另给 `exactRows`（真实 `COUNT(*)`），且**只对小表算**
+> （超过 10 万行不 COUNT，避免明显代价）。
+> 两个字段并存是刻意的：页面要能看出「近似值不可信」。
+
+> ### 库名白名单
+> 只允许**当前连接的库**（`qianlong_cloud`）。实测该账号虽然读不到 `mysql` 库
+> （errno 1142 无权限），但 `information_schema` / `performance_schema` 是可见的 ——
+> 放开库名等于把这两个也暴露出去，没有必要。
+> 请求别的库会**如实报错**（不静默改成当前库，那会让人以为查的是他指定的库）。
+
+> ### 只读 SQL 与分页读表都要权限点 + 写审计
+> 「能看页面」与「能跑任意 SELECT」是两件事：
+> `ops` 角色有 `action:storage-mysql:readonly-sql`、`viewer` 没有。
+> 每次执行**成功与失败都写审计**（谁、什么 SQL、返回多少行、耗时）。
+> SQL 文本会记进审计，但**不记结果内容** —— 审计是「谁做了什么」，不是数据副本。
+>
+> ⚠️ 本模块**没有任何写接口**，也不提供「结果导出」——
+> 导出会把整表数据带离现场，需要单独的权限设计与审计，不在本次范围。
+
+> ### 💡 建议（需要现场 DBA 配合）
+> 最彻底的做法是**给只读页面单独建一个只有 `SELECT` 权限的数据库账号**
+> （甚至只授 `qianlong_cloud.*` 的 SELECT）。
+> 本次**没有擅自改数据库账号** —— 那是现场要知情并决定的变更。
+> 在换号之前，第 1 层白名单是不可放松的。
 
 ### 数据存储：Redis 管理 `storageApi`
 
