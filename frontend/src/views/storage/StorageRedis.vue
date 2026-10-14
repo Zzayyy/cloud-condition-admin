@@ -44,7 +44,7 @@ import StatCard from '@/components/StatCard.vue'
 import { storageApi } from '@/api/endpoints'
 import { mockStorageApi, REDIS_INSTANCES } from '@/api/mock/storage'
 import { withDelay } from '@/api/mock/_shared'
-import type { RedisInstanceInfo, RedisKeyDetail, RedisKeyDomain, RedisKeyInfo, RedisValueType } from '@/api/domain'
+import type { RedisInstance, RedisInstanceInfo, RedisKeyDetail, RedisKeyDomain, RedisKeyInfo, RedisValueType } from '@/api/domain'
 import { useResource } from '@/composables/useResource'
 import { formatJson, thousands } from '@/utils/format'
 
@@ -66,7 +66,18 @@ const accent = '#2f9e5f'
 
 /* ------------------------------ 实例与 DB ------------------------------ */
 
-const instanceId = ref('136')
+/**
+ * 当前实例。
+ *
+ * ⚠️ **初值不能写死**（原来写的是 `ref('136')`）。
+ *
+ * 后端的 `instanceId` 参数收的是**主机地址**（`192.168.1.136`），
+ * 而 `'136'` 是 mock 时代的旧 id —— 拿它去请求，后端会如实返回
+ * 「未知的 Redis 主机：136」。
+ * 而 `onMounted` 会立刻发请求，那时实例清单还没回来，
+ * 所以必须**先等清单拿到，再用第一个真实实例去取数**（见 onMounted）。
+ */
+const instanceId = ref('')
 const db = ref(0)
 
 const {
@@ -80,10 +91,27 @@ const {
 
 const info = computed<RedisInstanceInfo | undefined>(() => infoData.value)
 
-const instanceOptions = REDIS_INSTANCES.map((i) => ({
-  label: `${i.host}:${i.port}`,
-  value: i.id,
-}))
+/**
+ * 实例清单。
+ *
+ * ⚠️ **真实态必须用后端返回的实例，不能用 mock 里硬编码的 REDIS_INSTANCES。**
+ *
+ * `mock/storage.ts` 里写死了 `136 / 137` 两个实例；而现场配置里实际是
+ * 「实例 + db」的组合（136 db0、136 db1、137 db1 …）。
+ * 硬编码会在实例增减时让页面指向不存在的目标，
+ * 且 `switchInstance` 里若拿 mock 的 dbKeys 去复位 db，真实态会复位错。
+ */
+const { data: instancesData, load: loadInstances } = useResource<RedisInstance[], undefined>(
+  () => storageApi.listRedisInstances(),
+  { mock: () => withDelay([...REDIS_INSTANCES]) },
+)
+
+const instanceOptions = computed(() =>
+  (instancesData.value ?? []).map((i) => ({
+    label: `${i.host}:${i.port}${i.db ? ` db${i.db}` : ''}`,
+    value: i.id,
+  })),
+)
 
 /** 当前实例有键的 db 列表 */
 const dbOptions = computed(() => {
@@ -93,9 +121,19 @@ const dbOptions = computed(() => {
 
 function switchInstance(id: string) {
   instanceId.value = id
-  // 切实例时把 db 复位到该实例的第一个有键 db，避免落到空的 db 上
-  const first = mockStorageApi.getRedisInstanceInfo(id).dbKeys[0]?.db ?? 0
-  db.value = first
+  /*
+   * 切实例时把 db 复位到「该实例有键的第一个 db」。
+   *
+   * ⚠️ 这里**不能读 `infoData.value`** —— 它是**上一个实例**的 info，
+   * 还没被新请求覆盖。用它复位会把上一个实例的 db 带到新实例上
+   * （比如从 136 的 db1 切到 137，137 若没有 db1 就会一个键都查不到）。
+   *
+   * 所以复位只能依赖**配置里的起始 db**（后端 listInstances 已经算好了
+   * 「该主机有键的第一个 db」）。新实例的 info 回来后，
+   * dbOptions 会按真实 dbKeys 刷新，用户再手动选具体 db。
+   */
+  const fromConfig = instancesData.value?.find((i) => i.id === id)?.db
+  db.value = fromConfig ?? 0
   scanPage.value = 1
   loadInfo({ instanceId: id })
   reloadKeys()
@@ -147,7 +185,27 @@ function reloadKeys() {
   loadKeys(keyParams())
 }
 
-onMounted(() => {
+/**
+ * 首次进入：**先取实例清单，再取该实例的数据**。
+ *
+ * ⚠️ 顺序不能反。原来这里是
+ * `loadInfo({ instanceId: instanceId.value }); reloadKeys()`
+ * 直接拿初值去请求 —— 而初值 `'136'` 是 mock 时代的旧 id，
+ * 后端如实回「未知的 Redis 主机：136」。
+ *
+ * 即使把初值改成 `'192.168.1.136'` 也仍然是硬编码，
+ * 所以正确做法是：等清单回来 → 用第一个真实实例 → 再取数据。
+ * 清单为空（后端未就绪 / 无可用实例）时不发后续请求，
+ * 让页面显示「加载失败」，而不是发一个注定 400 的请求。
+ */
+onMounted(async () => {
+  await loadInstances()
+  const first = instancesData.value?.[0]
+  if (!first) {
+    return
+  }
+  instanceId.value = first.id
+  db.value = first.db ?? 0
   loadInfo({ instanceId: instanceId.value })
   reloadKeys()
 })
@@ -237,9 +295,27 @@ const summary = computed(() => {
   }
 })
 
-/** 当前 db 的类型分布 */
+/**
+ * 当前 db 的类型分布。
+ *
+ * ⚠️ 原来这里无条件调 `mockStorageApi.typeDistribution(...)` ——
+ * **真实态也在用假数据画饼图**，而且不报错、看不出来。
+ * 现改为按**当前页真实键列表**统计；真实态不再触碰 mock
+ * （前端 README 第 4 条：图表也不许拿 mock 充数）。
+ *
+ * 口径说明：这是「本页口径」（当前页的键），不是全库分布 ——
+ * 后端 SCAN 有硬上限，全库分布无法在单次请求里准确给出。
+ * 页面标题已写明「本页口径」。
+ */
 const typeChartOption = computed(() => {
-  const dist = mockStorageApi.typeDistribution(instanceId.value, db.value)
+  const counts = new Map<string, number>()
+  for (const k of keys.value) {
+    const t = k.type ?? 'unknown'
+    counts.set(t, (counts.get(t) ?? 0) + 1)
+  }
+  const dist = [...counts.entries()]
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
   return {
     tooltip: { trigger: 'item', formatter: '{b}<br/>{c} 个键（{d}%）' },
     legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 12 } },

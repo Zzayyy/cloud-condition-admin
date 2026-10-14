@@ -95,6 +95,92 @@ public class RedisJsonGateway {
         return Map.copyOf(failures);
     }
 
+    /**
+     * 按实例 id 取一个连接（Redis 管理页要用 INFO / SCAN / 类型查询等）。
+     *
+     * @return 连接；实例不可用时返回 {@code null}（调用方须处理，不要假装成功）
+     */
+    public StatefulRedisConnection<String, String> connection(String instanceId) {
+        return connections.get(instanceId);
+    }
+
+    /** 实例配置（用于回显 host/port/db，以及校验 instanceId 是否合法） */
+    public java.util.Optional<RedisProperties.Instance> instance(String instanceId) {
+        return properties.getInstances().stream()
+                .filter(i -> i.getId().equals(instanceId))
+                .findFirst();
+    }
+
+    /** 全部实例配置（供 /storage/redis/instances 返回真实的实例清单） */
+    public List<RedisProperties.Instance> allInstances() {
+        return List.copyOf(properties.getInstances());
+    }
+
+    /**
+     * 按**主机**取一个可用连接（Redis 管理页用）。
+     *
+     * <p><b>为什么管理页按主机而不是按 (host,db) 定位：</b>
+     * 配置里的 {@code app.redis.instances} 是「业务需要读的 (host,db) 组合」
+     * （acc-* 在 136 db0/db1、137 db1）。但管理页要**浏览整台实例的所有 db** ——
+     * 比如 137 db0 有 117 个键（其中一个 stream 有 1400 万条条目），
+     * 它不在业务清单里，却正是运维要看的东西。
+     * 所以管理页用主机定位连接，具体 db 通过 SELECT 切换。
+     *
+     * @return 连接；该主机任何配置项都连不上时返回 {@code null}
+     */
+    public StatefulRedisConnection<String, String> connectionByHost(String host) {
+        for (RedisProperties.Instance i : properties.getInstances()) {
+            if (i.getHost().equals(host) && connections.containsKey(i.getId())) {
+                return connections.get(i.getId());
+            }
+        }
+        return null;
+    }
+
+    /** 该主机在配置里是否存在（用于校验管理页传来的 host） */
+    public boolean hasHost(String host) {
+        return properties.getInstances().stream().anyMatch(i -> i.getHost().equals(host));
+    }
+
+    /**
+     * 去重后的主机清单（管理页的「实例」下拉用它）。
+     *
+     * <p>按配置里首次出现的顺序返回，保证顺序稳定可预测。
+     */
+    public List<String> distinctHosts() {
+        List<String> out = new ArrayList<>();
+        for (RedisProperties.Instance i : properties.getInstances()) {
+            if (!out.contains(i.getHost())) {
+                out.add(i.getHost());
+            }
+        }
+        return out;
+    }
+
+    /** 某个主机的端口（配置里同主机端口应一致；取第一个） */
+    public int portOfHost(String host) {
+        return properties.getInstances().stream()
+                .filter(i -> i.getHost().equals(host))
+                .mapToInt(RedisProperties.Instance::getPort)
+                .findFirst()
+                .orElse(6379);
+    }
+
+    /**
+     * 某个主机的「常驻 db」——配置里该主机第一条记录的 db。
+     *
+     * <p>连接建立后固定在某个 db 上。管理页切换 db 时必须能切回来，
+     * 所以要记住这个常驻值；不知道它就会「切换后回不去」，
+     * 表现为后续请求读到错的 db。
+     */
+    public int homeDbOf(String host) {
+        return properties.getInstances().stream()
+                .filter(i -> i.getHost().equals(host))
+                .mapToInt(RedisProperties.Instance::getDb)
+                .findFirst()
+                .orElse(0);
+    }
+
     /** 可用实例名（如 192.168.1.136/db0） */
     public List<String> availableInstanceNames() {
         List<String> names = new ArrayList<>();

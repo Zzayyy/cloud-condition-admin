@@ -11,6 +11,7 @@
 | 业务数据 | 委托单管理 | ✅ 只读 |
 | 业务数据 | 成交回报管理 | ✅ 只读 |
 | 业务数据 | 策略日志管理 | ✅ 只读 |
+| 数据存储 | Redis 管理 | ✅ 只读 + 删键（高危，需权限点） |
 
 | 项 | 版本 |
 |---|---|
@@ -479,6 +480,70 @@ AUTO_INCREMENT 已到 160707，说明历史上写过多行；
 **若将来真涨到几十万行，必须改成下推式**：先在 MySQL 按条件取候选、
 Redis 侧按前缀筛，再归并，不能继续全量读到内存里。
 `AccountService` 里已就地留了说明。
+
+### 数据存储：Redis 管理 `storageApi`
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/storage/redis/instances` | 实例清单（按**主机**去重） | 登录即可 |
+| GET | `/storage/redis/info` | 实例概览（INFO + 各 db 键数） | 登录即可 |
+| GET | `/storage/redis/keys` | 扫描键（分页 + 关键字/类型/TTL 过滤） | 登录即可 |
+| GET | `/storage/redis/key` | 单个键的内容（按类型返回不同结构） | 登录即可 |
+| GET | `/storage/redis/channels` | Pub/Sub 频道（含订阅者数） | 登录即可 |
+| DELETE | `/storage/redis/key` | **删除键（不可撤销）** | `action:storage-redis:delete-key` |
+
+> **参数名注意**：接口参数是 `instanceId`，但**它的值就是主机地址**
+> （如 `192.168.1.136`）—— 参数名保持与前端 `endpoints.ts` 一致，
+> 语义却是「一台主机」。这是刻意的：管理页要浏览整台实例的所有 db，
+> 而业务侧的 `app.redis.instances` 是「业务要读的 (host,db) 组合」，两者用途不同。
+> 所以实例清单返回的是**去重后的主机**（136 只出现一次），
+> 不是 136-db0 / 136-db1 各一条。
+
+> ### ⚠️ 键数 ≠ 条目数（本页最容易误读的地方）
+>
+> 现场实测：
+> ```
+> 137 db0  DBSIZE = 117                        ← 只有 117 个键
+> 但 DataHub_req_stream 的 XLEN = 14,129,288   ← 单个 stream 1412 万条条目
+> ```
+> 前端 README 里记的「457 万条」指的是**条目数**，不是键数。
+> 所以接口把它们做成**不同字段**：`dbKeys[]` 是键数（DBSIZE 口径），
+> 每个键的 `length` 才是条目数。页面上也分开显示 ——
+> 混着看会得出完全错误的容量判断。
+>
+> 另外注意 `DataHub_req_stream` 已从 README 记的 407 万涨到 **1412 万**。
+
+> ### ⚠️ 三条安全线
+>
+> 1. **只用 SCAN，绝不用 KEYS。** 现场 137 db0 有 1412 万条条目的 stream，
+>    `KEYS *` 会把实例阻塞住、影响正在跑的生产流。
+> 2. **服务端强制条数上限**（`SCAN_HARD_LIMIT = 2000`），接口里**没有**
+>    「取全部」的选项。被截断时如实返回 `truncated=true` + `scanLimit`，
+>    **不静默截断** —— 否则会被当成「这个 db 就这么多键」。
+> 3. **删除键是高危**：单独要求权限点，成功与失败**都写审计**
+>    （失败同样要留痕：有人试过删那个键）。返回值是**实际删掉的键数**，
+>    键不存在就是 0，**不假装成功**。
+
+> **连接按实例复用，请求内 SELECT 切换 db，切走必须切回**（`try/finally`）。
+> 不切回去的 bug 表现为「随机查到别的 db 的键」，极难定位。
+
+> **INFO 的 keyspace 段要精确匹配 `db\d+`**：新版本 Redis 还有
+> `db0_distrib_strings_sizes` 这类**看起来也以 db 开头**的段，
+> 直接 `startsWith("db")` 会在 `substring(2)` 时抛
+> `NumberFormatException("0_distrib_strings_sizes")`。实测 137 的 INFO 里确实有。
+
+#### 前端同时修掉的三处「真实态读 mock」
+
+| 位置 | 原来的问题 | 现在 |
+|---|---|---|
+| 实例下拉 | 用 `mock/storage.ts` 硬编码的 `REDIS_INSTANCES`（只有 136/137 两项） | 调 `listRedisInstances()` 拿真实实例 |
+| `switchInstance` | 用 `mockStorageApi.getRedisInstanceInfo(id).dbKeys` 复位 db → 真实态会落到不存在的 db | 从真实 `info` / 实例配置取 |
+| 类型分布图 | **无条件**调 `mockStorageApi.typeDistribution()`，真实态也在用假数据画饼图且不报错 | 按当前页真实键列表统计（本页口径） |
+
+### 数据存储：MySQL 管理（尚未实现）
+
+`/storage/mysql/*`（表清单、表结构、只读 SQL）均未实现 ——
+前端 `StorageMysql.vue` 目前走演示数据。
 
 ---
 
