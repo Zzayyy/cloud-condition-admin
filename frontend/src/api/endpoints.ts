@@ -81,6 +81,22 @@ export const strategyApi = {
 
   /** 策略运行日志 */
   listLogs: (query?: PageQuery) => api.get<PageResult<StrategyLog>>('/strategy/logs', query),
+
+  /**
+   * Status 列的**真实**去重取值。
+   *
+   * ⚠️ 必须用这个接口而不是 `mock/strategy.ts` 的 `LOG_STATUS`：
+   * 那 7 个值（触发成功 / 触发失败 / 已暂停 / …）是演示数据编的，
+   * 现场 `T_StrategyLog.Status` **整列为 NULL**，一个都不存在。
+   * 从 mock 取选项会造成「下拉里有 7 个选项、每个都查出 0 条」
+   * 这种极具误导性的界面。
+   * 现在后端如实返回空数组 → 页面应显示「该列现场为空」而不是假选项。
+   */
+  listLogStatuses: () => api.get<string[]>('/strategy/logs/statuses'),
+
+  /** 某条件单的完整日志轨迹（时间线，按时间升序） */
+  listLogTimeline: (strategy: number) =>
+    api.get<StrategyLog[]>(`/strategy/logs/${strategy}/timeline`),
 }
 
 /* ------------------------------ 委托服务器管理 ----------------------------- */

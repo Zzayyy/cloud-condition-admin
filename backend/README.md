@@ -9,6 +9,8 @@
 | 账户与用户 | 用户账号 / 签署与股东号 / 登录日志 | ✅ |
 | 业务数据 | 条件单管理 | ✅ 只读（写操作见下） |
 | 业务数据 | 委托单管理 | ✅ 只读 |
+| 业务数据 | 成交回报管理 | ✅ 只读 |
+| 业务数据 | 策略日志管理 | ✅ 只读 |
 
 | 项 | 版本 |
 |---|---|
@@ -325,6 +327,51 @@ UNION ALL SELECT 'T_AdminAudit',           COUNT(*) FROM T_AdminAudit;
 协议文档没定义取值，现场 `T_Order_his` 只有 1 条测试数据（值为 1）。
 前端只展示 `StatueDis` 文本与原值、不做状态着色；
 **后端同样不臆造映射** —— 猜一个映射出来会让别人以为那是确认过的口径。
+
+### 业务数据：策略日志 `strategyApi.listLogs`
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/strategy/logs` | 列表（`keyword` / `status` / `fromIp` / 时间范围） |
+| GET | `/strategy/logs/statuses` | **`Status` 列的真实去重取值**（见下） |
+| GET | `/strategy/logs/stats/daily` | 按天日志量趋势 |
+| GET | `/strategy/logs/stats/by-strategy` | 按条件单聚合（「按策略单查看生命周期」） |
+| GET | `/strategy/logs/{strategy}/timeline` | 某条件单的完整轨迹（按时间升序） |
+
+表：`T_StrategyLog`，**17430 行真实数据**（现场四张业务表里数据最多的）。
+
+#### ⚠️ 三条现场事实（接口如实返回，不粉饰）
+
+| 列 | 现场实况 | 后果 |
+|---|---|---|
+| `Status` | **17430 行全部 NULL** | 前端的状态下拉取自 `mock/strategy.ts` 的 `LOG_STATUS`，那 **7 个值是编的**，现场一个都不存在 |
+| `FromIP` / `FromMac` | **全部 NULL** | 「按来源 IP 筛」必然 0 条 —— 不是查询写错了 |
+| `OccurTIme` | `date` 类型（无时分秒），且存过**非法空串** | ⚠️ SQL 里**不能**写 `<> ''`，会报 **MySQL 1525** 让整条查询失败 |
+
+> **关于 `Status`：为什么专门加 `/strategy/logs/statuses` 接口**
+>
+> 前端页面原本写的是
+> `const statusOptions = mockStrategyApi.logStatusOptions.map(...)` ——
+> **真实态也从 mock 取选项**。那样界面会变成「下拉里有 7 个选项，
+> 但选任何一个都查出 0 条」，排查的人会去怀疑分页、SQL、权限，
+> 而真正的原因是这一列根本没有数据。
+>
+> 现已改为：真实态调 `/strategy/logs/statuses` 拿真实去重值
+> （当前是**空数组** → 下拉置灰并提示「状态列现场为空」），
+> 只有演示态才回落 mock。`meta.statusColumnEmpty` / `meta.deviceColumnsEmpty`
+> 也一并返回，供页面直接说明。
+>
+> 这两个 meta 字段是**真的去查一次**得出的，不是硬编码 `true` ——
+> 现场补了数据之后页面会自动恢复正常显示，不需要改代码。
+
+> **关于 `OccurTIme` 的 1525 报错**：这是实测踩到的 ——
+> 探测脚本里写了 `WHERE OccurTIme <> ''`，直接抛
+> `(1525, "Incorrect DATE value: ''")`，**整条 SQL 失败**而不是「筛掉几行」。
+> 本模块对日期列只用 `IS NULL` 与范围比较。
+>
+> **性能**：表上只有主键索引且不能加（不改既有表结构）。
+> 实测 17430 行下：主键倒序分页 ~1ms、按 `Strategy` 过滤 ~7ms、
+> 按天聚合 ~6ms、`Info LIKE` ~1ms，都可接受。涨到百万级需与现场协商加索引。
 
 ### 鉴权 `authApi`
 

@@ -87,7 +87,34 @@ function resetFilters() {
   reload()
 }
 
-const statusOptions = mockStrategyApi.logStatusOptions.map((s) => ({ label: s, value: s }))
+/**
+ * 状态下拉的选项。
+ *
+ * ⚠️ **真实态必须用后端返回的取值，不能用 mock 的 LOG_STATUS。**
+ *
+ * `mock/strategy.ts` 里的 `LOG_STATUS` 有 7 个值（触发成功 / 触发失败 /
+ * 已暂停 / 已恢复 / 已删除 / 校验失败 / 参数错误）—— 那是**演示数据编的**。
+ * 现场 `T_StrategyLog.Status` **整列为 NULL**（17430 行无例外），
+ * 那 7 个值一个都不存在。
+ *
+ * 若真实态仍从 mock 取选项，界面会变成「下拉里有 7 个选项，
+ * 但选任何一个都查出 0 条」—— 排查的人会去怀疑分页、SQL、权限，
+ * 而真正的原因是这一列根本没有数据。
+ *
+ * 所以：真实态取 `listLogStatuses()`（当前返回空数组 → 下拉为空 +
+ * 页面明确提示「该列现场为空」）；只有演示态才回落到 mock 选项。
+ */
+const { data: statusDict } = useResource<string[], undefined>(
+  () => strategyApi.listLogStatuses(),
+  { mock: () => withDelay([...mockStrategyApi.logStatusOptions]) },
+)
+
+const statusOptions = computed(() =>
+  (statusDict.value ?? []).map((s) => ({ label: s, value: s })),
+)
+
+/** 后端明确告知「Status 列整列为空」—— 用它来显示说明，而不是让人对着空下拉猜 */
+const statusColumnEmpty = computed(() => statusDict.value !== undefined && statusDict.value.length === 0)
 
 const rows = computed(() => data.value?.list ?? [])
 const total = computed(() => data.value?.total ?? 0)
@@ -321,14 +348,23 @@ const relatedTimeline = computed(() => {
           </template>
         </n-input>
 
-        <n-select
-          v-model:value="statusFilter"
-          :options="statusOptions"
-          placeholder="全部状态"
-          clearable
-          style="width: 150px"
-          @update:value="handleSearch"
-        />
+        <n-tooltip trigger="hover" :disabled="!statusColumnEmpty">
+          <template #trigger>
+            <n-select
+              v-model:value="statusFilter"
+              :options="statusOptions"
+              :placeholder="statusColumnEmpty ? '状态列现场为空' : '全部状态'"
+              :disabled="statusColumnEmpty"
+              clearable
+              style="width: 150px"
+              @update:value="handleSearch"
+            />
+          </template>
+          <span>
+            T_StrategyLog.Status 整列为 NULL（17430 行无例外），
+            没有任何可筛的状态值。此处不再使用演示数据里编的 7 个状态。
+          </span>
+        </n-tooltip>
 
         <n-input
           v-model:value="fromIp"
