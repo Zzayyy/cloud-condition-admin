@@ -17,6 +17,8 @@ spring:
   datasource:
     url: jdbc:mysql://192.168.1.136:3306/qianlong_cloud?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
     username: qianlong_cloud
+    # 注意：MySQL 是小写 l 的 Qianlong@2026（无 &），
+    # 与下面 app.redis.instances 的 Redis 密码 QianLong@2026& 只差大小写和一个 &。
     password: Qianlong@2026
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
@@ -74,6 +76,50 @@ sa-token:
   token-style: uuid
   # 关闭控制台 banner，日志干净些
   is-print: false
+
+# =============================================================================
+# Redis 实例清单（账户与用户页要读 acc-* 键）
+# -----------------------------------------------------------------------------
+# 现场是**多实例 + 多 db**，且 acc-* 分散在其中（实测 2026-10-12）：
+#   192.168.1.136 db0  1 个 acc-*      （就是 T_User 里那唯一一行账号）
+#   192.168.1.136 db1  12 个 acc-*
+#   192.168.1.137 db1  1 个 acc-*
+# 所以这里用**列表**而不是单 host —— Spring 的 spring.data.redis.* 只支持
+# 一个连接，表达不了这种结构，故本模块不用它的自动配置，见 RedisAccountRepository。
+#
+# ⚠️ 密码与 MySQL 的**不一样**，且大小写很容易看错：
+#    Redis   = QianLong@2026&   ← 注意是大写 L，且**末尾有个 &**
+#    MySQL   = Qianlong@2026    ← 小写 l，无 &
+#    两个密码只差一个字母大小写与一个 & 符号，肉眼极易混淆。
+#    我第一版就写成了 Qianlong@2026&（小写 l），
+#    表现为「三个实例全部连接失败」，而这时接口**不会报错**，
+#    只会让所有账号的 hasRedis 变成 false —— 很容易被误读成
+#    「这些账号在 Redis 里确实没有实时对象」。密码取自现场工具的
+#    strategy_test/config.ini（pwd）与 datahub_test/config.ini（r_pwd），两处一致。
+#    生产环境请改用环境变量注入，不要把密码提交进仓库。
+# =============================================================================
+app:
+  redis:
+    # 单次 SCAN 的游标批次；acc-* 数量很少，这里只是防止误扫全库
+    scan-count: 500
+    # 命令超时（毫秒）。Redis 不可达时页面应尽快降级提示，而不是把接口挂住
+    timeout-ms: 3000
+    instances:
+      - id: '136-0'
+        host: 192.168.1.136
+        port: 6379
+        db: 0
+        password: QianLong@2026&
+      - id: '136-1'
+        host: 192.168.1.136
+        port: 6379
+        db: 1
+        password: QianLong@2026&
+      - id: '137-1'
+        host: 192.168.1.137
+        port: 6379
+        db: 1
+        password: QianLong@2026&
 
 logging:
   level:

@@ -1,7 +1,12 @@
 # 云条件单后台管理系统 · 后端
 
-管理端后台服务的后端实现。**当前完成范围：系统管理模块的三个页面**
-（管理用户与权限 / 角色与权限 / 操作审计）+ 登录鉴权。
+管理端后台服务的后端实现。**当前完成范围**：
+
+| 模块 | 页面 | 状态 |
+|---|---|---|
+| 系统管理 | 管理用户与权限 / 角色与权限 / 操作审计 | ✅ |
+| 登录鉴权 | 登录 / 登出 / 资料 / 改密 | ✅ |
+| 账户与用户 | 用户账号 / 签署与股东号 / 登录日志 | ✅ |
 
 | 项 | 版本 |
 |---|---|
@@ -9,7 +14,16 @@
 | Spring Boot | 3.5.16 |
 | MyBatis-Plus | 3.5.16（`mybatis-plus-spring-boot3-starter`） |
 | Sa-Token | 1.44.0（`sa-token-spring-boot3-starter`） |
+| Lettuce | 6.6.0（读 Redis `acc-*`，版本由 Boot BOM 管理） |
 | MySQL | 8.0.45 @ `192.168.1.136:3306` / 库 `qianlong_cloud` |
+| Redis | 8.6.2 @ `192.168.1.136:6379`、`192.168.1.137:6379` |
+
+> ⚠️ **两个密码只差大小写和一个符号，极易看错**：
+> MySQL 是 `Qianlong@2026`（小写 l，无 `&`），
+> Redis 是 `QianLong@2026&`（**大写 L**，**末尾有 `&`**）。
+> 实现时第一版就写成了小写 l + `&`，表现为「三个 Redis 实例全部连接失败」，
+> 而接口**不报错**，只会让所有账号的 `hasRedis` 变成 false ——
+> 很容易被误读成「这些账号在 Redis 里确实没有实时对象」。
 
 ---
 
@@ -129,6 +143,51 @@ UNION ALL SELECT 'T_AdminAudit',           COUNT(*) FROM T_AdminAudit;
 > 关掉后「字段名即列名」，与 DDL 严格一致。
 > 同时 `map-underscore-to-camel-case: false` 也要关，否则查询结果映射不上。
 
+### 账户与用户模块用到的**既有表**（只读，本项目不动其结构）
+
+| 表 | 用途 | 现场实况 |
+|---|---|---|
+| `T_User` | 云单业务用户（客户账号） | **只有 1 行**（AUTO_INCREMENT 已到 160707，历史上写过多行） |
+| `T_UserLog` | 客户登录/操作日志 | **191,009 行**，且**只有主键索引** |
+
+> ⚠️ **这两张表一个字都不能改**（不加列、不加索引、不改注释）。
+> 因此 `T_UserLog` 的查询不能靠加索引优化，只能靠查询策略：
+> 默认走主键倒序分页（~1ms）；`Account LIKE` ~106ms、`GROUP BY Account` ~90ms
+> 都在可接受范围（实测 19.1 万行）。若涨到千万级需与现场协商。
+
+> **`T_UserLog` 有两个必须如实呈现、不要「修好」的现场事实**：
+> 1. `LogIP` / `LogMAC` / `LogOS` **三列全部为 NULL**（191009 行无例外）。
+>    所以页面「只看有设备信息的」筛选**必然查出 0 条** —— 那是真的没有数据，
+>    不是查询写错了。后端如实返回 0，前端也已写明。
+> 2. `Info` 实际只有 `user registed` / `user insert or updated` 两类取值，
+>    不承载「失败原因」语义。
+
+### Redis `acc-*`（账户与用户页的实时态）
+
+键名形如 `acc-<账号>_<账号类型>_<渠道>`，类型是 **ReJSON-RL**，
+所以必须用 `JSON.GET` 读（用 `GET` 会报 WRONGTYPE）。字段名照现场：
+`useraccount` / `accounttype` / `maintype` / `onlineflag` / `syncflag` /
+`strategyserverid` / `traderserver` / `regprotocal` / `shareHolders`。
+
+**现场是「多实例 + 多 db」，acc-* 分散在其中**（实测 2026-10-12）：
+
+| 实例 | acc-* 数量 |
+|---|---|
+| `192.168.1.136` db0 | 1 |
+| `192.168.1.136` db1 | 12 |
+| `192.168.1.137` db1 | 1 |
+
+所以配置写成**列表**（`app.redis.instances`），而不是用
+`spring.data.redis.*`（那只能表达一个连接）。
+少读一个库的表现是「某些账号 `hasRedis=false`」，那不是「没有」而是「没查到」，
+两者在运维判断上完全不同 —— 所以另外提供 `/account/redis-instances`
+让人能确认「是账号真的没有实时对象」还是「我们没连上 Redis」。
+
+> **SCAN 必须循环到游标结束**：`SCAN` 是增量游标，一次调用只返回一批，
+> 且不保证返回全部。只调一次会漏键，而这种缺失很难察觉
+> （页面只是少了一个实时态标记）。代码里做了循环 + 轮数上限兜底。
+> 用 `SCAN` 而非 `KEYS`：现场 137 db0 有 400 万条流，`KEYS` 会把实例拖垮。
+
 ---
 
 ## 接口清单
@@ -191,6 +250,56 @@ UNION ALL SELECT 'T_AdminAudit',           COUNT(*) FROM T_AdminAudit;
 |---|---|---|
 | GET | `/system/password-policy` | 登录即可（页面要用它渲染提示） |
 | PUT | `/system/password-policy` | `action:system-user:manage` |
+
+### 账户与用户 `accountApi`
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/account/accounts` | 用户账号列表（MySQL `T_User` + Redis `acc-*` **合并后**返回） | 登录即可 |
+| GET | `/account/accounts/{account}` | 单账号详情（两侧合并） | 登录即可 |
+| GET | `/account/redis/{account}` | 该账号在 Redis 的实时态原始 JSON | 登录即可 |
+| GET | `/account/redis-instances` | Redis 实例连接情况（**排查用**，非前端契约） | 登录即可 |
+| GET | `/account/logs` | 登录日志明细（`T_UserLog`） | 登录即可 |
+| GET | `/account/logs/stats` | 登录日志按账号聚合（登录频次） | 登录即可 |
+
+**本模块只读，因此没有独立的操作权限点。** 权限点只列真正危险的动作 ——
+避免管理员图省事全勾上而失去意义。将来若加「重置账号密码」这类写操作，
+再引入独立权限点并写审计。
+
+三个页面与接口的对应关系：
+* **用户账号** → `listAccounts`（合并行）+ `getRedisAccount`（实时态抽屉）
+* **签署与股东号** → `listAccounts`（复用，靠 `signed` 筛选；股东号已在行里）
+* **登录日志** → `listLogs` + `listLogStats`
+
+#### 合并口径（三条，都会影响页面读数）
+
+1. **以两侧账号的并集为准**：只在 MySQL 有（Redis 对象已过期）、
+   只在 Redis 有（库里还没落数据）**都要展示** —— 这两种差异本身就是要运维关注的信息。
+2. **两边都有的字段以 Redis 为准**：Redis 是实时态，
+   MySQL 那行可能很久没更新（现场 `T_User` 的 `LoginTime` 停在 2026-09-15，
+   而 Redis 里那些账号是活的）。
+3. **`hasRedis` 明确标出**「这个账号在 Redis 侧没有对象」，
+   而不是把 Redis 字段静默填 null —— 否则「没有实时态」和
+   「实时态是空值」在页面上长得一模一样，运维没法区分。
+
+**为什么合并必须放后端**：两个源都要参与筛选（在线 / 已签署 / 渠道横跨两边），
+拆成两个接口会让前端无法正确分页与筛选（要么分页各分一遍，
+要么取回全量在浏览器里筛）。
+
+> ⚠️ 本模块**不返回 `T_User.Passwd`**：出参 DTO 里根本没有这个字段
+> （与 `T_AdminUser.passwordHash` 同样处理，用类型杜绝回显）。
+
+#### 关于「全量读 `T_User`」
+
+`listAccounts` 会 `SELECT * FROM T_User`（无分页）—— 因为合并是并集语义，
+必须先拿到两侧全量才能算并集、再筛选、再分页；先分页再合并会出现
+「第 2 页混进第 1 页的账号」这种无法解释的结果。
+
+现场这张表**只有 1 行**，全量读没有代价。⚠️ 但它的
+AUTO_INCREMENT 已到 160707，说明历史上写过多行；
+**若将来真涨到几十万行，必须改成下推式**：先在 MySQL 按条件取候选、
+Redis 侧按前缀筛，再归并，不能继续全量读到内存里。
+`AccountService` 里已就地留了说明。
 
 ---
 
@@ -306,12 +415,18 @@ backend/
     │   │   │   ├── WebConfig.java               # ★ Sa-Token 拦截器注册（关键）
     │   │   │   ├── SaTokenPermissionProvider.java
     │   │   │   ├── MybatisPlusConfig.java
-    │   │   │   └── JacksonConfig.java
+    │   │   │   ├── JacksonConfig.java
+    │   │   │   └── RedisProperties.java         # app.redis.instances 实例清单
     │   │   ├── controller/          # HTTP 层（原 web 包）
+    │   │   │   ├── AccountController.java       # 账户与用户
+    │   │   │   └── ...（系统管理各 Controller）
     │   │   ├── dto/                 # 出入参（与前端 domain.ts 逐字段对齐）
-    │   │   ├── entity/              # 8 张表的实体
+    │   │   ├── entity/              # 表实体（T_Admin* 8 张 + T_User / T_UserLog）
     │   │   ├── mapper/              # MyBatis-Plus Mapper（含聚合 SQL）
-    │   │   └── service/             # 业务逻辑
+    │   │   └── service/
+    │   │       ├── RedisAccountRepository.java  # ★ 多实例 acc-* 只读访问
+    │   │       ├── AccountService.java          # ★ MySQL+Redis 合并
+    │   │       └── AccountLogService.java
     │   └── resources/application.yml
     └── test/java/.../AdminApplicationTests.java   # 冒烟 + 守护鉴权不失效
 ```

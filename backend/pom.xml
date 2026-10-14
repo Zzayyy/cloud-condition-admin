@@ -59,6 +59,19 @@
       <version>${sa-token.version}</version>
     </dependency>
 
+    <!--
+      Redis 客户端：账户与用户页要把 MySQL T_User 与 Redis acc-*（ReJSON）合并展示。
+      ⚠️ 直接用 lettuce-core，**不用 spring-boot-starter-data-redis** ——
+      现场有多个实例、多个 db 都存着 acc-*（136 db0/db1、137 db1），
+      而 RedisAutoConfiguration 只按「一个 host」装配，表达不了这种结构，
+      还会多出一个用不到的 RedisTemplate。
+      实际访问走 service/RedisAccountRepository 里自建的连接。
+    -->
+    <dependency>
+      <groupId>io.lettuce</groupId>
+      <artifactId>lettuce-core</artifactId>
+    </dependency>
+
     <!-- 只要 BCrypt 本身，不引入 Spring Security 自动配置 -->
     <dependency>
       <groupId>org.springframework.security</groupId>
