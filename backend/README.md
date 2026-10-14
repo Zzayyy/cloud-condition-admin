@@ -8,6 +8,7 @@
 | 登录鉴权 | 登录 / 登出 / 资料 / 改密 | ✅ |
 | 账户与用户 | 用户账号 / 签署与股东号 / 登录日志 | ✅ |
 | 业务数据 | 条件单管理 | ✅ 只读（写操作见下） |
+| 业务数据 | 委托单管理 | ✅ 只读 |
 
 | 项 | 版本 |
 |---|---|
@@ -277,6 +278,53 @@ UNION ALL SELECT 'T_AdminAudit',           COUNT(*) FROM T_AdminAudit;
 ## 接口清单
 
 上下文路径 `/api`，全部与前端 `src/api/endpoints.ts` 逐一对齐。
+
+### 业务数据：委托单 / 成交 `tradeApi`
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/trade/orders` | 委托单列表（`table` 主表/历史表 + `bsType`/`ocType`/`code`/`keyword` 筛选） |
+| GET | `/trade/orders/{id}` | 委托单详情（先主表后历史表） |
+| GET | `/trade/orders/{orderNo}/trades` | **某委托号**下的成交明细（委托 → 成交下钻） |
+| GET | `/trade/orders/stats/bs` | 买卖方向分布（全量口径） |
+| GET | `/trade/orders/stats/daily` | 按天下单量趋势 |
+| GET | `/trade/trades` | 成交列表（成交回报页用） |
+
+数据**只来自 MySQL** 的四张表：
+
+| 表 | 用途 | 现场实况 |
+|---|---|---|
+| `T_Order` | 委托主表 | **0 行** |
+| `T_Order_his` | 委托历史表 | **1 行**（测试数据，`OrderNo=1234567`） |
+| `T_Trade` | 成交主表 | **0 行** |
+| `T_Trade_his` | 成交历史表 | **1 行**（同一笔 `OrderNo=1234567`） |
+
+所以「主表」标签页是空的、「历史表」有 1 条 —— **如实呈现，不拿别处的数据填充**
+（条件单那边曾把 Redis 数据混进来，导致页面读数失去意义，见下节）。
+
+> **路由注意**：`/trade/orders/stats/bs` 与 `/trade/orders/{id}` 段数相同，
+> 但 Spring 的路径匹配**优先精确匹配**，`stats` 不会被当成 id 解析。
+> 已实测确认（测试里专门有一条守着它）。
+
+> **`table` 参数来自用户可点的 tab**（前端
+> `table: tab === 'active' ? 'T_Order' : 'T_Order_his'`），所以它是不可信输入。
+> 后端用 `TradeTable` 枚举严格白名单（非法值返回 40000，不静默回落），
+> SQL 里再用 `<choose>` 二次校验 —— 与条件单同样的两层防护。
+
+#### ⚠️ 两个列类型带来的口径问题（都已按实际类型处理）
+
+1. **`OrderTime` / `TradeTime` 是 `date` 而不是 `datetime`**
+   （现场 DDL 实测），所以**没有时分秒**。接口返回 `yyyy-MM-dd`，
+   **不补 `00:00:00`** —— 补零会让页面显示「2026-06-04 00:00」，
+   让人误以为真有那个精确时刻。
+2. **`T_Trade.Volumn` 是 `varchar` 而不是数字**（现场值是 `'5'`），
+   接口按字符串返回，**不擅自转数字** —— 前端契约里也是 `string | null`。
+
+#### ⚠️ `OrderStatue` 的含义未知（沿用 README 的待确认项）
+
+协议文档没定义取值，现场 `T_Order_his` 只有 1 条测试数据（值为 1）。
+前端只展示 `StatueDis` 文本与原值、不做状态着色；
+**后端同样不臆造映射** —— 猜一个映射出来会让别人以为那是确认过的口径。
 
 ### 鉴权 `authApi`
 

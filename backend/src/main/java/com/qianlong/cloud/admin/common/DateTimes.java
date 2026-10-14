@@ -31,4 +31,19 @@ public final class DateTimes {
     public static String formatDate(LocalDateTime value) {
         return value == null ? null : DATE.format(value);
     }
+
+    /**
+     * 格式化 {@link java.time.LocalDate}（只有日期，没有时分秒）。
+     *
+     * <p>用于那些**列类型就是 {@code date}** 的表：{@code T_Order.OrderTime}、
+     * {@code T_Order_his.OrderTime}、{@code T_Trade.TradeTime}、
+     * {@code T_Trade_his.TradeTime}（现场实测均为 {@code date}）。
+     *
+     * <p>刻意输出 {@code yyyy-MM-dd} 而**不是**补成 {@code 00:00:00} ——
+     * 补零会让页面显示「2026-06-04 00:00」，让人误以为真有这个精确时刻。
+     * 库里只有日期，就只给日期。
+     */
+    public static String formatLocalDate(java.time.LocalDate value) {
+        return value == null ? null : DATE.format(value);
+    }
 }
