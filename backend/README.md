@@ -13,6 +13,7 @@
 | 业务数据 | 策略日志管理 | ✅ 只读 |
 | 数据存储 | Redis 管理 | ✅ 只读 + 删键（高危，需权限点） |
 | 数据存储 | 数据库管理 | ✅ 只读（表清单 / 结构 / 分页读表 / 只读 SQL） |
+| 服务器管理 | 委托服务器 | ✅ **只读**（节点清单 + 账号分配关系，**不做启停**） |
 
 | 项 | 版本 |
 |---|---|
@@ -194,6 +195,36 @@ UNION ALL SELECT 'T_AdminAudit',           COUNT(*) FROM T_AdminAudit;
 > （页面只是少了一个实时态标记）。代码里做了循环 + 轮数上限兜底。
 > 用 `SCAN` 而非 `KEYS`：现场 137 db0 有 400 万条流，`KEYS` 会把实例拖垮。
 
+### Redis 配置中与委托服务器相关的一段（`app.trade.*`）
+
+```yaml
+app:
+  redis:
+    instances: [...]          # 业务要读的 (host, db) 组合（与上面同一份）
+  trade:
+    offline-after-sec: 30     # 心跳阈值。⚠️ 必须与前端 SERVER_OFFLINE_AFTER_SEC 一致
+    registry-key: traderserver
+    registry-instances: []    # 留空 = 读上面 instances 的全部；将来加机器不用改这里
+    channels:
+      # ⚠️ 现场实测带 _1 后缀（REDISSELECT=1），不带后缀的那一套并不存在
+      online: tradeserver_online
+      beat: tradeserver_beat
+      offline: tradeserver_offline
+      suffix: '_1'
+```
+
+> **`registry-instances` 留空是有意的**：将来现场加一台委托服务器，
+> 只要它的 `(host, db)` 在 `app.redis.instances` 里，本模块自动能读到，
+> 不需要回来改代码或改这一段配置。
+>
+> **接口把阈值回传在 `meta.offlineAfterSec`，页面会拿它与前端常量比对**，
+> 不一致时直接在页面上告警 —— 两侧的「在线」判定必须同口径，
+> 否则会出现「页面显示 1 台在线、汇总卡说 0 台」这种没法解释的偏差。
+
+> **没有常驻 Pub/Sub 订阅**：在线状态由 `lastActiveTimeLong` 推导即可算准，
+> 而订阅要在后台长期占一条连接。`channels` 目前仅用于展示与排查。
+> 将来若要做「实时上下线告警」，再在这里加开关。
+
 ### 条件单模块用到的**既有表**（只读，本项目不动其结构）
 
 | 对象 | 用途 | 现场实况 |
@@ -329,6 +360,83 @@ UNION ALL SELECT 'T_AdminAudit',           COUNT(*) FROM T_AdminAudit;
 协议文档没定义取值，现场 `T_Order_his` 只有 1 条测试数据（值为 1）。
 前端只展示 `StatueDis` 文本与原值、不做状态着色；
 **后端同样不臆造映射** —— 猜一个映射出来会让别人以为那是确认过的口径。
+
+### 服务器管理：委托服务器 `tradeApi`（**只读**）
+
+| 方法 | 路径 | 说明 | 权限 |
+|---|---|---|---|
+| GET | `/trade/servers` | 节点清单（跨实例全读 + 关键字/在线筛选 + 分页/排序） | 登录即可 |
+| GET | `/trade/assignments` | 账号 → 委托服务器 的分配关系（`acc-*` 的 `traderserver` 字段） | 登录即可 |
+| GET | `/trade/servers/{serverId}/accounts` | 某台节点承载的账号（详情抽屉下钻） | 登录即可 |
+
+数据只来自 Redis，**两张表一个字都不写**。
+
+#### 现场实况（2026-10-14 实测，全部只读探查）
+
+注册表键 `traderserver` 在**三个库上各存一份，且内容完全不同**：
+
+| 实例 | 条数 | 状况 |
+|---|---|---|
+| `192.168.1.136` db0 | 2 | 22 小时前（我们自己 `strategy_test` 插件的测试残留，`mac=…cloudcond-api` / `…Test`） |
+| `192.168.1.136` db1 | 7 | **只有 `id=1 / ip=192.168.1.137 / mac=20474789c674Test` 是活的**（每 10 秒刷新），其余是 8/12、9/14 的僵尸记录 |
+| `192.168.1.137` db1 | 4 | 全部 63 天前 |
+| `192.168.1.137` db0 | 0 | 无此键（该库只有 1412 万条的 `ST-*` 流，**不要去扫**） |
+
+> **委托服务器确实在跑**：`192.168.1.137` 上有 `./qltradeserverasy133`（属主 `qianlong`，
+> `PID 3656140 → 3657013`，监听 8185 与 1234）；`192.168.1.136` 上也有一个同名进程。
+> 实测订阅 `tradeserver_beat_1` 抓到实时心跳包
+> `{"id":1,"unique_string":"WT-570-20474789c674Test-1","ip":"192.168.1.137","mac":"20474789c674Test"}`，
+> 约 10 秒一次；`136 db1` 的 `WT-1-reply` 有 20140 条、最后一条是当天 14:35。
+> 所以「现场起没起委托服务器」这件事，本页现在能直接回答。
+
+#### ⚠️ 四个必须如实呈现、不要「修好」的现场特征
+
+1. **`id` 会重复**：`136 db1` 的 7 条里有 **4 个 `id=0`**。
+   所以行的唯一键是 **`(来源实例, 数组下标)`**，接口为此回传 `instance` 与 `arrayIndex`；
+   前端表格的 `row-key` 也换成这一对 —— 否则会出现「点详情打开的是另一行」。
+2. **`mac` 也会重复**：`id=1/mac=…Test`（活）与 `id=0/mac=…Test`（死）同时存在。
+3. **`enable` 不能用来判在线**：`136 db0` 的两条与 `137 db1` 的四条都是
+   `enable=true`，但最后活跃分别是 22 小时前与 63 天前。**在线只看 `lastActiveTimeLong`**
+   （阈值 `app.trade.offline-after-sec`，现场 13 条里恰好只有 1 条在线）；
+   `enable=false` 则一定不算在线。
+4. **两处 `traderserver` 的字段名不一样**：注册表里是 `last-active-time`（带横线），
+   而 `acc-*` 里内嵌的是 `lastactivetime`（**全小写、无横线**）。
+   这是现场两处结构本身就不一致，两边都照原样读，**不做「统一」**。
+   且 `acc-*` 里那个时间是**分配时刻**、不是节点心跳（现场普遍是几天到两个月前），
+   所以**不能**拿它给分配列着色成「在线/离线」，否则会出现
+   「节点表说这台在线、分配列说它离线」的自相矛盾。
+
+> **为什么后端不按 `id` 去重**：现场这 4 条 `id=0` 是真实存在的记录
+> （多次上线累积）。去重会让「这台机器上线过好几次、其中几条是陈旧残留」
+> 这件事从页面上消失，而那恰是运维要看的。所以全部列出，由页面呈现重复。
+
+#### ⚠️ 为什么**没有**启停接口（需求方已明确去掉该功能）
+
+改 `enable` 需要先确定「改哪一台」，而现场可用的定位条件都不唯一
+（`id` 重复、`mac` 也重复），后端又拿不到「这台机器是否属于本次运维范围」这一信息。
+猜着写回很容易改到一台并不属于本次范围的机器上，而这是在往**生产 Redis** 写。
+所以本模块只做只读呈现，启停由现场按自己的流程操作。
+
+配套地，`action:server-trade:toggle` 这个权限点已从「可授予的权限」里撤掉，
+但**保留在审计动作字典**里（`PermissionCatalog.AUDIT_ONLY_ACTIONS`）——
+库里的历史审计行仍有 `Action='action:server-trade:toggle'`，
+整个删掉会让那些旧记录在审计页显示成光秃秃的键名。
+
+#### 节点列表的默认排序
+
+**在线优先 + 心跳倒序**。不这么排的话，进页面第一眼全是几个月前的残留，
+唯一活着的那台被挤到第 8 位之后 —— 而「现在到底有没有活的委托服务器」
+正是这个页面要回答的第一个问题。用户显式点列排序时以用户选择为准。
+
+#### 图表的全量口径
+
+「各节点承载账号数」图必须按**全量**分配关系统计，不能只用当前页
+（那会得出「第 1 页的分布」）。为此页面另外拉一次 `pageSize=200` 的全量请求，
+超过 200 时在标题旁如实标注「已截断」。现场 `acc-*` 只有 14 个，远不到上限。
+
+> ⚠️ 修掉了一个原有缺陷：这张图原先**无条件**调 `mockServerLoad()`，
+> 于是真实态下也在用演示数据画图、而且不报错 —— 与 README 前面记的
+> 「Redis 管理页类型分布图无条件调 mock」是同一类坑。
 
 ### 业务数据：策略日志 `strategyApi.listLogs`
 
@@ -759,7 +867,8 @@ backend/
     │   │   │   ├── SaTokenPermissionProvider.java
     │   │   │   ├── MybatisPlusConfig.java
     │   │   │   ├── JacksonConfig.java
-    │   │   │   └── RedisProperties.java         # app.redis.instances 实例清单
+    │   │   │   ├── RedisProperties.java         # app.redis.instances 实例清单
+    │   │   │   └── TradeServerProperties.java   # app.trade.* 委托服务器（只读）
     │   │   ├── controller/          # HTTP 层（原 web 包）
     │   │   │   ├── AccountController.java       # 账户与用户
     │   │   │   └── ...（系统管理各 Controller）
@@ -767,8 +876,11 @@ backend/
     │   │   ├── entity/              # 表实体（T_Admin* 8 张 + T_User / T_UserLog）
     │   │   ├── mapper/              # MyBatis-Plus Mapper（含聚合 SQL）
     │   │   └── service/
+    │   │       ├── RedisJsonGateway.java        # ★ 多实例连接 + SCAN + 按实例读同一个键
     │   │       ├── RedisAccountRepository.java  # ★ 多实例 acc-* 只读访问
     │   │       ├── AccountService.java          # ★ MySQL+Redis 合并
+    │   │       ├── TraderServerRepository.java  # ★ 委托服务器注册表只读（跨实例全读）
+    │   │       ├── TradeServerService.java      # ★ 委托服务器节点 + 分配关系
     │   │       └── AccountLogService.java
     │   └── resources/application.yml
     └── test/java/.../AdminApplicationTests.java   # 冒烟 + 守护鉴权不失效
@@ -803,6 +915,7 @@ backend/
 
 * **本模块只实现系统管理三个页面**。其余页面（服务器管理、业务数据、账户与用户、
   数据存储）的接口尚未实现，`endpoints.ts` 里已有定义，可按同样结构继续加。
+  （委托服务器页现已实现，见上；策略服务器 / 数据中台 / 消息总线三页仍未实现。）
 * **Sa-Token 用默认内存 DAO**：会话在应用重启后失效（管理员需重新登录）。
   现场若要多实例部署，需要换成 Redis DAO 并引入 `sa-token-redis-jackson`。
 * **删除账号不删审计**：这是刻意的 —— 审计要认人，
@@ -811,6 +924,14 @@ backend/
 * 密码策略目前是**全局单行**配置。若将来要按角色区分复杂度要求，需要给策略表加维度。
 * **并发编辑**：两个管理员同时改同一角色时，后提交的会覆盖前者（last-write-wins）。
   当前未做乐观锁；若现场有多人同时运维，建议给 `T_AdminRole` 加 `version` 字段。
+* **委托服务器不做启停**（需求方明确要求）：只呈现状态。
+  `action:server-trade:toggle` 已从可授予权限中撤销，仅保留为历史审计标签。
+* **委托服务器页的「承载账号数」按 `id` 匹配**：现场 `id` 会重复
+  （`136 db1` 有 4 个 `id=0`），所以那几个同 id 的节点会显示承载同一批账号。
+  这是数据本身如此，接口与页面都已注明；不去猜一个更细的匹配规则
+  （那会把「本该看到的重复」藏起来）。
+* **`meta.registryCopies` 只统计「有该键的实例数」**：若某实例上该键不存在
+  （现场 `137 db0` 就是），它不计入份数，也不报错 —— 这符合预期，不是缺陷。
 
 ---
 

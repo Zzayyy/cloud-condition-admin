@@ -68,7 +68,6 @@ public class PermissionCatalog {
 
     static {
         ACTIONS.put("action:conditional:write", new ActionDef("启停 / 删除条件单", "bizdata", "high"));
-        ACTIONS.put("action:server-trade:toggle", new ActionDef("启停委托服务器", "server", "high"));
         ACTIONS.put("action:storage-redis:delete-key", new ActionDef("删除 Redis 键", "storage", "high"));
         ACTIONS.put("action:storage-mysql:readonly-sql", new ActionDef("执行只读 SQL", "storage", "medium"));
         ACTIONS.put("action:system-user:manage", new ActionDef("管理后台账号", "system", "high"));
@@ -87,9 +86,22 @@ public class PermissionCatalog {
     static {
         AUDIT_ONLY_ACTIONS.put("system:connection", new ActionDef("修改连接配置", "system", "high"));
         AUDIT_ONLY_ACTIONS.put("system:login", new ActionDef("管理端登录", "system", "low"));
+        /*
+         * 「启停委托服务器」已按需求**去掉该功能**（改为只读状态），权限点随之撤销。
+         *
+         * 但不能把这个动作键整个删掉：库里的历史审计行（T_AdminAudit）
+         * 仍有 Action='action:server-trade:toggle' 的记录，动作中文名要从这里查。
+         * 直接删掉的话，审计页会把这些历史行显示成光秃秃的键名
+         * （actionLabel 查不到就返回键本身）。
+         *
+         * 放在 AUDIT_ONLY_ACTIONS 里正好：**历史可读，但不再可授予**
+         * （normalize 只认 MENUS + ACTIONS，所以它已不是合法权限键）。
+         */
+        AUDIT_ONLY_ACTIONS.put("action:server-trade:toggle",
+                new ActionDef("启停委托服务器（功能已下线）", "server", "high"));
     }
 
-    /** 全部合法权限键（不含通配符），共 17 + 7 = 24 个 */
+    /** 全部合法权限键（不含通配符），共 17 + 6 = 23 个 */
     private static final Set<String> ALL_KEYS = new LinkedHashSet<>();
 
     static {

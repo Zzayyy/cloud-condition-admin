@@ -13,11 +13,30 @@ export interface TraderServer {
   id: number
   ip: string
   mac: string
-  /** 是否启用 */
+  /** 是否启用（只读展示，本页不提供启停） */
   enable: boolean
   /** 最后活跃时间（字符串形式） */
   'last-active-time': string
   lastActiveTimeLong: number
+  /**
+   * 来源实例（如 `192.168.1.136/db1`）。
+   *
+   * 现场同一个 `traderserver` 键在多个实例上**各存一份且内容不同**
+   * （136 db0 两条测试残留、136 db1 七条、137 db1 四条已过期 63 天），
+   * 所以必须能看出这一行是从哪个库读到的。
+   */
+  instance?: string
+  /**
+   * 在该实例数组里的下标。
+   *
+   * 现场 `id` 会重复（136 db1 的 7 条里有 4 个 `id=0`），
+   * 只有 `(instance, arrayIndex)` 能唯一定位一行 —— 表格的 row-key 用它。
+   */
+  arrayIndex?: number
+  /** 后端按心跳阈值算好的在线判定（页面本地的 isServerOnline 会再按当前时间算一次） */
+  online?: boolean
+  /** 心跳年龄（秒），后端在响应时刻算好 */
+  ageSec?: number | null
 }
 
 /** 策略服务器（Redis JSON 键 strategy-srv 中的元素） */
@@ -58,6 +77,40 @@ export interface DatahubNodeDetail extends DatahubNode {
   entryTotal?: number
   /** 是否启用（沿用 traderserver 那套 enable 约定；中台侧暂无此字段，预留） */
   enable?: boolean
+}
+
+/** 委托服务器节点列表的附加信息（后端 meta，非表格契约字段） */
+export interface TraderServerListMeta {
+  /** 读到注册表的份数（每存在该键的实例算一份） */
+  registryCopies: number
+  /** 摊平后的条目总数（未去重） */
+  entryTotal: number
+  /** 其中在线数（后端按 offlineAfterSec 判定） */
+  onlineCount: number
+  /** 心跳阈值（秒）——用于自检与前端常量是否一致 */
+  offlineAfterSec: number
+  configuredInstances: number
+  redisInstances: string[]
+  /** 非空表示列表可能不完整（不是数据没有，是我们没连上） */
+  redisUnavailable: string[]
+  registryKey: string
+  onlineChannel: string
+  beatChannel: string
+  offlineChannel: string
+}
+
+/**
+ * 委托服务器节点列表返回。
+ *
+ * 比通用 `PageResult` 多一个 `meta` —— 这个键跨三个实例且大多是陈旧残留，
+ * 「一共读了几份、有没有连不上」必须能传到页面上。
+ */
+export interface TraderServerPage {
+  list: TraderServer[]
+  total: number
+  page: number
+  pageSize: number
+  meta: TraderServerListMeta
 }
 
 /* ------------------------------- 条件单/策略 ------------------------------- */

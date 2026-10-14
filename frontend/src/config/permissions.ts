@@ -60,13 +60,6 @@ export const ACTION_PERMISSIONS: ActionPermissionDef[] = [
     dangerous: true,
   },
   {
-    menu: 'server-trade',
-    action: 'toggle',
-    label: '启停委托服务器',
-    desc: '改写 Redis 键 traderserver 里的 enable 字段。停用后该节点不再接受新账号分配。',
-    dangerous: true,
-  },
-  {
     menu: 'storage-redis',
     action: 'delete-key',
     label: '删除 Redis 键',

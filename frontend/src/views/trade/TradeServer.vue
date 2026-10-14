@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref } from 'vue'
 import {
+  NAlert,
   NButton,
   NCard,
   NDataTable,
@@ -12,12 +13,10 @@ import {
   NGrid,
   NIcon,
   NInput,
-  NSwitch,
   NTabPane,
   NTabs,
   NTag,
   NTooltip,
-  useMessage,
   type DataTableColumns,
   type DataTableSortState,
 } from 'naive-ui'
@@ -49,11 +48,14 @@ import { orDash, relativeTime, thousands } from '@/utils/format'
  * 委托服务器页：节点清单 + 账号分配关系。
  *
  * 两个 Tab 分别对应两类数据：
- *  - 节点：Redis 键 `traderserver`
+ *  - 节点：Redis 键 `traderserver`（**跨实例全读**，现场三个库各存一份且内容不同）
  *  - 账号分配：Redis 键 `acc-*` 里的 `traderserver` 字段
+ *
+ * ⚠️ 本页**只读**：不提供启停。现场 `traderserver` 键里的 id 与 mac 都可能重复
+ * （136 db1 的 7 条里有 4 个 `id=0`），后端拿不到「这台机器是不是本次运维范围内的
+ * 实例」这一信息，按 id/mac 猜着写回很容易改到一台并不属于本次范围的机器上。
  */
 
-const message = useMessage()
 const accent = '#0d9c9c'
 
 /** 当前 Tab */
@@ -78,7 +80,7 @@ const {
   data: serverData,
   loading: serverLoading,
   error: serverError,
-  isMock: serverIsMock,
+  usingMock: serverUsingMock,
   load: loadServers,
 } = useResource(
   (params: Record<string, unknown>) => tradeApi.listServers(params),
@@ -100,12 +102,27 @@ function reloadServers() {
   loadServers(serverParams())
 }
 
-onMounted(reloadServers)
+/**
+ * 首屏就要把「分配关系」也拉一次 —— 页面顶部的两个指标（已分配账号数）与
+ * 「各节点承载账号数」图表都依赖它，而它们与当前是哪个 Tab **无关**。
+ *
+ * ⚠️ 早先只在 `reloadAssignments()` 里加载（切到分配 Tab 才触发），
+ * 导致刚进页面时图表显示「暂无分配数据」、指标显示 0 —— 而数据其实是有的，
+ * 看起来就像现场没有账号分配。切一次 Tab 又"好了"，那只是把缺失掩盖掉。
+ *
+ * `reloadServers` 里一并触发，而不是各写一遍，避免以后漏掉其中一个。
+ */
+function reloadAll() {
+  reloadServers()
+  void loadAllAssignments()
+}
+
+onMounted(reloadAll)
 
 // 10 秒自动刷新（委托服务器心跳 5 秒一次）
 let timer: ReturnType<typeof setInterval> | undefined
 onUnmounted(() => clearInterval(timer))
-timer = setInterval(reloadServers, 10_000)
+timer = setInterval(reloadAll, 10_000)
 
 function searchServers() {
   serverPage.value = 1
@@ -147,6 +164,8 @@ function accParams() {
 
 function reloadAssignments() {
   loadAssignments(accParams())
+  // 图表要的是**全量**分布，不能只用当前页（那会得出「第 1 页的分布」）
+  void loadAllAssignments()
 }
 
 function searchAssignments() {
@@ -159,35 +178,157 @@ function handleTabChange(value: string) {
   if (value === 'assignments' && !accData.value) reloadAssignments()
 }
 
+/* --------------------------- 全量分配（图表用） --------------------------- */
+
+/**
+ * 全量分配关系，供「各节点承载账号数」图表统计。
+ *
+ * ⚠️ 后端 pageSize 上限是 200（与前几页一致）。现场 acc-* 只有 14 个，
+ * 远不到上限；但**将来若涨过 200，图表会静默少算** —— 所以这里记下
+ * 是否被截断，并在图表下方如实提示，而不是让运维看着一根偏矮的柱子
+ * 以为「这台机器就承载了这么多」。真要涨上去，应改成后端出一个聚合接口。
+ */
+const ALL_PAGE_SIZE = 200
+const allAssignments = ref<RedisAccount[]>([])
+const allAssignmentsTruncated = ref(false)
+/** 全量分配是否已取回（用于区分「确实没有分配」与「还没加载」） */
+const allAssignmentsLoaded = ref(false)
+
+async function loadAllAssignments() {
+  /*
+   * 用 `serverUsingMock` 而不是 `serverIsMock`：后者初值是 false，只在 load() 的
+   * await **之后**才落定。本函数与 loadServers 同时触发，那一刻它还是 false ——
+   * 会误判成真实态、去调后端（演示态下白跑一次真实请求）。见 useResource 的说明。
+   */
+  if (serverUsingMock.value) {
+    allAssignments.value = mockTradeApi.listAssignments({ page: 1, pageSize: ALL_PAGE_SIZE }).list
+    allAssignmentsTruncated.value = false
+    allAssignmentsLoaded.value = true
+    return
+  }
+  try {
+    const res = await tradeApi.listAssignments({ page: 1, pageSize: ALL_PAGE_SIZE })
+    allAssignments.value = res.list
+    allAssignmentsTruncated.value = res.total > res.list.length
+    allAssignmentsLoaded.value = true
+  } catch {
+    // 图表取数失败不该把整页打红（表格自己有错误提示），静默留空并如实标注
+    allAssignments.value = []
+    allAssignmentsTruncated.value = false
+    allAssignmentsLoaded.value = false
+  }
+}
+
 const serverRows = computed(() => serverData.value?.list ?? [])
 const serverTotal = computed(() => serverData.value?.total ?? 0)
 const accRows = computed(() => accData.value?.list ?? [])
 const accTotal = computed(() => accData.value?.total ?? 0)
+const accRowsAll = computed(() => allAssignments.value)
 
 /**
  * 已分配账号总数。
- * 走真实接口时用后端返回的总数；演示数据下用 mock 的全量计数，
- * 避免只统计到当前页却当成全量。
+ *
+ * ⚠️ 用 `allAssignments`（首屏就加载的全量）而**不是** `accTotal` ——
+ * 后者属于「账号分配关系」那个 Tab 的分页结果，进页面时根本没加载，
+ * 于是这个指标会一直显示 0，直到用户切一次 Tab 才"突然"变成 13。
+ * 这是上面 `reloadAll` 要一并加载分配关系的同一个原因。
+ *
+ * 只数「真的分配了服务器」的：现场 `acc-010100011300_7_6` 的
+ * `traderserver.id = -1`（未分配），把它算进去会让「已分配账号」
+ * 比节点页上实际能下钻到的账号还多，两个数字对不上。
  */
-const assignedCount = computed(() =>
-  serverIsMock.value ? mockTradeApi.assignmentCount() : accTotal.value,
-)
+const assignedCount = computed(() => {
+  const list = allAssignments.value
+  return list.filter((row) => {
+    const id = row.traderserver?.id
+    return id !== undefined && id !== null && id >= 0
+  }).length
+})
+
+/**
+ * 后端回传的节点元信息（真实态才有）。
+ *
+ * 现场这个键跨三个实例、且大多数记录是几个月前的残留，
+ * 所以「一共读了几份注册表、有没有实例连不上」必须能看见 ——
+ * 否则「只有 2 条」会被读成「现场就 2 台」。
+ */
+const serverMeta = computed(() => serverData.value?.meta ?? null)
+
+const nodeStatusNote = computed(() => {
+  // 用 usingMock：settled 之前也退回构建期常量，避开 isMock 初值的时序窗口
+  if (serverUsingMock.value) return null
+  const m = serverMeta.value
+  if (!m) return null
+  const parts: string[] = []
+  if (m.redisUnavailable?.length) {
+    parts.push(
+      `有 ${m.redisUnavailable.length} 个 Redis 实例连不上（${m.redisUnavailable.join('、')}），` +
+        '本列表可能不完整。',
+    )
+  }
+  if (m.offlineAfterSec !== SERVER_OFFLINE_AFTER_SEC) {
+    parts.push(
+      `⚠️ 心跳阈值不一致：后端 ${m.offlineAfterSec} 秒、前端常量 ${SERVER_OFFLINE_AFTER_SEC} 秒，` +
+        '两侧的「在线」判定会出现偏差。',
+    )
+  }
+  return parts.length ? parts.join(' ') : null
+})
 
 /* ------------------------------ 汇总 ------------------------------ */
 
+/**
+ * 汇总指标。
+ *
+ * ⚠️ 在线/停用数**必须用后端 meta 的全量口径**，不能对当前页 `filter` ——
+ * 后端返回的是分页后的行，对当前页统计会得出「第 1 页有 1 台在线，总数 13」，
+ * 而实际上现场就那一台是活的，页面读起来像是「还有 12 台状态不明」。
+ */
 const summary = computed(() => {
+  const m = serverMeta.value
+  if (m) {
+    return {
+      online: m.onlineCount,
+      offline: Math.max(0, m.entryTotal - m.onlineCount),
+      total: serverTotal.value,
+    }
+  }
+  // 演示态（或真实态拿不到 meta 时）退回按当前页统计
   const list = serverRows.value
   const online = list.filter(isServerOnline)
-  return {
-    online: online.length,
-    offline: list.length - online.length,
-    total: serverTotal.value,
-  }
+  return { online: online.length, offline: list.length - online.length, total: serverTotal.value }
 })
 
-/** 节点负载：各 IP 承载账号数 */
+/**
+ * 各节点承载账号数。
+ *
+ * ⚠️ 这里**必须按当前数据源分支**：早先的写法是无条件 `mockServerLoad()`，
+ * 于是真实态下也在用演示数据画这张图，而且不报错 —— 与 README 里记的
+ * 「Redis 管理页类型分布图无条件调 mock」是同一类坑。
+ * 真实态下按**全量分配关系**统计（不能只用当前页，那会得出「第 1 页的分布」）。
+ *
+ * 统计维度是分配给的那个 ip（现场 acc-* 里存的是 id + ip），
+ * 故同一个 ip 上有多条 id 不同的记录时会合并成一根柱。
+ */
 const loadOption = computed(() => {
-  const data = mockServerLoad()
+  const buckets = new Map<string, number>()
+  if (serverUsingMock.value) {
+    for (const d of mockServerLoad()) buckets.set(d.label, d.value)
+  } else {
+    for (const row of accRowsAll.value) {
+      const ts = row.traderserver
+      /*
+       * `id < 0` / 无 ip 的是**未分配**（现场 acc-010100011300_7_6 就是 id=-1）。
+       * 归到「未分配」一根柱，而不是拼出一个空 ip 的标签 ——
+       * 那样图上会出现一根没有名字的柱子，看不出是哪个节点。
+       * 口径与上面的「已分配账号」指标一致（那边也不把这些算作已分配）。
+       */
+      const assigned = ts && ts.id !== undefined && ts.id !== null && ts.id >= 0 && ts.ip
+      const label = assigned ? ts.ip!.trim() : '未分配'
+      buckets.set(label, (buckets.get(label) ?? 0) + 1)
+    }
+  }
+  const data = [...buckets.entries()].map(([label, value]) => ({ label, value }))
   return {
     grid: { left: 8, right: 30, top: 8, bottom: 8, containLabel: true },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -282,16 +423,44 @@ const serverColumns: DataTableColumns<TraderServer> = [
   {
     title: '启用',
     key: 'enable',
-    width: 80,
+    width: 96,
     render: (row) =>
-      h(NSwitch, {
-        size: 'small',
-        value: row.enable,
-        'onUpdate:value': () => {
-          // 后端未接通：如实提示，不做本地假状态变更
-          message.warning('后端接口尚未实现，委托服务器的启停开关暂不落库')
+      h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () =>
+            h(
+              NTag,
+              { size: 'small', round: true, bordered: false, type: row.enable ? 'info' : 'default' },
+              { default: () => (row.enable ? '已启用' : '已停用') },
+            ),
+          // 只读：本页不提供启停（现场 id/mac 都可能重复，猜着写回容易改错机器）
+          default: () =>
+            `enable=${row.enable}\n只读展示，本页不提供启停（由现场流程操作）`,
         },
-      }),
+      ),
+  },
+  {
+    title: '来源实例',
+    key: 'instance',
+    width: 130,
+    render: (row) =>
+      h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () => h('span', { class: 'mono', style: { fontSize: '12px' } }, row.instance ?? '-'),
+          /*
+           * 现场同一个 traderserver 键在多个实例上各存一份且内容不同，
+           * 看不出「这条来自哪」就没法解释「同一台机器出现两次、时间还不一样」。
+           * 下标也是必需的：id 会重复，只有 (实例, 下标) 才能唯一定位一行。
+           */
+          default: () =>
+            `来源：${row.instance ?? '-'}\n数组下标：${row.arrayIndex ?? '-'}\n` +
+            '（同一键在多个实例上各存一份且内容不同；id 会重复，故用来源+下标区分）',
+        },
+      ),
   },
   {
     title: '操作',
@@ -349,16 +518,41 @@ const accColumns: DataTableColumns<RedisAccount> = [
     width: 230,
     render: (row) => {
       const s = row.traderserver
-      if (!s) return h('span', { class: 'text-muted' }, '未分配')
-      const online = s.enable && Math.floor(Date.now() / 1000) - s.lastActiveTimeLong <= SERVER_OFFLINE_AFTER_SEC
-      return h('div', { class: 'srv-cell' }, [
-        h('span', { class: 'mono' }, s.ip),
-        h(
-          NTag,
-          { size: 'tiny', round: true, bordered: false, type: online ? 'success' : 'default' },
-          { default: () => `id=${s.id}` },
-        ),
-      ])
+      /*
+       * 这几种都按「未分配」显示：
+       *  - 没有 traderserver 字段；
+       *  - id < 0（现场 acc-010100011300_7_6 就是 id=-1，且 ip 是空串）。
+       *    若照原样显示会变成「id=-1」加一个空 IP，看着像是分配到了一台机器。
+       */
+      if (!s || s.id === undefined || s.id === null || s.id < 0 || !s.ip) {
+        return h('span', { class: 'text-muted' }, '未分配')
+      }
+      return h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () =>
+            h('div', { class: 'srv-cell' }, [
+              h('span', { class: 'mono' }, s.ip),
+              h(
+                NTag,
+                { size: 'tiny', round: true, bordered: false, type: 'info' },
+                { default: () => `id=${s.id}` },
+              ),
+            ]),
+          /*
+           * ⚠️ 这里**不**用 traderserver 里的时间着色成「在线/离线」：
+           * 那个 lastActiveTimeLong 是**当时分配的时刻**，不是该节点当前的心跳
+           * （现场普遍是几天到两个月前，例如 id=3 停在 2026-09-04）。
+           * 拿它判在线会出现「上面的节点表说这台在线、这一列说它离线」的自相矛盾。
+           * 节点是否在线以上面的节点表为准。
+           */
+          default: () =>
+            `分配编号：id=${s.id}\n启用：${s.enable ?? '-'}\n` +
+            `分配时刻：${s.lastactivetime ?? '-'}\n` +
+            '（该时间是分配时刻，不是节点心跳；节点在线状态请看上方节点表）',
+        },
+      )
     },
   },
   {
@@ -404,7 +598,8 @@ const active = ref<TraderServer | null>(null)
 const nodeAccounts = ref<RedisAccount[]>([])
 
 async function loadNodeAccounts(serverId: number) {
-  if (serverIsMock.value) {
+  // usingMock 与其它处一致：数据未落定时退回构建期常量，不赌 isMock 的时序
+  if (serverUsingMock.value) {
     nodeAccounts.value = mockTradeApi.accountsByServer(serverId)
     return
   }
@@ -441,13 +636,37 @@ function openServerDetail(row: TraderServer) {
 
 const heartbeatAge = computed(() => {
   if (!active.value) return 0
+  // 真实态用后端算好的 ageSec（与 online 同一时刻的口径）；演示态没有则本地算
+  if (typeof active.value.ageSec === 'number') return Math.max(0, active.value.ageSec)
   return Math.max(0, Math.floor(Date.now() / 1000) - active.value.lastActiveTimeLong)
+})
+
+/** 详情抽屉里的在线判定：真实态优先用后端口径，避免与汇总卡打架 */
+const isActiveOnline = computed(() => {
+  if (!active.value) return false
+  if (typeof active.value.online === 'boolean') return active.value.online
+  return isServerOnline(active.value)
 })
 </script>
 
 <template>
   <div>
     <QueryErrorAlert v-if="serverError" :message="serverError" :loading="serverLoading" @retry="reloadServers" />
+
+    <!--
+      真实态的现场提示：这个键跨三个实例、且绝大多数记录是几个月前的残留。
+      「有实例连不上」与「阈值两边不一致」都必须显式说出来 ——
+      前者会让节点数偏少（看少了几台），后者会让两侧的「在线」判定打架。
+    -->
+    <n-alert
+      v-if="nodeStatusNote"
+      type="warning"
+      :bordered="false"
+      size="small"
+      style="margin-bottom: 14px"
+    >
+      {{ nodeStatusNote }}
+    </n-alert>
 
     <!-- 汇总指标 -->
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
@@ -502,9 +721,20 @@ const heartbeatAge = computed(() => {
         </span>
       </template>
       <template #header-extra>
-        <span class="text-muted" style="font-size: 12px">按 acc-* 键的分配关系统计</span>
+        <span class="text-muted" style="font-size: 12px">
+          按 acc-* 键的分配关系统计（全量）
+          <template v-if="allAssignmentsTruncated">；⚠️ 已截断到前 200 条，实际更多</template>
+        </span>
       </template>
-      <BaseChart :option="loadOption" :height="200" empty-text="暂无分配数据" />
+      <!--
+        空态文案必须区分「还没加载」与「确实没有分配」：
+        后者要现场去查，前者只是等一下。共用一个「暂无数据」会让人误判。
+      -->
+      <BaseChart
+        :option="loadOption"
+        :height="200"
+        :empty-text="allAssignmentsLoaded ? '暂无分配数据（acc-* 里没有 traderserver 字段）' : '加载中…'"
+      />
     </n-card>
 
     <!-- 主体：两个 Tab -->
@@ -572,7 +802,7 @@ const heartbeatAge = computed(() => {
           :bordered="false"
           :single-line="false"
           size="small"
-          :row-key="(row: TraderServer) => `${row.id}-${row.mac}`"
+          :row-key="(row: TraderServer) => `${row.instance ?? '?'}#${row.arrayIndex ?? row.id}-${row.mac}`"
           :scroll-x="1080"
           :pagination="{
             page: serverPage,
@@ -678,13 +908,17 @@ const heartbeatAge = computed(() => {
               <span class="mono">{{ active.mac }}</span>
             </n-descriptions-item>
             <n-descriptions-item label="状态">
+              <!--
+                真实态优先用后端给的 online（与汇总卡同一口径，页面自算那份会随时间跳变，
+                两者可能显示不一致）；演示态没有该字段时退回本地判定。
+              -->
               <n-tag
                 size="small"
                 round
                 :bordered="false"
-                :type="isServerOnline(active) ? 'success' : active.enable ? 'error' : 'default'"
+                :type="isActiveOnline ? 'success' : active.enable ? 'error' : 'default'"
               >
-                {{ isServerOnline(active) ? '在线' : active.enable ? '离线' : '停用' }}
+                {{ isActiveOnline ? '在线' : active.enable ? '离线' : '停用' }}
               </n-tag>
             </n-descriptions-item>
             <n-descriptions-item label="最后活跃">
@@ -693,6 +927,12 @@ const heartbeatAge = computed(() => {
             </n-descriptions-item>
             <n-descriptions-item label="心跳间隔">
               {{ heartbeatAge }} 秒前
+            </n-descriptions-item>
+            <n-descriptions-item label="来源实例">
+              <span class="mono">{{ active.instance ?? '-' }}</span>
+              <span class="text-muted" style="margin-left: 8px; font-size: 12px">
+                （数组下标 {{ active.arrayIndex ?? '-' }}；同一键在多个库上各存一份且内容不同）
+              </span>
             </n-descriptions-item>
             <n-descriptions-item label="承载账号数">
               {{ nodeAccounts.length }} 个（按 id 匹配，因 id 会重复仅供参考）
@@ -720,6 +960,9 @@ const heartbeatAge = computed(() => {
               数据对应 Redis 键 <code>traderserver</code>；账号的分配关系存在
               <code>acc-&lt;账号&gt;</code> 键的 <code>traderserver</code> 字段里。
               心跳阈值 {{ SERVER_OFFLINE_AFTER_SEC }} 秒（<code>tradeserver_beat</code> 频道）。
+              <br />
+              <b>本页只读</b>：不提供启停。现场该键里的 <code>id</code> 与 <code>mac</code>
+              都可能重复，按它们猜着写回容易改到一台并不属于本次范围的机器。
             </div>
           </div>
         </template>

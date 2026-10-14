@@ -114,7 +114,6 @@ const BUILTIN_ROLES: Array<Pick<AdminRole, 'code' | 'name' | 'desc' | 'builtin' 
       menuPermissionKey('storage-mysql'),
       menuPermissionKey('system-audit'),
       actionPermissionKey('conditional', 'write'),
-      actionPermissionKey('server-trade', 'toggle'),
       actionPermissionKey('storage-mysql', 'readonly-sql'),
       actionPermissionKey('system-audit', 'export'),
     ],
@@ -319,7 +318,10 @@ const LOGIN_LOGS = buildLoginLogs()
 export const AUDIT_ACTIONS: AuditActionOption[] = [
   { action: actionPermissionKey('storage-redis', 'delete-key'), label: '删除 Redis 键', module: 'storage', level: 'high' },
   { action: actionPermissionKey('conditional', 'write'), label: '启停 / 删除条件单', module: 'bizdata', level: 'high' },
-  { action: actionPermissionKey('server-trade', 'toggle'), label: '启停委托服务器', module: 'server', level: 'high' },
+  // 「启停委托服务器」功能已下线（改为只读状态），权限点已撤销。
+  // 但历史审计里有这个 Action 的记录，筛选下拉与中文名都要留着，否则那些旧记录
+  // 会显示成一串看不出含义的键名。
+  { action: actionPermissionKey('server-trade', 'toggle'), label: '启停委托服务器（功能已下线）', module: 'server', level: 'high' },
   { action: actionPermissionKey('storage-mysql', 'readonly-sql'), label: '执行只读 SQL', module: 'storage', level: 'medium' },
   { action: actionPermissionKey('system-user', 'manage'), label: '管理后台账号', module: 'system', level: 'high' },
   { action: actionPermissionKey('system-role', 'manage'), label: '管理角色与权限', module: 'system', level: 'high' },

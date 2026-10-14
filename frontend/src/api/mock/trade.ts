@@ -13,7 +13,7 @@
  *
  * **数值是编的，不是真实业务数据。**
  */
-import type { OrderRecord, RedisAccount, TradeRecord, TraderServer } from '../domain'
+import type { OrderRecord, RedisAccount, TradeRecord, TraderServer, TraderServerPage } from '../domain'
 import type { PageQuery, PageResult } from '../types'
 import {
   agoBy,
@@ -31,6 +31,23 @@ import {
 const rand: Rand = seededRandom(20261010)
 
 /* --------------------------- 委托服务器节点 --------------------------- */
+
+/**
+ * 心跳阈值。委托服务器按 5 秒发一次 tradeserver_beat，
+ * 超过 30 秒没心跳即判定离线（与策略服务器一致）。
+ *
+ * ⚠️ **必须声明在 `buildServers()` 之前**：下面构造 SERVERS 时要用它算
+ * `online` / `ageSec`，而 `const` 没有变量提升 —— 放到后面会让整个模块在
+ * import 阶段抛 `ReferenceError: Cannot access 'SERVER_OFFLINE_AFTER_SEC'
+ * before initialization`，表现为**整页空白**。
+ * 这类错误 vue-tsc 与 vite build 都查不出来（它们不执行模块），只在浏览器里炸。
+ */
+export const SERVER_OFFLINE_AFTER_SEC = 30
+
+/** 当前秒级时间戳（集中一处，便于两处判定用同一个「现在」） */
+function nowSec(): number {
+  return Math.floor(Date.now() / 1000)
+}
 
 /**
  * 照 Redis 键 `traderserver` 的真实结构。
@@ -54,6 +71,12 @@ function buildServers(): TraderServer[] {
     const [lastActive, ts] = agoBy(row.ageSec)
     // 照现场：id 会重复，所以不能当唯一键
     const id = index < 4 ? index % 2 : 0
+    /*
+     * 来源实例与下标也照现场：同一个 traderserver 键在三个库上各存一份、
+     * 内容不同，所以页面必须能看出「这条来自哪」；id 会重复，
+     * 只有 (instance, arrayIndex) 能唯一定位一行。
+     */
+    const instance = index < 2 ? '192.168.1.136/db1' : index < 4 ? '192.168.1.136/db0' : '192.168.1.137/db1'
     return {
       id,
       ip: row.ip,
@@ -61,22 +84,19 @@ function buildServers(): TraderServer[] {
       enable: row.enable,
       'last-active-time': lastActive,
       lastActiveTimeLong: ts,
+      instance,
+      arrayIndex: index,
+      online: nowSec() - ts <= SERVER_OFFLINE_AFTER_SEC,
+      ageSec: nowSec() - ts,
     }
   })
 }
 
 const SERVERS = buildServers()
 
-/**
- * 心跳阈值。委托服务器按 5 秒发一次 tradeserver_beat，
- * 超过 30 秒没心跳即判定离线（与策略服务器一致）。
- */
-export const SERVER_OFFLINE_AFTER_SEC = 30
-
 export function isServerOnline(server: TraderServer): boolean {
   if (!server.enable) return false
-  const now = Math.floor(Date.now() / 1000)
-  return now - server.lastActiveTimeLong <= SERVER_OFFLINE_AFTER_SEC
+  return nowSec() - server.lastActiveTimeLong <= SERVER_OFFLINE_AFTER_SEC
 }
 
 /* --------------------------- 账号分配关系 --------------------------- */
@@ -313,8 +333,15 @@ const TRADES = buildTrades()
 /* ----------------------------- 对外接口 ----------------------------- */
 
 export const mockTradeApi = {
-  listServers(query: PageQuery = {}): PageResult<TraderServer> {
-    return paginate(
+  /**
+   * 节点列表。
+   *
+   * 返回结构与真实接口一致（含 `meta`）—— 页面的「在线/停用」汇总与
+   * 「有没有实例连不上」的提示都读 meta，演示态若少这一块，
+   * 页面在演示态下会走进一条与真实态不同的分支，等于没验证到真实路径。
+   */
+  listServers(query: PageQuery = {}): TraderServerPage {
+    const page = paginate(
       SERVERS,
       query,
       (row, kw) => row.ip.includes(kw) || row.mac.toLowerCase().includes(kw.toLowerCase()),
@@ -330,6 +357,24 @@ export const mockTradeApi = {
         },
       ],
     )
+    /* 演示数据刻意保留现场特征：id 重复、跨实例各存一份 */
+    const onlineCount = SERVERS.filter(isServerOnline).length
+    return {
+      ...page,
+      meta: {
+        registryCopies: 3,
+        entryTotal: SERVERS.length,
+        onlineCount,
+        offlineAfterSec: SERVER_OFFLINE_AFTER_SEC,
+        configuredInstances: 3,
+        redisInstances: ['192.168.1.136/db0', '192.168.1.136/db1', '192.168.1.137/db1'],
+        redisUnavailable: [],
+        registryKey: 'traderserver',
+        onlineChannel: 'tradeserver_online_1',
+        beatChannel: 'tradeserver_beat_1',
+        offlineChannel: 'tradeserver_offline_1',
+      },
+    }
   },
 
   listAssignments(query: PageQuery = {}): PageResult<RedisAccount> {

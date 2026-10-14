@@ -159,6 +159,24 @@ public class AccountService {
         return value == null ? null : toRedisView(value);
     }
 
+    /**
+     * 全部 {@code acc-*} 实时对象（**不合并 MySQL**，就是 Redis 侧的原样）。
+     *
+     * <p>委托服务器页的「账号分配关系」用它，而不是自己再解析一遍 {@code acc-*}：
+     * 前端那两个页面用的是**同一个类型** {@code RedisAccount}，若各自映射一套，
+     * 同一个账号在账号页与委托服务器页迟早会出现字段口径不一致
+     * （例如 {@code syncflag} 一边是数字、一边是布尔）。
+     * 所以映射只有这里一份，谁要用谁来取。
+     *
+     * <p>顺序沿用 {@code scanJson} 的实例配置顺序 + 「键名去重保留第一份」口径
+     * （现场 {@code acc-1000006_1_6} 在 136 db1 与 137 db1 都有）。
+     */
+    public List<RedisAccountView> listRedisAccounts() {
+        List<RedisAccountView> out = new ArrayList<>();
+        redisRepository.findAll().values().forEach(value -> out.add(toRedisView(value)));
+        return out;
+    }
+
     public AccountListMeta meta() {
         return new AccountListMeta(
                 redisRepository.availableInstanceNames(),

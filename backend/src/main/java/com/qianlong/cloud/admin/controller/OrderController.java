@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.qianlong.cloud.admin.common.ApiResult;
+import com.qianlong.cloud.admin.common.PageResult;
+import com.qianlong.cloud.admin.dto.AccountDtos.RedisAccountView;
 import com.qianlong.cloud.admin.dto.TradeDtos.BsCountRow;
 import com.qianlong.cloud.admin.dto.TradeDtos.DailyOrderRow;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderPage;
@@ -17,7 +19,11 @@ import com.qianlong.cloud.admin.dto.TradeDtos.OrderView;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradePage;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeQuery;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeView;
+import com.qianlong.cloud.admin.dto.TradeServerDtos.AssignmentQuery;
+import com.qianlong.cloud.admin.dto.TradeServerDtos.TradeServerPage;
+import com.qianlong.cloud.admin.dto.TradeServerDtos.TraderServerQuery;
 import com.qianlong.cloud.admin.service.OrderService;
+import com.qianlong.cloud.admin.service.TradeServerService;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +51,7 @@ import lombok.RequiredArgsConstructor;
 public class OrderController {
 
     private final OrderService orderService;
+    private final TradeServerService tradeServerService;
 
     /* ================================ 委托单 ================================ */
 
@@ -120,5 +127,54 @@ public class OrderController {
     @GetMapping("/trades")
     public ApiResult<TradePage> listTrades(TradeQuery query) {
         return ApiResult.ok(orderService.listTrades(query));
+    }
+
+    /* ============================== 委托服务器管理 ============================== */
+
+    /**
+     * 委托服务器节点列表（服务器管理 / 委托服务器页）。
+     *
+     * <p>数据来自 Redis 键 {@code traderserver}，且**跨实例全读**：
+     * 现场同一个键在 136 db0、136 db1、137 db1 上各存一份且内容不同
+     * （只有 136 db1 里那条 {@code id=1} 是活的）。按 id 去重会把
+     * 「4 条 {@code id=0}」这种现场真实存在的重复记录藏起来，
+     * 所以这里如实全部列出，靠 {@code instance} + {@code arrayIndex} 区分行。
+     *
+     * <p>默认排序是**在线优先 + 心跳倒序**：不这么排的话，进页面第一眼
+     * 全是几个月前的残留，唯一活着的那台被挤到后面。
+     */
+    @SaCheckLogin
+    @GetMapping("/servers")
+    public ApiResult<TradeServerPage> listServers(TraderServerQuery query) {
+        return ApiResult.ok(tradeServerService.listServers(query));
+    }
+
+    /**
+     * 账号 → 委托服务器的分配关系。
+     *
+     * <p>数据源是 {@code acc-*} 键里的 {@code traderserver} 字段，
+     * 复用账号页的同一份映射（返回类型就是前端 {@code RedisAccount}）。
+     */
+    @SaCheckLogin
+    @GetMapping("/assignments")
+    public ApiResult<PageResult<RedisAccountView>> listAssignments(AssignmentQuery query) {
+        TradeServerService.MergedAssignments result = tradeServerService.listAssignments(query);
+        return ApiResult.ok(PageResult.of(
+                result.rows(), result.total(),
+                query.pageOrDefault(), query.pageSizeOrDefault()));
+    }
+
+    /**
+     * 某台委托服务器承载的账号（节点详情抽屉的下钻）。
+     *
+     * <p>⚠️ 按 {@code id} 匹配，而现场 {@code id} **会重复**
+     * （136 db1 的 7 条里有 4 个 {@code id=0}），所以那几个同 id 的节点
+     * 会显示承载同一批账号。这是数据本身如此，不是查询写错；
+     * 页面已注明「按 id 匹配，因 id 会重复仅供参考」。
+     */
+    @SaCheckLogin
+    @GetMapping("/servers/{serverId}/accounts")
+    public ApiResult<List<RedisAccountView>> accountsByServer(@PathVariable Integer serverId) {
+        return ApiResult.ok(tradeServerService.listAccountsByServer(serverId));
     }
 }

@@ -34,6 +34,7 @@ import type {
   TimeSeriesPoint,
   TradeRecord,
   TraderServer,
+  TraderServerPage,
   UserLog,
 } from './domain'
 
@@ -102,19 +103,24 @@ export const strategyApi = {
 /* ------------------------------ 委托服务器管理 ----------------------------- */
 
 export const tradeApi = {
+  /**
+   * 委托服务器节点列表。
+   *
+   * 返回类型不是通用 `PageResult`，因为它多带一个 `meta`（读了几份注册表、
+   * 有没有实例连不上、后端的心跳阈值）—— 现场这个键跨三个实例、大多是陈旧残留，
+   * 光看 list 会误判「现场就这么多台」。
+   */
   listServers: (query?: PageQuery) =>
-    api.get<PageResult<TraderServer>>('/trade/servers', query),
+    api.get<TraderServerPage>('/trade/servers', query),
 
   /**
-   * 启用/停用委托服务器。
+   * 账号 → 委托服务器分配关系。
    *
-   * ⚠️ 现场 `traderserver` 键里 **id 是重复的**（多次上线累积，见 mock 注释），
-   * 所以追加 mac 作为定位条件，避免误改到别的节点。
+   * ⚠️ 这里**没有**启停接口：委托服务器只做状态展示，不提供启停。
+   * 现场 tradeserver 键里的 id 与 mac 都可能重复，后端拿不到
+   * 「这台机器到底是不是本次运维范围内的实例」这一信息，按 id/mac 猜着写回
+   * 很容易改到一台并不属于本次范围的机器上。启停由现场按自己的流程操作。
    */
-  setServerEnabled: (id: number, mac: string, enable: boolean) =>
-    api.post<void>(`/trade/servers/${id}/enable`, { mac, enable }),
-
-  /** 账号 → 委托服务器分配关系 */
   listAssignments: (query?: PageQuery) =>
     api.get<PageResult<RedisAccount>>('/trade/assignments', query),
 

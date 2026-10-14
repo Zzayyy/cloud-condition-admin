@@ -257,6 +257,52 @@ public class RedisJsonGateway {
     }
 
     /**
+     * 取**每个实例上的同一个键**，各自返回一份。
+     *
+     * <p><b>为什么不能用 {@link #findOne} 或 {@link #scanJson}：</b>
+     * 那两者都按「键名」去重（{@code findOne} 命中第一个就返回、
+     * {@code scanJson} 用 {@code putIfAbsent}），而现场有些键在多个实例上
+     * **各存一份且内容不同**。最典型的是委托服务器注册表 {@code traderserver}：
+     * <pre>
+     *   136 db0  2 条   ← 测试残留
+     *   136 db1  7 条   ← 唯一活跃的那台在这里
+     *   137 db1  4 条   ← 全部 63 天前
+     * </pre>
+     * 用上面两个方法只能读到其中一份，表现是「节点列表少了几台」——
+     * 而这恰好是运维最需要看见的信息（哪台还在、哪台早就死了）。
+     *
+     * <p>所以这里刻意**不去重**：有几个实例有这个键就返回几份，
+     * 由调用方决定怎么合并与呈现。键不存在的实例直接跳过。
+     *
+     * @return 每个存在该键的实例一条，顺序与配置顺序一致
+     */
+    public List<RedisJsonValue> findAllAcrossInstances(String key) {
+        List<RedisJsonValue> out = new ArrayList<>();
+        if (key == null || key.isBlank()) {
+            return out;
+        }
+        for (RedisProperties.Instance instance : properties.getInstances()) {
+            StatefulRedisConnection<String, String> conn = connections.get(instance.getId());
+            if (conn == null) {
+                continue; // 连接失败，已在构造时记入 failures
+            }
+            try {
+                String raw = jsonGet(conn, key);
+                if (raw == null) {
+                    continue;
+                }
+                out.add(new RedisJsonValue(objectMapper.readTree(raw), instance, key, raw));
+            } catch (Exception ex) {
+                // 只读不到某一个实例不算整体失败，但要留痕且记入 failures ——
+                // 否则「少了一台节点」看不出是数据问题还是连接问题
+                failures.put(instance.getId(), ex.getClass().getSimpleName() + ": " + ex.getMessage());
+                log.warn("读取 ReJSON 键失败 key={} instance={} -> {}", key, instance.display(), ex.getMessage());
+            }
+        }
+        return out;
+    }
+
+    /**
      * SCAN 到游标结束，取出全部匹配前缀的键。
      *
      * <p><b>必须循环</b>：SCAN 是增量游标，一次调用只返回一批（受 COUNT 影响），

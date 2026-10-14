@@ -112,13 +112,26 @@ export const menuTree: MenuNode[] = [
           title: '委托服务器',
           icon: SwapHorizontalOutline,
           status: 'ready',
-          desc: '委托服务器节点清单与在线状态，以及账号到委托服务器的分配关系。',
+          desc: '委托服务器节点清单与在线状态，以及账号到委托服务器的分配关系。**只读，不提供启停。**',
           refs: [
-            { label: 'Pub/Sub 频道', value: 'tradeserver_online / _beat / _offline（现场另有 _1 后缀一套）' },
-            { label: 'Redis JSON 键', value: 'traderserver（节点数组：id / ip / mac / enable / last-active-time）' },
+            {
+              label: 'Pub/Sub 频道',
+              value:
+                'tradeserver_online_1 / _beat_1 / _offline_1（现场实测带 _1 后缀，不带后缀的那一套并不存在）',
+            },
+            {
+              label: 'Redis JSON 键',
+              value:
+                'traderserver（数组：id / ip / mac / enable / last-active-time / lastActiveTimeLong）' +
+                '；跨 136 db0、136 db1、137 db1 各存一份且内容不同',
+            },
             { label: '协议说明', value: '请求接口doc.txt 第 1~3 条' },
           ],
-          todos: ['节点列表：ID、IP、MAC、启用状态、最后活跃时间', 'enable 启停开关', '账号分配关系（acc-* 键里的 traderserver 字段）', '心跳超时告警'],
+          todos: [
+            '节点列表：来源实例、ID、IP、MAC、启用状态、最后活跃时间（已完成）',
+            '账号分配关系（acc-* 键里的 traderserver 字段）（已完成）',
+            '心跳超时告警（页面按 30 秒阈值着色，未做主动告警推送）',
+          ],
         },
       },
       {
