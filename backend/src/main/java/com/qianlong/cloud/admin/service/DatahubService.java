@@ -144,6 +144,16 @@ public class DatahubService {
         long entryTotal = 0;
         int streamTotal = 0;
 
+        /*
+         * 先判断该主机是否可用：137 那台挂掉时，若从 db0 开始一个个试，
+         * 每个 db 都要等满 3 秒超时（共 16 个 db ≈ 48 秒）。
+         * 网关侧已有实例级熔断，这里再提前挡一次，省掉**第一次**超时。
+         */
+        if (!gateway.isHostUsable(host)) {
+            log.debug("跳过不可用的 Redis 实例：{}", host);
+            return emptyNode(host, port);
+        }
+
         for (int db = 0; db <= datahubProperties.getMaxDb(); db++) {
             StatefulRedisConnection<String, String> conn = gateway.connectionFor(host, db);
             if (conn == null) {
@@ -154,8 +164,16 @@ public class DatahubService {
             try {
                 keys = cmd.dbsize();
             } catch (Exception ex) {
-                log.warn("DBSIZE 失败 {} db{}：{}", host, db, ex.getMessage());
-                continue;
+                /*
+                 * ⚠️ 命令失败要**上报**，让网关把整台主机熔断。
+                 * 否则后面 15 个 db 会各等一次超时 —— 这正是 2026-10-15
+                 * 「137 挂掉后总览页 63 秒打不开」的直接原因。
+                 * 连接可能是启动时就建好的（那时 137 还活着），
+                 * 所以只靠 connectionFor 的 try/catch 拦不住这种「陈旧连接」。
+                 */
+                gateway.reportHostFailure(host, ex);
+                log.warn("DBSIZE 失败 {} db{}，已熔断该实例：{}", host, db, ex.getMessage());
+                break;
             }
             // 键数为 0 的 db 直接跳过：既不显示，也不必去扫（现场很多空 db）
             if (keys == 0) {
@@ -196,6 +214,33 @@ public class DatahubService {
                 channels);
     }
 
+    /**
+     * 实例不可达时的空行。
+     *
+     * <p><b>为什么返回空行而不是抛异常：</b>一台实例挂掉不该让**整个页面**打不开
+     * —— 136 还是好的，运维要能继续看它。所以如实返回「这台统计不到」，
+     * 由 {@code redisUnavailable} 与页面上的提示说明原因。
+     *
+     * <p>⚠️ 这里**不把 keysTotal 等填 0 当成「真的没有数据」**：
+     * 页面靠 {@code redisUnavailable} 区分「没数据」与「没连上」。
+     */
+    private DatahubNodeView emptyNode(String host, int port) {
+        State state = heartbeatMonitor.stateOf(host);
+        Boolean online = switch (state) {
+            case ONLINE -> Boolean.TRUE;
+            case OFFLINE -> Boolean.FALSE;
+            case UNKNOWN -> null;
+        };
+        return new DatahubNodeView(
+                host, host, String.valueOf(port),
+                online, state.name(),
+                heartbeatMonitor.ageSecOf(host),
+                heartbeatMonitor.beatCountOf(host),
+                heartbeatMonitor.isSubscribed(host),
+                heartbeatMonitor.errorOf(host),
+                List.of(), 0L, 0L, 0, 0);
+    }
+
     /* ================================ 频道 ================================ */
 
     /**
@@ -227,15 +272,27 @@ public class DatahubService {
         List<String> selfOnly = new ArrayList<>();
         java.util.Set<String> mine = heartbeatMonitor.ownSubscriptions();
         for (String host : gateway.distinctHosts()) {
-            for (var c : redisAdminService.pubsubChannels(host)) {
-                boolean self = mine.contains(c.name());
-                long subs = self ? Math.max(0, c.subscribers() - 1) : c.subscribers();
-                if (self && subs == 0) {
-                    // 这个频道纯粹是我们订阅出来的，现场本来没有 —— 不计入
-                    selfOnly.add(host + " " + c.name());
-                    continue;
+            /*
+             * ⚠️ 必须**逐实例兜住异常**：pubsubChannels 在实例不可用时抛 BizException，
+             * 不兜的话「一台 Redis 挂掉」会让整个频道接口返回 40000，
+             * 页面整块显示不出来 —— 而 136 明明还是好的，那部分数据白丢了。
+             * （2026-10-15 现场故障：137 挂掉后 /datahub/channels 直接 40000。）
+             */
+            try {
+                for (var c : redisAdminService.pubsubChannels(host)) {
+                    boolean self = mine.contains(c.name());
+                    long subs = self ? Math.max(0, c.subscribers() - 1) : c.subscribers();
+                    if (self && subs == 0) {
+                        // 这个频道纯粹是我们订阅出来的，现场本来没有 —— 不计入
+                        selfOnly.add(host + " " + c.name());
+                        continue;
+                    }
+                    out.add(new DatahubChannelView(c.name(), subs, c.group(), c.instance(), self));
                 }
-                out.add(new DatahubChannelView(c.name(), subs, c.group(), c.instance(), self));
+            } catch (Exception ex) {
+                // 如实跳过该实例，并让网关熔断它（避免后续请求再等满超时）
+                gateway.reportHostFailure(host, ex);
+                log.warn("取 {} 的频道失败，已跳过该实例：{}", host, ex.getMessage());
             }
         }
         return new ChannelScan(List.copyOf(out), List.copyOf(selfOnly));
@@ -268,6 +325,13 @@ public class DatahubService {
             if (StringUtils.hasText(query.getInstance()) && !host.equals(query.getInstance())) {
                 continue;
             }
+            /*
+             * 该实例是否已熔断：挂了就整台跳过，不要逐个 db 各等一次超时
+             * （16 个 db × 3 秒 ≈ 48 秒，见 RedisJsonGateway 的说明）。
+             */
+            if (!gateway.isHostUsable(host)) {
+                continue;
+            }
             for (int db = 0; db <= datahubProperties.getMaxDb(); db++) {
                 if (query.getDb() != null && query.getDb() != db) {
                     continue;
@@ -277,7 +341,22 @@ public class DatahubService {
                     continue;
                 }
                 RedisCommands<String, String> cmd = conn.sync();
-                for (String key : scanStreamKeys(cmd)) {
+                /*
+                 * ⚠️ scanStreamKeys 必须**放在 try 里面**：
+                 * 它内部要发 SCAN/TYPE 命令，若 137 是启动后才挂的，
+                 * 这里拿到的是一条陈旧连接，命令会抛超时异常。
+                 * 放在 try 外的话异常直接冒到接口层 → 整个 /datahub/streams 返回 50000。
+                 * （2026-10-15 现场故障就是这个。）
+                 */
+                List<String> keys;
+                try {
+                    keys = scanStreamKeys(cmd);
+                } catch (Exception ex) {
+                    gateway.reportHostFailure(host, ex);
+                    log.warn("扫流失败 {} db{}，已熔断该实例：{}", host, db, ex.getMessage());
+                    break;
+                }
+                for (String key : keys) {
                     try {
                         long len = cmd.xlen(key);
                         String role = roleOf(key);
@@ -501,6 +580,10 @@ public class DatahubService {
             if (StringUtils.hasText(instance) && !host.equals(instance)) {
                 continue;
             }
+            // 已熔断的实例直接跳过，省掉逐个 db 的超时等待
+            if (!gateway.isHostUsable(host)) {
+                continue;
+            }
             for (int d = 0; d <= datahubProperties.getMaxDb(); d++) {
                 if (db != null && db != d) {
                     continue;
@@ -591,13 +674,26 @@ public class DatahubService {
         boolean anyTruncated = false;
 
         for (String host : gateway.distinctHosts()) {
+            // 已熔断的实例直接跳过，省掉逐个 db 的超时等待
+            if (!gateway.isHostUsable(host)) {
+                continue;
+            }
             for (int db = 0; db <= datahubProperties.getMaxDb(); db++) {
                 StatefulRedisConnection<String, String> conn = gateway.connectionFor(host, db);
                 if (conn == null) {
                     continue;
                 }
                 RedisCommands<String, String> cmd = conn.sync();
-                for (String key : scanStreamKeys(cmd)) {
+                // scanStreamKeys 要发命令，必须兜住异常（陈旧连接会超时）
+                java.util.List<String> keys;
+                try {
+                    keys = scanStreamKeys(cmd);
+                } catch (Exception ex) {
+                    gateway.reportHostFailure(host, ex);
+                    log.warn("追踪时扫流失败 {} db{}，已熔断该实例：{}", host, db, ex.getMessage());
+                    break;
+                }
+                for (String key : keys) {
                     try {
                         long len = cmd.xlen(key);
                         if (len == 0) {

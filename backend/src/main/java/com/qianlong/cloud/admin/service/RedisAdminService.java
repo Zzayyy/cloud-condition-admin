@@ -527,6 +527,17 @@ public class RedisAdminService {
         return conn;
     }
 
+    /**
+     * 该主机当前是否不可用（供**跨实例汇总**的调用方先判断，避免无谓的超时等待）。
+     *
+     * <p>管理页是「用户选一台实例来看」，所以 {@link #requireConnection} 在实例挂掉时
+     * 如实报错是对的；但跨实例汇总（如消息总线的频道）不该因为一台挂掉就整块失败，
+     * 调用方应当先用本方法跳过它。
+     */
+    public boolean isHostUsable(String host) {
+        return gateway.isHostUsable(host);
+    }
+
     /** db 取值校验：只允许 0-15（Redis 默认库数），避免非法值打到实例上 */
     private static int resolveDb(int db) {
         if (db < 0 || db > 15) {

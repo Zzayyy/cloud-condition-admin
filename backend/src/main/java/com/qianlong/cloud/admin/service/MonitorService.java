@@ -145,13 +145,26 @@ public class MonitorService {
         int streamCount = 0;
 
         for (String host : gateway.distinctHosts()) {
+            // 已熔断的实例直接跳过，省掉逐个 db 的超时等待（16 × 3 秒）
+            if (!gateway.isHostUsable(host)) {
+                continue;
+            }
             for (int db = 0; db <= datahubProperties.getMaxDb(); db++) {
                 StatefulRedisConnection<String, String> conn = gateway.connectionFor(host, db);
                 if (conn == null) {
                     continue;
                 }
                 RedisCommands<String, String> cmd = conn.sync();
-                for (String streamKey : streamKeysOf(cmd)) {
+                // streamKeysOf 要发命令，必须兜住异常（陈旧连接会超时）
+                java.util.List<String> streamKeys;
+                try {
+                    streamKeys = streamKeysOf(cmd);
+                } catch (Exception ex) {
+                    gateway.reportHostFailure(host, ex);
+                    log.warn("扫流失败 {} db{}，已熔断该实例：{}", host, db, ex.getMessage());
+                    break;
+                }
+                for (String streamKey : streamKeys) {
                     if (ingressOnly && !"DataHub_req_stream".equals(streamKey)) {
                         continue;
                     }

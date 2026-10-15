@@ -76,9 +76,42 @@ public class RedisJsonGateway {
     /** 连接失败的实例 id -> 失败原因（供接口如实告知前端） */
     private final Map<String, String> failures = new LinkedHashMap<>();
 
+    /**
+     * 实例级熔断：host -> 冷却截止时刻（epoch 毫秒）。
+     *
+     * <h2>⚠️ 为什么必须有这个（2026-10-15 现场故障）</h2>
+     * 137 那台 Redis 在**后端启动之后**挂掉了（TCP 从「通」变成**超时**）。
+     * 此时程序手里握着的是一条**陈旧连接**：每条命令都要等满
+     * {@code timeout-ms}（3 秒）才失败。而统计一台实例要遍历 {@code db0~db15}
+     * —— 每个 (host,db) 各建一次连接、各超时一次：
+     * <pre>
+     *   16 个 db × 3 秒 ≈ 48 秒   ← 实测 /datahub/nodes 用了 51 秒
+     * </pre>
+     * 于是「一台 Redis 挂掉」直接把整个总览页拖到一分钟以上，
+     * 页面看起来就是「加载不出来」。
+     *
+     * <p>修法：**只要某台实例上有一个操作失败，就把整台主机标记为不可用**，
+     * 冷却期内不再尝试它的任何 db —— 于是第一次失败仍要等 3 秒（无法避免，
+     * 网络超时就是这样），但剩下 15 个 db 立刻跳过，整体从 48 秒降到 3 秒。
+     *
+     * <p>冷却结束会「半开」重试一次：现场恢复后不需要重启后端就能自动恢复。
+     */
+    private final Map<String, Long> hostCooldownUntil = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 熔断冷却时长（毫秒）。太短会频繁撞超时，太长则现场恢复后迟迟不显示 */
+    private static final long HOST_COOLDOWN_MS = 30_000;
+
     public RedisJsonGateway(RedisProperties properties) {
         this.properties = properties;
         for (RedisProperties.Instance instance : properties.getInstances()) {
+            /*
+             * 同一台主机会有多条配置（136-db0 / 136-db1）。若它已经连不上，
+             * 就别为它的每个 db 再各等一次超时 —— 启动时间会成倍变长。
+             */
+            if (failures.containsKey(instance.getHost())) {
+                log.warn("跳过 {}（该主机已有连接失败记录）", instance.display());
+                continue;
+            }
             try {
                 RedisURI.Builder builder = RedisURI.builder()
                         .withHost(instance.getHost())
@@ -95,7 +128,15 @@ public class RedisJsonGateway {
                 clients.put(instance.getId(), client);
                 log.info("Redis 实例已连接：{}", instance.display());
             } catch (Exception ex) {
-                failures.put(instance.getId(), ex.getClass().getSimpleName() + ": " + ex.getMessage());
+                /*
+                 * ⚠️ 统一用 **host** 作为 `failures` 的键（不要用 instance.getId()）：
+                 * 同一台主机会出现在多条配置里（136-db0 / 136-db1 是两个 id、
+                 * 同一个 host）。用 id 当键的话，同一台挂掉的实例会以
+                 * `137-1`、`136-0`、`136-1` 这种形式各出现一条，
+                 * 而熔断标记用的是 host —— 于是前端会看到
+                 * 「192.168.1.137 和 137-1 都不可用」这种同一件事写两遍的提示。
+                 */
+                failures.put(instance.getHost(), ex.getClass().getSimpleName() + ": " + ex.getMessage());
                 log.error("Redis 实例连接失败：{} -> {}", instance.display(), ex.getMessage());
             }
         }
@@ -144,6 +185,14 @@ public class RedisJsonGateway {
             return cached;
         }
         /*
+         * 实例级熔断：该主机刚失败过就直接跳过，不要再试它其余的 db。
+         * 没有这一步的话，一台实例挂掉会让 16 个 db 各超时一次
+         * （3 秒 × 16 ≈ 48 秒），整个页面卡死 —— 见 hostCooldownUntil 的说明。
+         */
+        if (isHostCoolingDown(host)) {
+            return null;
+        }
+        /*
          * 建过的失败要记住，不要每次请求都重试一遍。
          * 典型场景：db 下标超范围（Redis 默认只有 db0~db15），
          * 每一轮统计都会试着连一次、再失败一次 —— 日志被同一条告警刷满，
@@ -165,10 +214,51 @@ public class RedisJsonGateway {
             return conn;
         } catch (Exception ex) {
             failedDbConnections.add(key);
-            failures.put(key, ex.getClass().getSimpleName() + ": " + ex.getMessage());
-            log.warn("建立 {} 的连接失败（本次运行内不再重试）：{}", key, ex.getMessage());
+            // 整台主机进入冷却，避免剩下 15 个 db 继续各超时一次
+            markHostFailed(host, ex);
             return null;
         }
+    }
+
+    /** 该主机是否处于熔断冷却期（过期的冷却记录顺手清掉，实现「半开」重试） */
+    private boolean isHostCoolingDown(String host) {
+        Long until = hostCooldownUntil.get(host);
+        if (until == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() >= until) {
+            // 冷却结束：允许再试一次（现场恢复后无需重启后端）
+            hostCooldownUntil.remove(host);
+            failedDbConnections.removeIf(k -> k.startsWith(host + "/"));
+            return false;
+        }
+        return true;
+    }
+
+    /** 标记整台主机失败（记原因 + 进入冷却） */
+    private void markHostFailed(String host, Exception ex) {
+        String reason = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+        failures.put(host, reason);
+        hostCooldownUntil.put(host, System.currentTimeMillis() + HOST_COOLDOWN_MS);
+        log.warn("Redis 实例 {} 不可用，{} 秒内跳过它的全部 db：{}",
+                host, HOST_COOLDOWN_MS / 1000, reason);
+    }
+
+    /**
+     * 报告某台实例上的命令失败了 —— 调用方捕获到异常时调它。
+     *
+     * <p>用途：连接可能是**建立成功**的（启动时 137 还活着），
+     * 之后实例才挂掉。这种情况下 {@code connectionFor} 返回的是缓存里的
+     * 陈旧连接，每次命令都会超时 —— 必须让调用方能把这次失败上报上来，
+     * 触发整台主机的熔断，否则后面每个 db、每条命令都要继续等满超时。
+     */
+    public void reportHostFailure(String host, Exception ex) {
+        markHostFailed(host, ex);
+    }
+
+    /** 该主机当前是否可用（供接口层在开始遍历前先判断，省掉第一次超时） */
+    public boolean isHostUsable(String host) {
+        return !isHostCoolingDown(host) && clientByHost(host) != null;
     }
 
     /** 该主机对应的客户端（按配置顺序取第一条） */
@@ -236,6 +326,13 @@ public class RedisJsonGateway {
      * @return 连接；该主机任何配置项都连不上时返回 {@code null}
      */
     public StatefulRedisConnection<String, String> connectionByHost(String host) {
+        /*
+         * 熔断中的主机视为不可用 —— 否则管理页点开一台挂掉的实例时，
+         * INFO/SCAN 这些命令会各等一次超时，页面转很久才报错。
+         */
+        if (isHostCoolingDown(host)) {
+            return null;
+        }
         for (RedisProperties.Instance i : properties.getInstances()) {
             if (i.getHost().equals(host) && connections.containsKey(i.getId())) {
                 return connections.get(i.getId());
@@ -317,6 +414,10 @@ public class RedisJsonGateway {
             if (conn == null) {
                 continue; // 连接失败，已在构造时记入 failures
             }
+            // 该主机刚失败过就跳过，别让每条命令都等满一次超时
+            if (isHostCoolingDown(instance.getHost())) {
+                continue;
+            }
             try {
                 for (String key : scanKeys(conn, prefix)) {
                     if (excludeKeys != null && excludeKeys.contains(key)) {
@@ -334,7 +435,8 @@ public class RedisJsonGateway {
                     }
                 }
             } catch (Exception ex) {
-                failures.put(instance.getId(), ex.getClass().getSimpleName() + ": " + ex.getMessage());
+                // 上报失败 → 熔断整台主机（否则后面每个 db 都要再等一次超时）
+                markHostFailed(instance.getHost(), ex);
                 log.error("扫描 Redis 实例失败：{} -> {}", instance.display(), ex.getMessage());
             }
         }
@@ -351,12 +453,16 @@ public class RedisJsonGateway {
             if (conn == null) {
                 continue;
             }
+            if (isHostCoolingDown(instance.getHost())) {
+                continue;
+            }
             try {
                 String raw = jsonGet(conn, key);
                 if (raw != null) {
                     return new RedisJsonValue(objectMapper.readTree(raw), instance, key, raw);
                 }
             } catch (Exception ex) {
+                markHostFailed(instance.getHost(), ex);
                 log.warn("读取 ReJSON 键失败 key={} instance={} -> {}", key, instance.display(), ex.getMessage());
             }
         }
@@ -393,6 +499,9 @@ public class RedisJsonGateway {
             if (conn == null) {
                 continue; // 连接失败，已在构造时记入 failures
             }
+            if (isHostCoolingDown(instance.getHost())) {
+                continue;
+            }
             try {
                 String raw = jsonGet(conn, key);
                 if (raw == null) {
@@ -400,9 +509,9 @@ public class RedisJsonGateway {
                 }
                 out.add(new RedisJsonValue(objectMapper.readTree(raw), instance, key, raw));
             } catch (Exception ex) {
-                // 只读不到某一个实例不算整体失败，但要留痕且记入 failures ——
-                // 否则「少了一台节点」看不出是数据问题还是连接问题
-                failures.put(instance.getId(), ex.getClass().getSimpleName() + ": " + ex.getMessage());
+                // 只读不到某一个实例不算整体失败，但要留痕且**熔断它** ——
+                // 否则后面每个 db 都要再等一次超时
+                markHostFailed(instance.getHost(), ex);
                 log.warn("读取 ReJSON 键失败 key={} instance={} -> {}", key, instance.display(), ex.getMessage());
             }
         }
