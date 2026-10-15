@@ -60,7 +60,8 @@ function compact(n: number): string {
 function buildSummary(): DashboardSummary {
   const tradeOnline = TRADE_SERVERS.filter(isTradeServerOnline).length
   const strategyOnline = STRATEGY_SERVERS.filter(isStrategyServerOnline).length
-  const datahubOnline = DATAHUB_NODES.filter((n) => n.online).length
+  const datahubOnline = DATAHUB_NODES.filter((n) => n.online === true).length
+  const datahubUnknown = DATAHUB_NODES.filter((n) => n.online === null).length
 
   // 委托单里「已成交」的判定：成交表按 OrderNo 关联到了委托
   const filledOrderNos = new Set(TRADES.map((t) => t.OrderNo).filter(Boolean) as string[])
@@ -68,16 +69,25 @@ function buildSummary(): DashboardSummary {
 
   const volume = TRADES.reduce((sum, t) => sum + Number(t.Volumn ?? 0), 0)
 
-  // 消息总线：入口积压 / lag / pending / 无消费组的流
+  // 消息总线：入口积压 / lag / pending / 无消费组的流 / 已停止进数据的流
   const ingress = STREAMS.filter((s) => s.role === 'ingress')
   let lag = 0
   let pending = 0
+  let entryTotal = 0
   for (const s of STREAMS) {
+    entryTotal += s.length
     for (const g of s.groups) {
       lag += g.lag ?? 0
       pending += g.pending ?? 0
     }
   }
+  // 演示数据里 lastEntryAgeSec 是造出来的，这里照实算 ——
+  // 页面那条「数据流已停止」提示在演示态才走得到
+  const stale = STREAMS.filter((s) => s.length > 0 && (s.lastEntryAgeSec ?? 0) > 3600).length
+  const ingressAges = ingress
+    .map((s) => s.lastEntryAgeSec)
+    .filter((v): v is number => typeof v === 'number')
+  const ingressAge = ingressAges.length ? Math.min(...ingressAges) : null
 
   return {
     nodes: {
@@ -87,6 +97,10 @@ function buildSummary(): DashboardSummary {
       strategyOnline,
       datahubTotal: DATAHUB_NODES.length,
       datahubOnline,
+      datahubUnknown,
+      // 演示数据里心跳是新鲜的，所以策略注册表不算陈旧
+      strategyRegistryStale: false,
+      datahubHeartbeatEnabled: true,
     },
     conditional: {
       total: CONDITIONALS.length,
@@ -104,6 +118,8 @@ function buildSummary(): DashboardSummary {
     account: {
       total: ACCOUNTS.length,
       online: ACCOUNTS.filter((a) => a.onlineflag === 1).length,
+      redisOnly: ACCOUNTS.filter((a) => a.hasRedis && !a.userId).length,
+      mysqlOnly: ACCOUNTS.filter((a) => !a.hasRedis).length,
     },
     stream: {
       count: STREAMS.length,
@@ -112,7 +128,13 @@ function buildSummary(): DashboardSummary {
       pending,
       // 现场 137 的入口流**没有消费组** —— 写入后没人投递，是最危险的一类
       groupLess: STREAMS.filter((s) => s.groups.length === 0).length,
+      staleStreams: stale,
+      ingressBacklogAgeSec: ingressAge,
+      entryTotal,
     },
+    idle: false,
+    idleReason: null,
+    generatedAt: fmt(new Date()),
   }
 }
 

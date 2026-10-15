@@ -867,6 +867,51 @@ export interface MonitorMetricOption {
 /* --------------------------------- 总览页 --------------------------------- */
 
 /**
+ * 服务器节点健康度。
+ *
+ * ⚠️ 三类**必须分开看**，且数据中台有 `datahubUnknown`：
+ * 三类「离线」的含义完全不同 ——
+ * 委托服务器是真有活的；策略服务器是**服务未开放**（离线是必然）；
+ * 数据中台是**观测不到**（不等于离线）。
+ * 合并成一个「离线 N 个」会让人误判成「大面积宕机」。
+ */
+export interface DashboardNodeSummary {
+  tradeTotal: number
+  tradeOnline: number
+  strategyTotal: number
+  strategyOnline: number
+  datahubTotal: number
+  datahubOnline: number
+  /** 数据中台里**观测不到**的实例数（订阅关闭/连接失败/还没收到心跳） */
+  datahubUnknown: number
+  /** 策略服务器注册表是否已陈旧（服务未开放时为 true） */
+  strategyRegistryStale: boolean
+  /** 数据中台心跳订阅是否开启（关掉时在线数不可信） */
+  datahubHeartbeatEnabled: boolean
+}
+
+/**
+ * 消息总线汇总。
+ *
+ * ⚠️ `staleStreams` 与 `ingressBacklogAgeSec` 是最该被看见的两个字段：
+ * 它们回答「这些积压是活的还是死的」。
+ * 只看 `ingressBacklog`（上千万条）会把一潭死水读成「流量很大」。
+ */
+export interface DashboardStreamSummary {
+  count: number
+  ingressBacklog: number
+  consumerLag: number
+  pending: number
+  /** **没有消费组**的流数 —— 写入后无人投递，最危险的一类 */
+  groupLess: number
+  /** 已超过 1 小时没有新条目的流数 */
+  staleStreams: number
+  /** 入口流里**最新**那条条目距今多少秒；无数据时为 null */
+  ingressBacklogAgeSec: number | null
+  entryTotal: number
+}
+
+/**
  * 总览页的汇总数据。
  *
  * **为什么单独出一个汇总接口、而不是让前端把各业务页的列表拼起来**：
@@ -877,18 +922,8 @@ export interface MonitorMetricOption {
  */
 export interface DashboardSummary {
   /** 服务器节点健康度（三类节点分开统计） */
-  nodes: {
-    /** 委托服务器：总数 / 在线数 */
-    tradeTotal: number
-    tradeOnline: number
-    /** 策略服务器：总数 / 在线数 */
-    strategyTotal: number
-    strategyOnline: number
-    /** 数据中台：总数 / 在线数 */
-    datahubTotal: number
-    datahubOnline: number
-  }
-  /** 条件单（T_Conditional） */
+  nodes: DashboardNodeSummary
+  /** 条件单（V_Conditional 并集视图） */
   conditional: {
     total: number
     /** Mode = 1 运行中 */
@@ -896,36 +931,34 @@ export interface DashboardSummary {
     /** Status = 1 已触发 */
     triggered: number
   }
-  /** 委托单（T_Order） */
+  /** 委托单（T_Order + T_Order_his） */
   order: {
     total: number
-    /** 已产生成交的委托单数（与成交表按 OrderNo 关联，真实可算） */
+    /** 已产生成交的委托单数（按 OrderNo 关联成交表，真实可算） */
     filled: number
   }
-  /** 成交回报（T_Trade） */
+  /** 成交回报（T_Trade + T_Trade_his） */
   trade: {
     total: number
     /** 成交量合计 */
     volume: number
   }
-  /** 云单账号 */
+  /** 云单账号（MySQL 与 Redis 合并口径） */
   account: {
     total: number
     online: number
+    /** 只在 Redis 有实时对象的账号数 */
+    redisOnly: number
+    /** 只在 MySQL 有的账号数 */
+    mysqlOnly: number
   }
   /** 消息总线（Redis Stream） */
-  stream: {
-    /** stream 条数 */
-    count: number
-    /** 入口流积压条目（DataHub_req_stream 的 XLEN 合计） */
-    ingressBacklog: number
-    /** 消费组 lag 合计 */
-    consumerLag: number
-    /** pending 合计 */
-    pending: number
-    /** **没有消费组**的流数量 —— 现场 137 的入口流就是这种，最危险 */
-    groupLess: number
-  }
+  stream: DashboardStreamSummary
+  /** 现场当前是否没有在发数据 */
+  idle: boolean
+  /** 沉默的原因（null = 一切正常） */
+  idleReason: string | null
+  generatedAt: string
 }
 
 /** 数据来源的一行（总览页的「数据来源与规模」表） */
@@ -957,6 +990,7 @@ export interface DashboardOverview {
   /** 数据生成时间（页面据此显示「快照于 …」） */
   generatedAt: string
 }
+
 
 /* ---------------------------- 管理端：用户与权限 ---------------------------- */
 
