@@ -39,18 +39,67 @@ export interface TraderServer {
   ageSec?: number | null
 }
 
-/** 策略服务器（Redis JSON 键 strategy-srv 中的元素） */
+/**
+ * 策略服务器（Redis JSON 键 strategy-srv 中的元素）。
+ *
+ * ⚠️ `usecount` 现场**全部为 0**（该字段未上报，策略服务器当前未开放）——
+ * 不代表「策略平台没有承载条件单用户」。页面已在列头标注这件事。
+ */
 export interface StrategyServer {
   id: number
   ip: string
   mac: string
-  /** 该策略服务器上运行条件单用户的数量 */
+  /** 该策略服务器上运行条件单用户的数量。⚠️ 现场未上报，全为 0 */
   usecount: number
   /** 上线时间 */
   'login-time': string
   'last-active-time': string
   lastActiveTimeLong: number
+  /** 是否启用（只读展示，本页不提供启停） */
   enable: boolean
+  /* ---- 非契约的排查字段（后端 meta 之外的补充） ---- */
+  /** 后端按心跳阈值算好的在线判定 */
+  online?: boolean
+  /** 距上次心跳秒数 */
+  ageSec?: number | null
+  /** 来源实例（现场 136 db0 / 136 db1 各一份且内容不同） */
+  instance?: string
+  /** 在该实例数组里的下标 —— id 会重复（现场都是 0），只有它+实例能唯一定位一行 */
+  arrayIndex?: number
+}
+
+/** 策略服务器列表的附加信息（后端 meta，非表格契约字段） */
+export interface StrategyServerListMeta {
+  /** 全量在线数（不是当前页） */
+  onlineCount: number
+  offlineCount: number
+  /** 全量节点总数（跨实例摊平后，未去重） */
+  total: number
+  /** 全量 usecount 合计 */
+  usecountTotal: number
+  /** 全量 usecount 最大值 —— 进度条的分母 */
+  usecountMax: number
+  offlineAfterSec: number
+  registryCopies: number
+  registryKey: string
+  redisInstances: string[]
+  redisUnavailable: string[]
+  /** 注册表里最新那条心跳距今多少秒；一条都没有时为 null */
+  newestAgeSec: number | null
+  /** true = 注册表已超过阈值没变化（现场策略服务器未开放就是这种） */
+  registryStale: boolean
+  staleRegistryAfterSec: number
+  /** 后端给的如实说明（策略服务器未开放 / usecount 未上报） */
+  note: string
+}
+
+/** 策略服务器列表返回 */
+export interface StrategyServerPage {
+  list: StrategyServer[]
+  total: number
+  page: number
+  pageSize: number
+  meta: StrategyServerListMeta
 }
 
 /**

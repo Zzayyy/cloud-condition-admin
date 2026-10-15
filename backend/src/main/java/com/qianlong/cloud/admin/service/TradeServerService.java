@@ -19,7 +19,7 @@ import com.qianlong.cloud.admin.dto.TradeServerDtos.TradeServerListMeta;
 import com.qianlong.cloud.admin.dto.TradeServerDtos.TradeServerPage;
 import com.qianlong.cloud.admin.dto.TradeServerDtos.TraderServerQuery;
 import com.qianlong.cloud.admin.dto.TradeServerDtos.TraderServerView;
-import com.qianlong.cloud.admin.service.TraderServerRepository.RegistryEntry;
+import com.qianlong.cloud.admin.service.RegistryArrayReader.RegistryEntry;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

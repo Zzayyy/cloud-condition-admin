@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref } from 'vue'
 import {
+  NAlert,
   NButton,
   NCard,
   NDataTable,
@@ -13,10 +14,8 @@ import {
   NIcon,
   NInput,
   NProgress,
-  NSwitch,
   NTag,
   NTooltip,
-  useMessage,
   type DataTableColumns,
   type DataTableSortState,
 } from 'naive-ui'
@@ -45,9 +44,25 @@ import type { StrategyServer } from '@/api/domain'
 import { useResource } from '@/composables/useResource'
 import { relativeTime, thousands } from '@/utils/format'
 
-/** 策略服务器页：节点清单 + 在线状态 + 承载条件单用户数 */
+/**
+ * 策略服务器页：节点清单 + 在线状态 + 承载条件单用户数。
+ *
+ * ⚠️ 现场策略服务器**当前未开放**（实测 2026-10-15）：
+ *  - 注册表 `strategy-srv` 不刷新（盯 30 秒内容不变）；
+ *  - `strategyserver_beat_1` 频道上没有心跳（订阅 25 秒 0 条）。
+ *
+ * 心跳收不到是**预期现象**，所以后端**不订阅**心跳频道（加了也收不到，
+ * 还会因 `PUBSUB CHANNELS` 只列有订阅者的频道而凭空造出订阅者、污染 Redis 管理页）。
+ * 「在线」按 `lastActiveTimeLong` 判，结果接近 0 台 —— 后端用
+ * `meta.registryStale` 说明「注册表没在更新」，页面据此提示，
+ * 免得被读成「策略平台全挂了」。
+ *
+ * ⚠️ `usecount` 现场全部为 0（该字段未上报），列头已标注。
+ *
+ * ⚠️ 本页**只读**：不提供启停。现场 id 全是 0、mac 又各带实例后缀，
+ * 没有任何字段能稳定指回「同一台机器」。
+ */
 
-const message = useMessage()
 const accent = '#7c5cf0'
 
 const keyword = ref('')
@@ -116,21 +131,62 @@ const rows = computed<StrategyServer[]>(() => data.value?.list ?? [])
 const total = computed(() => data.value?.total ?? 0)
 
 /**
- * 汇总统计基于**当前页**数据计算，并如实标注口径。
- * 真实汇总应由后端单独提供接口，避免前端只统计了一页却当成全量。
+ * 后端回传的元信息（真实态才有）。
+ *
+ * ⚠️ 汇总必须用 meta 的**全量**口径，不能对当前页 `filter`：
+ * 后端返回的是分页后的行，按当前页统计会得出「第 1 页有几台在线」，
+ * 而卡片上写的是「在线节点数」—— 翻页时数字会莫名变化。
+ * （原实现就是这么错的，代码里自己写了「真实汇总应由后端单独提供接口」。）
  */
+const meta = computed(() => data.value?.meta ?? null)
+
 const summary = computed(() => {
+  const m = meta.value
+  if (m) {
+    return {
+      onlineCount: m.onlineCount,
+      offlineCount: m.offlineCount,
+      usecount: m.usecountTotal,
+      maxUse: m.usecountMax,
+    }
+  }
+  // 演示态（或真实态拿不到 meta 时）退回按当前页统计，并如实标注口径
   const list = rows.value
   const online = list.filter(isServerOnline)
-  const usecount = list.reduce((sum, s) => sum + (s.usecount ?? 0), 0)
-  const maxUse = list.reduce((max, s) => Math.max(max, s.usecount ?? 0), 0)
   return {
-    totalOnPage: list.length,
     onlineCount: online.length,
     offlineCount: list.length - online.length,
-    usecount,
-    maxUse,
+    usecount: list.reduce((sum, s) => sum + (s.usecount ?? 0), 0),
+    maxUse: list.reduce((max, s) => Math.max(max, s.usecount ?? 0), 0),
   }
+})
+
+/** 汇总是否为「当前页」口径（演示态或 meta 缺失时，页面要如实说明） */
+const summaryIsPageScoped = computed(() => !meta.value)
+
+/**
+ * 现场现状提示。
+ *
+ * 策略服务器**当前未开放**：注册表不刷新、心跳也收不到，
+ * 所以「在线 0 台」是必然结果。不说明的话，看页面的人会以为是服务挂了，
+ * 从而去查节点 —— 而真正该知道的是「这个注册表本身就没在更新」。
+ */
+const statusNote = computed(() => {
+  const m = meta.value
+  if (!m) return null
+  const parts: string[] = []
+  if (m.redisUnavailable?.length) {
+    parts.push(`有 ${m.redisUnavailable.length} 个 Redis 实例连不上（${m.redisUnavailable.join('、')}），列表可能不完整。`)
+  }
+  if (m.registryStale) {
+    parts.push(
+      `注册表 ${m.registryKey} 已${
+        m.newestAgeSec == null ? '始终没有可用的心跳时间' : ` ${m.newestAgeSec} 秒`
+      }未刷新（阈值 ${m.staleRegistryAfterSec} 秒）—— 说明策略服务器当前未开放，` +
+        '「离线」是必然结果，不必据此排查节点。',
+    )
+  }
+  return parts.length ? parts.join(' ') : null
 })
 
 const usageOption = computed(() => ({
@@ -199,9 +255,40 @@ const columns: DataTableColumns<StrategyServer> = [
   {
     title: 'MAC',
     key: 'mac',
-    width: 180,
+    width: 200,
     ellipsis: { tooltip: true },
-    render: (row) => h('span', { class: 'mono' }, row.mac),
+    render: (row) =>
+      h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () => h('span', { class: 'mono' }, row.mac),
+          /*
+           * 这里的 mac 是「本机网卡地址 + 实例名后缀」（现场 …QLDataHub1 / …probe），
+           * 所以同一台机器会出现多个不同的 mac —— 不是数据错了。
+           */
+          default: () =>
+            '该值是「本机网卡 MAC + 实例名后缀」（现场 …QLDataHub1 / …probe），\n' +
+            '同一台机器出现多个不同的 mac 是正常的，不能当唯一键',
+        },
+      ),
+  },
+  {
+    title: '来源实例',
+    key: 'instance',
+    width: 140,
+    render: (row) =>
+      h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () => h('span', { class: 'mono', style: { fontSize: '12px' } }, row.instance ?? '-'),
+          // 现场 id 全是 0，只有 (来源实例, 下标) 能唯一定位一行
+          default: () =>
+            `来源：${row.instance ?? '-'}\n数组下标：${row.arrayIndex ?? '-'}\n` +
+            '（同一键在多个库上各存一份；id 会重复，故用来源+下标区分）',
+        },
+      ),
   },
   {
     title: '条件单用户数',
@@ -210,19 +297,34 @@ const columns: DataTableColumns<StrategyServer> = [
     sorter: true,
     render: (row) => {
       const value = row.usecount ?? 0
+      // 分母用**全量**最大值，否则翻页时进度条会跳（当前页最大 ≠ 全局最大）
       const pct = summary.value.maxUse > 0 ? Math.round((value / summary.value.maxUse) * 100) : 0
-      return h('div', { class: 'use-cell' }, [
-        h('span', { class: 'use-num' }, thousands(value)),
-        h(NProgress, {
-          type: 'line',
-          percentage: pct,
-          height: 4,
-          showIndicator: false,
-          color: accent,
-          railColor: 'var(--bg-hover)',
-          borderRadius: 2,
-        }),
-      ])
+      return h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () =>
+            h('div', { class: 'use-cell' }, [
+              h('span', { class: 'use-num' }, thousands(value)),
+              h(NProgress, {
+                type: 'line',
+                percentage: pct,
+                height: 4,
+                showIndicator: false,
+                color: accent,
+                railColor: 'var(--bg-hover)',
+                borderRadius: 2,
+              }),
+            ]),
+          /*
+           * 现场该字段未上报（全为 0），必须说明 ——
+           * 否则这一列（页面最重要的内容）会被读成「策略平台一个用户都没承载」。
+           */
+          default: () =>
+            `承载条件单用户数：${value}\n` +
+            '⚠️ 现场 usecount 未上报（全部为 0），不代表策略平台没有承载用户',
+        },
+      )
     },
   },
   {
@@ -255,15 +357,26 @@ const columns: DataTableColumns<StrategyServer> = [
   {
     title: '启用',
     key: 'enable',
-    width: 76,
+    width: 88,
     render: (row) =>
-      h(NSwitch, {
-        size: 'small',
-        value: row.enable,
-        'onUpdate:value': () => {
-          message.warning('后端接口尚未实现，启停开关暂不落库')
+      h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () =>
+            h(
+              NTag,
+              { size: 'small', round: true, bordered: false, type: row.enable ? 'info' : 'default' },
+              { default: () => (row.enable ? '已启用' : '已停用') },
+            ),
+          /*
+           * 只读：本页不提供启停。现场 id 全是 0、mac 又各带实例后缀，
+           * 没有任何字段能稳定指回「同一台机器」——
+           * 按它们写回容易改到一台不属于本次运维范围的机器上。
+           */
+          default: () => `enable=${row.enable}\n只读展示，本页不提供启停（由现场流程操作）`,
         },
-      }),
+      ),
   },
   {
     title: '操作',
@@ -300,6 +413,14 @@ const heartbeatAge = computed(() => {
   <div>
     <QueryErrorAlert v-if="error" :message="error" :loading="loading" @retry="reload" />
 
+    <!--
+      现场现状：策略服务器未开放 → 注册表不刷新 → 「在线 0 台」是必然结果。
+      不说清的话，看页面的人会以为服务挂了，从而去查节点（方向错了）。
+    -->
+    <n-alert v-if="statusNote" type="warning" :bordered="false" size="small" style="margin-bottom: 14px">
+      {{ statusNote }}
+    </n-alert>
+
     <!-- 汇总指标 -->
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>
@@ -309,7 +430,7 @@ const heartbeatAge = computed(() => {
           suffix="个"
           :icon="CheckmarkCircleOutline"
           color="#2f9e5f"
-          hint="心跳 30 秒内视为在线"
+          :hint="`心跳 ${meta?.offlineAfterSec ?? 30} 秒内视为在线${summaryIsPageScoped ? '（当前页口径）' : ''}`"
         />
       </n-gi>
       <n-gi>
@@ -319,7 +440,7 @@ const heartbeatAge = computed(() => {
           suffix="个"
           :icon="CloseCircleOutline"
           color="#d6455e"
-          hint="需要人工确认是否正常下线"
+          :hint="meta?.registryStale ? '注册表未刷新（策略服务器未开放），离线是必然结果' : '需要人工确认是否正常下线'"
         />
       </n-gi>
       <n-gi>
@@ -329,7 +450,7 @@ const heartbeatAge = computed(() => {
           suffix="个"
           :icon="LayersOutline"
           color="#7c5cf0"
-          hint="usecount 合计，决定条件单分配"
+          hint="⚠️ 现场 usecount 未上报（全为 0），不代表没有承载用户"
         />
       </n-gi>
       <n-gi>
@@ -339,7 +460,7 @@ const heartbeatAge = computed(() => {
           suffix="个"
           :icon="ServerOutline"
           :color="accent"
-          hint="本页口径，未含全量分页"
+          hint="跨实例全读（strategy-srv 在 136 db0 / db1 各一份）"
         />
       </n-gi>
     </n-grid>
@@ -420,7 +541,7 @@ const heartbeatAge = computed(() => {
         :bordered="false"
         :single-line="false"
         size="small"
-        :row-key="(row: StrategyServer) => String(row.id) + row.mac"
+        :row-key="(row: StrategyServer) => `${row.instance ?? '?'}#${row.arrayIndex ?? row.id}-${row.mac}`"
         :scroll-x="1180"
         :pagination="{
           page: page,

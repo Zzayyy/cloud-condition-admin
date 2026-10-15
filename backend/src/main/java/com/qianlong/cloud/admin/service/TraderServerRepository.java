@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.qianlong.cloud.admin.config.RedisProperties;
 import com.qianlong.cloud.admin.config.TradeServerProperties;
+import com.qianlong.cloud.admin.service.RegistryArrayReader.RegistryEntry;
 import com.qianlong.cloud.admin.service.RedisJsonGateway.RedisJsonValue;
 
 import lombok.RequiredArgsConstructor;
@@ -59,37 +60,17 @@ public class TraderServerRepository {
     /**
      * 读注册表：把**每个实例上**的 {@code traderserver} 数组成员摊平成一个列表。
      *
-     * <p>每条都记住「来自哪个实例、在该实例数组里的下标」——
-     * 现场 {@code id} 会重复（136 db1 里 7 条有 4 个 {@code id=0}），
-     * 光靠 id 无法定位到具体某一行；而 {@code (实例, 下标)} 是真正唯一的，
-     * 页面拿它做表格的 row-key 才不会串行。
+     * <p>摊平逻辑（跨实例全读、剥掉外层同名对象、记住「来源实例 + 下标」）
+     * 与策略服务器共用 {@link RegistryArrayReader} —— 那两个键的结构完全一样，
+     * 各写一遍迟早会在某一份里漏掉「必须记住下标」这类细节
+     * （现场 {@code id} 会重复：136 db1 的 7 条里有 4 个 {@code id=0}，
+     * 只有 {@code (实例, 下标)} 能唯一定位一行）。
      *
      * @return 摊平后的条目；注册表键一个实例上都没有时返回空列表
      */
     public List<RegistryEntry> readRegistry() {
         String key = tradeProperties.getRegistryKey();
-        List<RegistryEntry> out = new ArrayList<>();
-        for (RedisJsonValue value : gateway.findAllAcrossInstances(key)) {
-            JsonNode root = value.json();
-            // 值形如 {"traderserver":[...]}：外面包了一层同名对象，数组在里面。
-            // 兼容两种形状（万一将来现场改成直接就是数组），但不猜测别的键名。
-            JsonNode array = root;
-            if (root != null && root.isObject() && root.has(key)) {
-                array = root.get(key);
-            }
-            if (array == null || !array.isArray()) {
-                log.warn("注册表键 {} 的值不是数组（实例 {}），已跳过。实际类型：{}",
-                        key, value.instanceDisplay(),
-                        root == null ? "null" : root.getNodeType());
-                continue;
-            }
-            int index = 0;
-            for (JsonNode item : array) {
-                out.add(new RegistryEntry(item, value.instance(), index));
-                index++;
-            }
-        }
-        return out;
+        return RegistryArrayReader.flatten(gateway.findAllAcrossInstances(key), key);
     }
 
     /**
@@ -135,19 +116,11 @@ public class TraderServerRepository {
 
     /* ================================ 返回结构 ================================ */
 
-    /**
-     * 注册表里的一条委托服务器（含它来自哪里）。
-     *
-     * @param json     该条目的原始 JSON（字段名照现场）
-     * @param instance 来源实例（现场多实例且内容不同，页面必须能看出「这条是从哪读的」）
-     * @param index    在该实例数组里的下标（id 会重复，靠它才能唯一定位一行）
+    /*
+     * 注：注册表条目类型已上移到 RegistryArrayReader.RegistryEntry ——
+     * 因为策略服务器的 strategy-srv 是**完全相同的结构**，两处共用一个记录类，
+     * 免得再定义一份一模一样的嵌套类型（也避免两边字段漂移）。
      */
-    public record RegistryEntry(JsonNode json, RedisProperties.Instance instance, int index) {
-
-        public String instanceDisplay() {
-            return instance == null ? null : instance.display();
-        }
-    }
 
     /**
      * 一个账号的委托服务器分配。

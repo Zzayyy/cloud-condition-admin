@@ -164,13 +164,18 @@ export const menuTree: MenuNode[] = [
           title: '策略服务器',
           icon: LayersOutline,
           status: 'ready',
-          desc: '策略平台集群的节点清单、上线/心跳/下线状态与承载的条件单用户数。',
+          desc: '策略平台集群的节点清单、上线/心跳/下线状态与承载的条件单用户数。⚠️ 现场该服务当前未开放：注册表不刷新、心跳也收不到，「离线」是必然结果。**只读，不提供启停。**',
           refs: [
-            { label: 'Pub/Sub 频道', value: 'strategyserver_online / _beat / _offline（现场另有 _1 后缀一套）' },
-            { label: 'Redis JSON 键', value: 'strategy-srv（节点数组：id / ip / mac / usecount）' },
+            { label: 'Pub/Sub 频道', value: 'strategyserver_online / _beat / _offline（现场带 _1 后缀那一套；本模块**不订阅**）' },
+            { label: 'Redis JSON 键', value: 'strategy-srv（数组：id / ip / mac / usecount / enable / login-time / last-active-time）；136 db0 与 db1 各一份且内容不同' },
             { label: '协议说明', value: '请求接口doc.txt 第 4~6 条' },
           ],
-          todos: ['节点列表：IP、MAC、分配 ID、usecount、最后活跃时间', '在线/离线状态实时刷新', '节点详情抽屉：承载的条件单与账号', '离线告警'],
+          todos: [
+            '节点列表：来源实例、IP、MAC、分配 ID、usecount、最后活跃时间（已完成）',
+            '在线/离线状态（已完成；当前现场恒为离线，因该服务未开放）',
+            '承载的条件单与账号下钻 —— 未做（条件单走 /strategy/conditionals，账号可复用 acc-* 的 strategyserverid）',
+            '离线告警 —— 未做（现场连心跳都没有，做告警会一直响，需等服务开放后再定阈值）',
+          ],
         },
       },
       {

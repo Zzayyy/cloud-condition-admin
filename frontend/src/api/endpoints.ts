@@ -33,6 +33,7 @@ import type {
   RedisStreamInfo,
   StrategyLog,
   StrategyServer,
+  StrategyServerPage,
   TimeSeriesPoint,
   TradeRecord,
   TraderServer,
@@ -64,9 +65,17 @@ export const dashboardApi = {
 /* ------------------------------ 策略平台管理 ------------------------------ */
 
 export const strategyApi = {
-  /** 策略服务器列表 */
-  listServers: (query?: PageQuery) =>
-    api.get<PageResult<StrategyServer>>('/strategy/servers', query),
+  /**
+   * 策略服务器节点列表。
+   *
+   * 返回类型不是通用 `PageResult`：多带一个 `meta`（**全量**在线数 / usecount 合计与
+   * 最大值、以及「注册表是否已陈旧」的判定）。
+   * 之前前端按当前页 `filter` 算在线数，翻页时数字会莫名变化。
+   *
+   * ⚠️ 现场策略服务器未开放：注册表不刷新、心跳也收不到，
+   * 所以「在线 0 台」是必然结果（`meta.registryStale` 会说明）。
+   */
+  listServers: (query?: PageQuery) => api.get<StrategyServerPage>('/strategy/servers', query),
 
   /** 条件单列表（T_Conditional + T_Conditional_his） */
   listConditionals: (query?: PageQuery) =>

@@ -8,7 +8,7 @@
  *
  * 后端接通后 useResource 会自动改走真实接口，本文件可以整个删掉。
  */
-import type { Conditional, StrategyLog, StrategyServer } from '../domain'
+import type { Conditional, StrategyLog, StrategyServer, StrategyServerPage } from '../domain'
 import type { PageQuery, PageResult } from '../types'
 import {
   agoBy,
@@ -252,18 +252,48 @@ const LOGS = buildLogs()
 /* ----------------------------- 对外接口 ----------------------------- */
 
 export const mockStrategyApi = {
-  listServers(query: PageQuery = {}): PageResult<StrategyServer> {
+  /**
+   * 节点列表 —— 返回结构与真实接口一致（含 `meta`）。
+   *
+   * 演示态若少这一块，页面会走进一条与真实态不同的分支
+   * （汇总退回「当前页口径」、陈旧提示永不出现），等于没验证到真实路径。
+   */
+  listServers(query: PageQuery = {}): StrategyServerPage {
     const online = query.online
     let rows = SERVERS
     if (typeof online === 'boolean') {
       rows = rows.filter((s) => isServerOnline(s) === online)
     }
-    return paginate(
+    const page = paginate(
       rows,
       query,
       (row, kw) => row.ip.includes(kw) || row.mac.toLowerCase().includes(kw.toLowerCase()),
       { id: (r) => r.id, usecount: (r) => r.usecount, lastActiveTimeLong: (r) => r.lastActiveTimeLong },
     )
+    const onlineCount = SERVERS.filter(isServerOnline).length
+    const newestAge = SERVERS.length
+      ? Math.min(...SERVERS.map((s) => Math.max(0, Math.floor(Date.now() / 1000) - s.lastActiveTimeLong)))
+      : null
+    return {
+      ...page,
+      meta: {
+        onlineCount,
+        offlineCount: SERVERS.length - onlineCount,
+        total: SERVERS.length,
+        usecountTotal: SERVERS.reduce((sum, s) => sum + (s.usecount ?? 0), 0),
+        usecountMax: SERVERS.reduce((max, s) => Math.max(max, s.usecount ?? 0), 0),
+        offlineAfterSec: SERVER_OFFLINE_AFTER_SEC,
+        registryCopies: 2,
+        registryKey: 'strategy-srv',
+        redisInstances: ['192.168.1.136/db0', '192.168.1.136/db1', '192.168.1.137/db1'],
+        redisUnavailable: [],
+        newestAgeSec: newestAge,
+        // 演示数据里心跳是新鲜的，所以不算陈旧（真实态当前是 true）
+        registryStale: newestAge != null && newestAge > 120,
+        staleRegistryAfterSec: 120,
+        note: '在线按 lastActiveTimeLong 判定（本模块不订阅心跳频道）。',
+      },
+    }
   },
 
   listConditionals(query: PageQuery = {}): PageResult<Conditional> {

@@ -15,6 +15,7 @@
 | 数据存储 | 数据库管理 | ✅ 只读（表清单 / 结构 / 分页读表 / 只读 SQL） |
 | 服务器管理 | 委托服务器 | ✅ **只读**（节点清单 + 账号分配关系，**不做启停**） |
 | 服务器管理 | 数据中台 | ✅ **只读**（心跳在线判定 + 频道 + 流规模 + 尾部窗口取条目） |
+| 服务器管理 | 策略服务器 | ✅ **只读**（节点清单 + 在线状态 + 承载用户数；**不做启停**） |
 
 | 项 | 版本 |
 |---|---|
@@ -570,6 +571,80 @@ app:
 > Pub/Sub 频道是实例级的、不按 db 隔离（实测 136 的 db0 与 db1 收到的是同一份），
 > 所以 50 个中台也还是这一条连接。
 
+### 服务器管理：策略服务器 `strategyApi.listServers`（**只读**）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/strategy/servers` | 节点清单（跨实例全读 + 关键字/在线筛选 + 分页/排序） |
+
+数据只来自 Redis 键 `strategy-srv`。**结构与委托服务器的 `traderserver` 一样**：
+
+```json
+{ "strategy-srv": [ { id, ip, mac, usecount, enable,
+                      "login-time", "last-active-time", lastActiveTimeLong } ] }
+```
+
+#### ⚠️ 现场现状：策略服务器**未开放**（实测 2026-10-15）
+
+| 位置 | 条数 | 最后活跃 |
+|---|---|---|
+| `136` db0 | 1 | `mac=…QLDataHub1`，当天 10:01（约 1 小时前） |
+| `136` db1 | 1 | `mac=…probe`，**21 天前** |
+| `137` db1 | 0 | 无此键 |
+
+两条关键事实：
+
+1. **注册表不刷新** —— 盯 30 秒，内容完全不变。
+2. **心跳频道上没有心跳** —— `strategyserver_beat_1` 频道存在，
+   但订阅 25 秒收到 **0 条**（带后缀与不带后缀两种拼法都订过）。
+
+> **心跳收不到是预期现象，不是故障。** 因此本模块**不加常驻订阅**：
+> 加了也收不到；更糟的是 Redis 的 `PUBSUB CHANNELS` 只列「有订阅者的频道」，
+> 我们一订阅就会凭空多出一个订阅者，把 **Redis 管理页**的数字弄脏
+> （数据中台那边已经踩过这个观测者效应）。
+
+#### ⚠️ `usecount` 现场全部为 0
+
+这一列是页面核心内容（「承载条件单用户数」，还带进度条），但现场 3 条记录全为 0。
+那是「服务未开放、没有上报」的正常结果，**不等于「策略平台一个用户都没承载」**。
+所以 `meta.note` 会说明这一点，页面列头也用 tooltip 标注。
+
+#### 「注册表陈旧」提示（`registryStale`）
+
+「在线 0 台」在两种情况下含义完全不同：
+
+* **节点都离线了** —— 服务出问题，要去查；
+* **这个注册表本身就没在更新** —— 策略服务器未开放，离线是必然结果。
+
+现场正是后者。所以 meta 里给了 `newestAgeSec`（注册表里**最新**那条心跳距今多少秒）、
+`registryStale`（是否超过 `stale-registry-after-sec`）与 `note`，
+页面顶部据此提示。**没有这句提示，21 天前的时间戳会被读成「策略平台全挂了」**，
+让人去查一个根本没问题的方向。
+
+#### 汇总口径（全量，不是当前页）
+
+`meta.onlineCount` / `offlineCount` / `usecountTotal` / `usecountMax` 都是**全量**算的。
+前端原先按当前页 `filter` 统计（代码里自己写了注释
+「真实汇总应由后端单独提供接口」），翻页时「在线节点」会莫名变化。
+`usecountMax` 还兼作进度条分母 —— 用当前页最大值会导致翻页时进度条跳动。
+
+#### ⚠️ 为什么**没有**启停接口
+
+现场 `strategy-srv` 里的记录 **`id` 全是 0**，`mac` 又各自带实例后缀
+（`…QLDataHub1` / `…probe`），**没有任何字段能稳定地指回「同一台机器」**。
+按 id 或 mac 猜着写回很容易改到一台并不属于本次运维范围的机器上，
+而这是在往**生产 Redis** 写。所以与委托服务器一致：只读呈现，
+前端那个 `NSwitch` 也改成了只读标签。
+
+#### 与委托服务器共用的一段逻辑
+
+`strategy-srv` 与 `traderserver` 的结构完全相同（**外面包一层同名对象、数组在里面**），
+所以摊平逻辑抽到了 `RegistryArrayReader`：跨实例全读、剥外层、
+记住 `(来源实例, 数组下标)`。抽出来的理由是这段有两个容易漏的点 ——
+**必须跨实例读**（按配置顺序保留第一份会漏节点）、
+**必须记住下标**（`id` 会重复，只有它+实例能唯一定位一行，表格 row-key 靠它）。
+各写一遍迟早会在某一份里漏掉其中一个。
+
 ### 业务数据：策略日志 `strategyApi.listLogs`
 
 | 方法 | 路径 | 说明 |
@@ -1001,7 +1076,8 @@ backend/
     │   │   │   ├── JacksonConfig.java
     │   │   │   ├── RedisProperties.java         # app.redis.instances 实例清单
     │   │   │   ├── TradeServerProperties.java   # app.trade.* 委托服务器（只读）
-    │   │   │   └── DatahubProperties.java       # app.datahub.* 数据中台（只读）
+    │   │   │   ├── DatahubProperties.java       # app.datahub.* 数据中台（只读）
+    │   │   │   └── StrategyServerProperties.java # app.strategy.* 策略服务器（只读）
     │   │   ├── controller/          # HTTP 层（原 web 包）
     │   │   │   ├── AccountController.java       # 账户与用户
     │   │   │   └── ...（系统管理各 Controller）
@@ -1016,6 +1092,8 @@ backend/
     │   │       ├── TradeServerService.java      # ★ 委托服务器节点 + 分配关系
     │   │       ├── DatahubHeartbeatMonitor.java # ★ 中台心跳常驻订阅（三态：含「未知」）
     │   │       ├── DatahubService.java          # ★ 中台实例/频道/流/条目
+    │   │       ├── RegistryArrayReader.java     # ★ 注册表数组摊平（委托/策略共用）
+    │   │       ├── StrategyServerService.java   # ★ 策略服务器节点 + 陈旧度判定
     │   │       └── AccountLogService.java
     │   └── resources/application.yml
     └── test/java/.../AdminApplicationTests.java   # 冒烟 + 守护鉴权不失效
@@ -1067,6 +1145,12 @@ backend/
 * **数据中台的心跳订阅是常驻的**：关掉（`app.datahub.heartbeat.enabled=false`）
   之后在线状态全部显示「未知」——这是刻意的，不是为了省事。
   另外订阅本身会「造出」频道（见上文观测者效应），接口已做扣除与单列。
+* **策略服务器不做启停，也不订阅心跳**：现场该服务未开放（注册表不刷新、
+  心跳频道上收不到心跳），所以「在线 0 台」是必然结果 ——
+  `meta.registryStale` 与 `note` 会说明，不要据此判定服务故障。
+  `usecount` 现场全部为 0（未上报），也不代表没有承载用户。
+* **策略服务器的「在线」路径未经真实验证**：因该服务未开放，只能验证到
+  「正确读出注册表、如实显示离线与陈旧时间」；**没有**验证过真实心跳到达时的行为。
 * **委托服务器页的「承载账号数」按 `id` 匹配**：现场 `id` 会重复
   （`136 db1` 有 4 个 `id=0`），所以那几个同 id 的节点会显示承载同一批账号。
   这是数据本身如此，接口与页面都已注明；不去猜一个更细的匹配规则
