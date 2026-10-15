@@ -34,7 +34,6 @@ import {
   PauseOutline,
   PlayOutline,
   RefreshOutline,
-  SearchOutline,
   TimeOutline,
   TrashOutline,
   TrendingUpOutline,
@@ -544,18 +543,14 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
       </n-tabs>
 
       <div class="toolbar">
-        <n-input
+        <SearchInput
           v-model:value="keyword"
           placeholder="搜索条件单号 / 账号 / 名称"
-          clearable
           style="width: 250px"
-          @keyup.enter="handleSearch"
+          :loading="loading"
+          @search="handleSearch"
           @clear="handleSearch"
-        >
-          <template #prefix>
-            <n-icon :component="SearchOutline" />
-          </template>
-        </n-input>
+        />
 
         <n-select
           v-model:value="typeFilter"

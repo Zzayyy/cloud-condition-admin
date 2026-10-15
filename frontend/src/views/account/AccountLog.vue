@@ -28,7 +28,6 @@ import {
   PeopleOutline,
   PersonOutline,
   RefreshOutline,
-  SearchOutline,
   TimeOutline,
 } from '@vicons/ionicons5'
 
@@ -479,31 +478,25 @@ function openDetail(row: UserLog) {
 
       <template v-if="tab === 'logs'">
         <div class="toolbar">
-          <n-input
+          <!-- 「账号」用人物图标：它表达的是**字段语义**，与右侧可点的放大镜不重复 -->
+          <SearchInput
             v-model:value="accountFilter"
             placeholder="账号"
-            clearable
             style="width: 190px"
-            @keyup.enter="handleSearch"
+            :prefix-icon="PersonOutline"
+            :loading="logLoading"
+            @search="handleSearch"
             @clear="handleSearch"
-          >
-            <template #prefix>
-              <n-icon :component="PersonOutline" />
-            </template>
-          </n-input>
+          />
 
-          <n-input
+          <SearchInput
             v-model:value="keyword"
             placeholder="搜索账号 / 信息"
-            clearable
             style="width: 200px"
-            @keyup.enter="handleSearch"
+            :loading="logLoading"
+            @search="handleSearch"
             @clear="handleSearch"
-          >
-            <template #prefix>
-              <n-icon :component="SearchOutline" />
-            </template>
-          </n-input>
+          />
 
           <n-select
             v-model:value="infoFilter"

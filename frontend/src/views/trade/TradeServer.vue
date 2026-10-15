@@ -28,7 +28,6 @@ import {
   PersonOutline,
   PulseOutline,
   RefreshOutline,
-  SearchOutline,
   ServerOutline,
   SwapHorizontalOutline,
   TimeOutline,
@@ -751,18 +750,14 @@ const isActiveOnline = computed(() => {
       <!-- 节点 -->
       <template v-if="tab === 'servers'">
         <div class="toolbar">
-          <n-input
+          <SearchInput
             v-model:value="serverKeyword"
             placeholder="搜索 IP 或 MAC"
-            clearable
             style="width: 240px"
-            @keyup.enter="searchServers"
+            :loading="serverLoading"
+            @search="searchServers"
             @clear="searchServers"
-          >
-            <template #prefix>
-              <n-icon :component="SearchOutline" />
-            </template>
-          </n-input>
+          />
 
           <n-button-group>
             <n-button
@@ -821,18 +816,14 @@ const isActiveOnline = computed(() => {
       <!-- 账号分配 -->
       <template v-else>
         <div class="toolbar">
-          <n-input
+          <SearchInput
             v-model:value="accKeyword"
             placeholder="搜索账号 / 户名"
-            clearable
             style="width: 230px"
-            @keyup.enter="searchAssignments"
+            :loading="accLoading"
+            @search="searchAssignments"
             @clear="searchAssignments"
-          >
-            <template #prefix>
-              <n-icon :component="SearchOutline" />
-            </template>
-          </n-input>
+          />
 
           <n-select
             v-model:value="accServerId"

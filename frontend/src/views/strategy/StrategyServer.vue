@@ -25,7 +25,6 @@ import {
   LayersOutline,
   PulseOutline,
   RefreshOutline,
-  SearchOutline,
   ServerOutline,
   TimeOutline,
 } from '@vicons/ionicons5'
@@ -495,18 +494,14 @@ const heartbeatAge = computed(() => {
       </template>
 
       <div class="toolbar">
-        <n-input
+        <SearchInput
           v-model:value="keyword"
           placeholder="搜索 IP 或 MAC"
-          clearable
           style="width: 240px"
-          @keyup.enter="handleSearch"
+          :loading="loading"
+          @search="handleSearch"
           @clear="handleSearch"
-        >
-          <template #prefix>
-            <n-icon :component="SearchOutline" />
-          </template>
-        </n-input>
+        />
 
         <n-button-group>
           <n-button

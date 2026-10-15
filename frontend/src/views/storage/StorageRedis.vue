@@ -31,7 +31,6 @@ import {
   InformationCircleOutline,
   LayersOutline,
   RefreshOutline,
-  SearchOutline,
   ServerOutline,
   TimeOutline,
   TrashOutline,
@@ -674,18 +673,14 @@ function deleteKey(row: RedisKeyInfo) {
       </template>
 
       <div class="toolbar">
-        <n-input
+        <SearchInput
           v-model:value="keyword"
           placeholder="匹配键名（SCAN MATCH）"
-          clearable
           style="width: 230px"
-          @keyup.enter="handleSearch"
+          :loading="keyLoading"
+          @search="handleSearch"
           @clear="handleSearch"
-        >
-          <template #prefix>
-            <n-icon :component="SearchOutline" />
-          </template>
-        </n-input>
+        />
 
         <n-select
           v-model:value="domainFilter"

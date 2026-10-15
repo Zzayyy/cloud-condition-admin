@@ -33,7 +33,6 @@ import {
   PeopleOutline,
   PersonOutline,
   RefreshOutline,
-  SearchOutline,
   SyncOutline,
   WalletOutline,
   WarningOutline,
@@ -468,18 +467,14 @@ const shareholderColumns: DataTableColumns<Shareholder> = [
       </template>
 
       <div class="toolbar">
-        <n-input
+        <SearchInput
           v-model:value="keyword"
           placeholder="搜索账号 / 户名"
-          clearable
           style="width: 220px"
-          @keyup.enter="handleSearch"
+          :loading="loading"
+          @search="handleSearch"
           @clear="handleSearch"
-        >
-          <template #prefix>
-            <n-icon :component="SearchOutline" />
-          </template>
-        </n-input>
+        />
 
         <n-select
           v-model:value="accountTypeFilter"

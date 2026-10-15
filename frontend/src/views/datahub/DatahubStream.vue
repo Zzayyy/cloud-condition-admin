@@ -33,7 +33,6 @@ import {
   InformationCircleOutline,
   LayersOutline,
   RefreshOutline,
-  SearchOutline,
   TimeOutline,
   TrendingUpOutline,
   WarningOutline,
@@ -863,18 +862,14 @@ const traceHint = computed(() => {
       </template>
 
       <div class="toolbar">
-        <n-input
+        <SearchInput
           v-model:value="keyword"
           placeholder="搜索流名"
-          clearable
           style="width: 200px"
-          @keyup.enter="reload"
+          :loading="loading"
+          @search="reload"
           @clear="reload"
-        >
-          <template #prefix>
-            <n-icon :component="SearchOutline" />
-          </template>
-        </n-input>
+        />
 
         <n-select
           v-model:value="instanceFilter"

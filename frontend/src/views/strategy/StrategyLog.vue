@@ -28,7 +28,6 @@ import {
   LocationOutline,
   PersonOutline,
   RefreshOutline,
-  SearchOutline,
   TimeOutline,
   WarningOutline,
 } from '@vicons/ionicons5'
@@ -335,18 +334,14 @@ const relatedTimeline = computed(() => {
       </template>
 
       <div class="toolbar">
-        <n-input
+        <SearchInput
           v-model:value="keyword"
           placeholder="搜索日志内容 / 条件单号 / 账号"
-          clearable
           style="width: 260px"
-          @keyup.enter="handleSearch"
+          :loading="loading"
+          @search="handleSearch"
           @clear="handleSearch"
-        >
-          <template #prefix>
-            <n-icon :component="SearchOutline" />
-          </template>
-        </n-input>
+        />
 
         <n-tooltip trigger="hover" :disabled="!statusColumnEmpty">
           <template #trigger>
@@ -366,18 +361,16 @@ const relatedTimeline = computed(() => {
           </span>
         </n-tooltip>
 
-        <n-input
+        <!-- 「来源 IP」用定位图标：字段语义，不是装饰性放大镜 -->
+        <SearchInput
           v-model:value="fromIp"
           placeholder="来源 IP"
-          clearable
           style="width: 150px"
-          @keyup.enter="handleSearch"
+          :prefix-icon="LocationOutline"
+          :loading="loading"
+          @search="handleSearch"
           @clear="handleSearch"
-        >
-          <template #prefix>
-            <n-icon :component="LocationOutline" />
-          </template>
-        </n-input>
+        />
 
         <n-button size="small" @click="resetFilters">
           <template #icon>

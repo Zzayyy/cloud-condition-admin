@@ -40,7 +40,6 @@ import {
   PersonOutline,
   PulseOutline,
   RefreshOutline,
-  SearchOutline,
   ShieldOutline,
   TimeOutline,
   WarningOutline,
@@ -1084,19 +1083,15 @@ function openLoginDetail(row: AdminLoginLog) {
         </template>
 
         <div class="toolbar">
-          <n-input
+          <SearchInput
             v-model:value="auditKeyword"
             placeholder="目标 / 操作人 / 动作名"
-            clearable
             size="small"
             style="width: 230px"
-            @keyup.enter="handleAuditSearch"
+            :loading="auditLoading"
+            @search="handleAuditSearch"
             @clear="handleAuditSearch"
-          >
-            <template #prefix>
-              <n-icon :component="SearchOutline" />
-            </template>
-          </n-input>
+          />
 
           <n-select
             v-model:value="auditLevel"
@@ -1139,19 +1134,17 @@ function openLoginDetail(row: AdminLoginLog) {
             @update:value="handleAuditSearch"
           />
 
-          <n-input
+          <!-- 「操作人」用人物图标：字段语义，与右侧可点的放大镜不重复 -->
+          <SearchInput
             v-model:value="auditOperator"
             placeholder="操作人"
-            clearable
             size="small"
             style="width: 150px"
-            @keyup.enter="handleAuditSearch"
+            :prefix-icon="PersonOutline"
+            :loading="auditLoading"
+            @search="handleAuditSearch"
             @clear="handleAuditSearch"
-          >
-            <template #prefix>
-              <n-icon :component="PersonOutline" />
-            </template>
-          </n-input>
+          />
 
           <n-date-picker
             :value="auditRange"
@@ -1310,33 +1303,27 @@ function openLoginDetail(row: AdminLoginLog) {
         </template>
 
         <div class="toolbar">
-          <n-input
+          <SearchInput
             v-model:value="loginUsername"
             placeholder="账号"
-            clearable
             size="small"
             style="width: 170px"
-            @keyup.enter="handleLoginSearch"
+            :prefix-icon="PersonOutline"
+            :loading="loginLoading"
+            @search="handleLoginSearch"
             @clear="handleLoginSearch"
-          >
-            <template #prefix>
-              <n-icon :component="PersonOutline" />
-            </template>
-          </n-input>
+          />
 
-          <n-input
+          <SearchInput
             v-model:value="loginIp"
             placeholder="来源 IP"
-            clearable
             size="small"
             style="width: 170px"
-            @keyup.enter="handleLoginSearch"
+            :prefix-icon="LocationOutline"
+            :loading="loginLoading"
+            @search="handleLoginSearch"
             @clear="handleLoginSearch"
-          >
-            <template #prefix>
-              <n-icon :component="LocationOutline" />
-            </template>
-          </n-input>
+          />
 
           <n-select
             v-model:value="loginSuccess"

@@ -24,7 +24,6 @@ import {
   InformationCircleOutline,
   LinkOutline,
   RefreshOutline,
-  SearchOutline,
   SwapHorizontalOutline,
   TimeOutline,
   TrendingUpOutline,
@@ -348,25 +347,21 @@ const prettyOrderParam = computed(() => formatJson(relatedOrder.value?.OrderPara
       </n-tabs>
 
       <div class="toolbar">
-        <n-input
+        <SearchInput
           v-model:value="keyword"
           placeholder="搜索成交号 / 委托号 / 账号"
-          clearable
           style="width: 260px"
-          @keyup.enter="handleSearch"
+          :loading="loading"
+          @search="handleSearch"
           @clear="handleSearch"
-        >
-          <template #prefix>
-            <n-icon :component="SearchOutline" />
-          </template>
-        </n-input>
+        />
 
-        <n-input
+        <SearchInput
           v-model:value="codeFilter"
           placeholder="合约代码"
-          clearable
           style="width: 130px"
-          @keyup.enter="handleSearch"
+          :loading="loading"
+          @search="handleSearch"
           @clear="handleSearch"
         />
 

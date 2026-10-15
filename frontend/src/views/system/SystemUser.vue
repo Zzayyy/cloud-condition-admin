@@ -40,7 +40,6 @@ import {
   PersonAddOutline,
   PlayOutline,
   RefreshOutline,
-  SearchOutline,
   TrashOutline,
 } from '@vicons/ionicons5'
 
@@ -1001,18 +1000,14 @@ async function submitReset() {
       </template>
 
       <div class="toolbar">
-        <n-input
+        <SearchInput
           v-model:value="keyword"
           placeholder="搜索登录名 / 显示名 / 备注"
-          clearable
           style="width: 240px"
-          @keyup.enter="handleSearch"
+          :loading="loading"
+          @search="handleSearch"
           @clear="handleSearch"
-        >
-          <template #prefix>
-            <n-icon :component="SearchOutline" />
-          </template>
-        </n-input>
+        />
 
         <n-select
           v-model:value="roleFilter"

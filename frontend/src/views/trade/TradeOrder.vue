@@ -29,7 +29,6 @@ import {
   EyeOutline,
   InformationCircleOutline,
   RefreshOutline,
-  SearchOutline,
   SwapHorizontalOutline,
   TimeOutline,
   TrendingUpOutline,
@@ -514,25 +513,21 @@ const marketOrderType = computed(() => {
       </n-tabs>
 
       <div class="toolbar">
-        <n-input
+        <SearchInput
           v-model:value="keyword"
           placeholder="搜索委托号 / 策略号 / 账号 / 合约"
-          clearable
           style="width: 270px"
-          @keyup.enter="handleSearch"
+          :loading="loading"
+          @search="handleSearch"
           @clear="handleSearch"
-        >
-          <template #prefix>
-            <n-icon :component="SearchOutline" />
-          </template>
-        </n-input>
+        />
 
-        <n-input
+        <SearchInput
           v-model:value="codeFilter"
           placeholder="合约代码"
-          clearable
           style="width: 130px"
-          @keyup.enter="handleSearch"
+          :loading="loading"
+          @search="handleSearch"
           @clear="handleSearch"
         />
 
