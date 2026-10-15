@@ -166,7 +166,25 @@ public final class DatahubDtos {
             String instance,
             int db,
             /** ingress / reply / downstream / ack / other */
-            String role) {
+            String role,
+            /**
+             * 最后一条**保留中**的条目的 ID（形如 {@code 1791946676151-1}）。
+             *
+             * <p>Stream 条目 ID 是**毫秒时间戳**（Redis 的约定，现场实测一致），
+             * 所以这个 ID 可以直接当时间用。
+             */
+            String lastEntryId,
+            /**
+             * 最后一条条目距今多少秒 —— 用来回答「这条流还在进数据吗」。
+             *
+             * <p>⚠️ 这是现场非常需要看的一个数：实测 137 db0 的
+             * {@code DataHub_req_stream} 最后一条在 **24 小时前**、
+             * {@code ST-15} 在 **15 天前** —— 也就是说那些 1400 万条
+             * 全是**历史堆积**，而不是正在产生。只看 XLEN 会以为「流量很大」。
+             *
+             * <p>空流（XLEN=0）时为 {@code null}；不返回 0 冒充「刚刚」。
+             */
+            Long lastEntryAgeSec) {
     }
 
     /** 消费组（含积压）。{@code lag} 允许为 null —— 老版本 Redis 不返回该字段。 */

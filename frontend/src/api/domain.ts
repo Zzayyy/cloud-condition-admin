@@ -692,6 +692,22 @@ export interface RedisStreamInfo {
   db?: number
   /** 流的角色分类 */
   role?: StreamRole
+  /**
+   * 最后一条**保留中**条目的 ID（形如 `1791946676151-1`）。
+   * Stream 条目 ID 前一段是毫秒时间戳，可直接当时间用。
+   */
+  lastEntryId?: string | null
+  /**
+   * 最后一条条目距今多少秒 —— 回答「这条流还在进数据吗」。
+   *
+   * ⚠️ 这是本页很有用的一个数：实测 137 db0 的 `DataHub_req_stream`
+   * 最后一条在 **24 小时前**、`ST-15` 在 **15 天前**，
+   * 说明那 1400 万条是**历史堆积**而非当前流量。
+   * 只看 XLEN 会误判成「流量很大」。
+   *
+   * 空流为 `null`（不返回 0 冒充「刚刚」）。
+   */
+  lastEntryAgeSec?: number | null
 }
 
 /**
@@ -810,6 +826,42 @@ export interface TimeSeriesPoint {
   /** 时间戳（毫秒）或时间字符串 */
   time: number | string
   value: number
+}
+
+/**
+ * 趋势序列（`/monitor/series` 的返回）。
+ *
+ * ⚠️ 关键字段是 `historyAvailable`：现场**没有时序库**，所以只有
+ * 「能从 Redis 现有数据回溯出来」的指标才有曲线（条目到达速率 ——
+ * 靠 Stream 条目 ID 里的毫秒时间戳）。`lag` / `pending` 只有当前快照，
+ * 此时 `points` 是**空数组**、`currentValue` 有值、`note` 说明原因。
+ *
+ * 页面必须据此显示空态 + 说明，**不能**拿 `currentValue` 去凑一条曲线。
+ */
+export interface TimeSeriesView {
+  metric: string
+  label: string
+  unit: string
+  /** 无历史时为空数组 */
+  points: TimeSeriesPoint[]
+  /** 是否是**真实历史**（false 表示该指标无法回溯） */
+  historyAvailable: boolean
+  /** 当前值（即便没有历史也一定有） */
+  currentValue: number | null
+  source: string
+  /** 需要向用户说明的限制 */
+  note: string | null
+  windowMin: number
+  /** 每个点代表多少秒（无历史时为 0） */
+  bucketSec: number
+}
+
+/** 可选的趋势指标（含「有没有历史」，页面不用猜） */
+export interface MonitorMetricOption {
+  key: string
+  label: string
+  unit: string
+  historyAvailable: boolean
 }
 
 /* --------------------------------- 总览页 --------------------------------- */

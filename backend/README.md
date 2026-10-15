@@ -446,9 +446,11 @@ app:
 |---|---|---|
 | GET | `/datahub/nodes` | 实例清单（一行 = 一台 Redis 实例）+ 各 db 统计 + 心跳状态 |
 | GET | `/datahub/channels` | Pub/Sub 频道（**已扣除本后台自己那份订阅**） |
-| GET | `/datahub/streams` | 跨实例跨 db 的流清单（含消费组与积压） |
+| GET | `/datahub/streams` | 跨实例跨 db 的流清单（含消费组、积压、**最后条目距今**） |
 | GET | `/datahub/streams/{key}/entries` | 某流的条目（**只在尾部窗口内**） |
 | GET | `/datahub/trace` | 按 `request_id` 串联一次请求（同样只在尾部窗口内） |
+| GET | `/monitor/metrics` | 可用趋势指标（含「有没有历史」） |
+| GET | `/monitor/series` | 趋势序列（**能算真历史就算，算不出就说没有**） |
 
 #### ⚠️ 三条与「委托服务器」本质不同的地方
 
@@ -644,6 +646,60 @@ app:
 **必须跨实例读**（按配置顺序保留第一份会漏节点）、
 **必须记住下标**（`id` 会重复，只有它+实例能唯一定位一行，表格 row-key 靠它）。
 各写一遍迟早会在某一份里漏掉其中一个。
+
+### 服务器管理：消息总线 `datahubApi` + `monitorApi`（**只读**）
+
+「消息总线」页共用上面的 `/datahub/streams`、`/datahub/streams/{key}/entries`、
+`/datahub/trace`，外加 `/monitor/*`。
+
+#### ⚠️ 一个比「XLEN 有多大」更重要的事实：**大部分流已经停止进数据**
+
+Stream 的**条目 ID 是毫秒时间戳**（Redis 约定，现场实测一致），
+所以「最后一条是什么时候的」可以直接从 ID 算出来，**不需要任何额外存储**：
+
+| 流 | XLEN | 最后一条距今 |
+|---|---|---|
+| 137 db0 `DataHub_req_stream` | **1412 万** | **约 24.6 小时** |
+| 137 db0 `DataHub_reply_stream` | 26 万 | 约 24.6 小时 |
+| 137 db0 `ST-20` | 32 万 | 约 14.9 天 |
+| 136 db0 `ST-0` | 9.6 万 | 约 1.5 小时 |
+
+实测 **149 条流里有 72 条**超过 1 小时没有新条目。
+
+> **这说明那些百万级条目是「历史堆积」，不是当前流量。**
+> 只看 XLEN 会把一潭死水看成「流量很大」，判断方向完全相反。
+> 所以 `/datahub/streams` 每条都返回 `lastEntryId` 与 `lastEntryAgeSec`，
+> 页面新增「最后条目」列，并在有停流时给出汇总提示。
+
+#### ⚠️ 趋势图：一半是真历史，一半是「没有历史」
+
+现场**没有时序库**。所以能不能画曲线，取决于该指标在 Redis 里有没有可回溯的痕迹：
+
+| 指标 | 历史 | 来源 |
+|---|---|---|
+| `ingressRate` / `totalRate` | ✅ **真实历史** | `XRANGE` 按条目 ID 的毫秒时间戳分桶，还原每桶到达量 |
+| `consumerLag` / `consumerPending` / `ingressBacklog` | ❌ **没有** | `XINFO GROUPS` / `XLEN` 只有当前快照，Redis 不保存历史值 |
+
+对没有历史的指标，接口返回 `historyAvailable=false` + `currentValue` +
+说明，**`points` 是空数组** —— 页面显示空态与当前值。
+
+> **不编曲线是刻意的**：拿演示数据凑一条平滑曲线，会被读成
+> 「lag 在过去一小时里是这么变化的」—— 那是捏造的运维依据。
+> 要真历史只能后端定期采样落库或接 Prometheus；现场数据流当前已停止，
+> 先采也只会得到一条平线，所以本次不做，只在接口与页面上说明。
+
+> 实测该趋势的取数成本：`XRANGE` 起点支持「部分 ID」（只给毫秒），
+> Redis 从该位置顺序读，不扫全表 —— 15 分钟窗口 90 个点毫秒级返回。
+
+#### ⚠️ 条目查询**必须**带 `instance` + `db`
+
+同一个流名（如 `DataHub_req_stream`）在多个 `(实例, db)` 上都存在
+（现场 136 db0/db1、137 db0/db2 都有）。不指定的话后端只能按顺序返回
+**第一个**命中的 —— 实测不传时会落到 `192.168.1.136 db0`，
+于是**点开 137 db0 那一行看到的却是 136 db0 的报文**。
+
+列表里本来就有 `instance` / `db` 字段，页面此前没用上，现已修正。
+`/datahub/trace` 的 `hits` 也带这两个字段，便于确认报文到底出自哪个库。
 
 ### 业务数据：策略日志 `strategyApi.listLogs`
 
@@ -1094,6 +1150,7 @@ backend/
     │   │       ├── DatahubService.java          # ★ 中台实例/频道/流/条目
     │   │       ├── RegistryArrayReader.java     # ★ 注册表数组摊平（委托/策略共用）
     │   │       ├── StrategyServerService.java   # ★ 策略服务器节点 + 陈旧度判定
+    │   │       ├── MonitorService.java          # ★ 趋势（真历史 = 条目 ID 时间戳）
     │   │       └── AccountLogService.java
     │   └── resources/application.yml
     └── test/java/.../AdminApplicationTests.java   # 冒烟 + 守护鉴权不失效

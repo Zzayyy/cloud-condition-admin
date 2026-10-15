@@ -15,7 +15,7 @@
  *  - 消费组 lag 合计约 37,300（137 上 ST-15=10500、ST-42=4400、ST-35=3200…）
  *  - pending：136 db0 ST-0=595、DataHub_req_stream=11、136 db1 WT-1-reply=162
  */
-import type { TimeSeriesPoint } from '../domain'
+import type { MonitorMetricOption, TimeSeriesPoint, TimeSeriesView } from '../domain'
 import { seededRandom, type Rand } from './_shared'
 
 const rand: Rand = seededRandom(20261014)
@@ -33,41 +33,71 @@ export interface TrendMetricDef {
   warnAt?: number
   /** 随机游走幅度（相对基线的比例） */
   jitter: number
+  /**
+   * 该指标在**真实态**下有没有可回溯的历史。
+   *
+   * 演示态为了看出图形效果仍会生成曲线，但这个标记会传给页面，
+   * 由页面决定是否显示「非真实历史」提示 —— 不能让演示曲线被当成真数据。
+   */
+  hasHistory: boolean
   /** 指标来源，鼠标悬停时说明 */
   source: string
 }
 
 /**
- * 只保留「积压与消费健康」三类 —— 这正是消息总线那一页在回答的问题。
- * 内存类指标归属 Redis 管理，不搬到这里。
+ * 可画趋势的指标。
+ *
+ * ⚠️ 键名必须与后端 `MonitorService` 的常量**逐字一致**（否则真实态会报
+ * 「未知指标」）。`hasHistory` 也与后端一致：
+ *  - 到达速率类：能靠 Stream 条目 ID 的毫秒时间戳还原**真实历史**；
+ *  - lag / pending / 积压：只有当前快照，**没有历史**。
  */
 export const TREND_METRICS: TrendMetricDef[] = [
   {
-    key: 'ingressBacklog',
-    label: '入口流积压',
-    base: 4073271 + 6057 + 6004,
-    unit: '条',
-    warnAt: 1_000_000,
-    jitter: 0.004,
-    source: 'XLEN(DataHub_req_stream) 跨实例合计',
+    key: 'ingressRate',
+    label: '入口流到达速率',
+    base: 27.6,
+    unit: '条/秒',
+    jitter: 0.35,
+    hasHistory: true,
+    source: 'XRANGE(DataHub_req_stream) 按条目 ID 的毫秒时间戳分桶',
+  },
+  {
+    key: 'totalRate',
+    label: '全网到达速率',
+    base: 30.0,
+    unit: '条/秒',
+    jitter: 0.35,
+    hasHistory: true,
+    source: 'XRANGE(全部 stream) 按条目 ID 分桶',
   },
   {
     key: 'consumerLag',
     label: '消费组 lag',
     base: 37300,
     unit: '条',
-    warnAt: 20_000,
     jitter: 0.12,
-    source: 'XINFO GROUPS lag 合计（已写入未投递）',
+    hasHistory: false,
+    source: 'XINFO GROUPS lag 合计（当前快照，Redis 不保存历史）',
   },
   {
     key: 'consumerPending',
     label: '未确认 pending',
     base: 595 + 11 + 162,
     unit: '条',
-    warnAt: 500,
     jitter: 0.25,
-    source: 'XINFO GROUPS pending 合计（已投递未确认）',
+    hasHistory: false,
+    source: 'XINFO GROUPS pending 合计（当前快照，Redis 不保存历史）',
+  },
+  {
+    key: 'ingressBacklog',
+    label: '入口流积压',
+    base: 14129288 + 6411 + 13 + 6004,
+    unit: '条',
+    warnAt: 1_000_000,
+    jitter: 0.004,
+    hasHistory: false,
+    source: 'XLEN(DataHub_req_stream) 跨实例合计（当前快照）',
   },
 ]
 
@@ -96,11 +126,18 @@ export function trendCurrent(): Record<string, number> {
 }
 
 /**
- * 生成一条趋势曲线。
+ * 生成一条趋势序列（**演示态专用**）。
  *
- * ⚠️ 现场**没有时序库**，所以演示态下的历史是「围绕当前值往回生成」的，
- * 不是真实历史。组件上必须如实标注这一点，不能让人误以为是真实曲线。
- * 真实曲线需要后端接入指标存储（Prometheus 之类）后提供。
+ * ⚠️ 现场**没有时序库**，所以这里的历史是「围绕当前值往回生成」的，
+ * **不是真实历史**。组件据 `historyAvailable` 显示提示。
+ *
+ * 真实态下：
+ *  - 条目到达速率**能**算出真历史（Stream 条目 ID 带毫秒时间戳）；
+ *  - lag / pending **算不出**（只有当前快照），后端返回空 points，
+ *    页面显示空态而不是曲线。
+ *
+ * 演示态为了看到图形效果，对没有历史的指标也生成曲线，
+ * 但把 `historyAvailable` 标为 false，让页面照实提示。
  */
 export function trendSeries(key: string, points = 60): TimeSeriesPoint[] {
   const def = TREND_METRICS.find((d) => d.key === key)
@@ -122,4 +159,46 @@ export function trendSeries(key: string, points = 60): TimeSeriesPoint[] {
   // 末点对齐当前值，避免曲线末端跳变
   out[out.length - 1] = { time: now, value: base }
   return out
+}
+
+/* ------------------------- 演示态的 /monitor 接口 ------------------------- */
+
+/**
+ * 可用指标清单（与真实后端 `GET /monitor/metrics` 同结构）。
+ */
+export function mockMetrics(): MonitorMetricOption[] {
+  return TREND_METRICS.map((d) => ({
+    key: d.key,
+    label: d.label,
+    unit: d.unit ?? '',
+    historyAvailable: d.hasHistory,
+  }))
+}
+
+/**
+ * 趋势序列（与真实后端 `GET /monitor/series` 同结构）。
+ *
+ * ⚠️ 这里刻意**保留**「演示态对无历史指标也生成曲线」的行为，
+ * 但把 `historyAvailable` 标成 false —— 这样页面那条「非真实历史」提示
+ * 在演示态下也走得到，不至于上线才发现提示逻辑有问题。
+ */
+export function mockSeries(metric: string, window: string): TimeSeriesView {
+  const def = TREND_METRICS.find((d) => d.key === metric) ?? TREND_METRICS[0]
+  const windowMin = Number(String(window).replace(/[^0-9]/g, '')) || 15
+  // 每分钟一个点，最多 90 个（与后端 chooseBucketSec 的点数上限一致）
+  const points = Math.min(90, windowMin)
+  return {
+    metric: def.key,
+    label: def.label,
+    unit: def.unit ?? '',
+    points: trendSeries(def.key, points),
+    historyAvailable: def.hasHistory,
+    currentValue: current[def.key] ?? def.base,
+    source: def.source,
+    note: def.hasHistory
+      ? null
+      : '演示态：该指标在真实态下没有可回溯的历史（Redis 只保存当前快照），此曲线为演示生成。',
+    windowMin,
+    bucketSec: 60,
+  }
 }

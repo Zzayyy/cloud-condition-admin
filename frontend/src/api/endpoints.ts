@@ -20,6 +20,7 @@ import type {
   LoginResult,
   MysqlTable,
   MysqlTableSchema,
+  MonitorMetricOption,
   NameValueRow,
   OrderRecord,
   PasswordPolicy,
@@ -38,6 +39,7 @@ import type {
   TradeRecord,
   TraderServer,
   TraderServerPage,
+  TimeSeriesView,
   UserLog,
 } from './domain'
 
@@ -177,20 +179,26 @@ export const datahubApi = {
   /**
    * 某个流的条目。
    *
-   * ⚠️ 后端**只在尾部窗口内**取（现场入口流有 1400 万条），
+   * ⚠️ **必须带上 `instance` 与 `db`**：同一个流名（如 `DataHub_req_stream`）
+   * 在多个 (实例,db) 上都存在，不指定的话后端只能按顺序返回**第一个**命中的，
+   * 于是点开 137 db0 那一行看到的可能是 136 db0 的报文。
+   *
+   * 后端**只在尾部窗口内**取（现场入口流有 1400 万条），
    * 返回里的 `truncatedWindow` 说明「只查了最近 N 条」——
-   * 「没查到」不等于「不存在」，页面必须把这句显示出来。
+   * 「没查到」不等于「不存在」。
    */
   listStreamEntries: (key: string, query?: PageQuery) =>
     api.get<DatahubEntryPage>(`/datahub/streams/${encodeURIComponent(key)}/entries`, query),
 
   /**
-   * 按 request_id 串联一次请求的收发（入口 → 下发 → 回执）。
+   * 按 request_id 串联一次请求（入口 → 下发 → 回执）。
    *
-   * ⚠️ 同样只在尾部窗口内查找，返回里的 `searched` 会列出
+   * ⚠️ 只在**尾部窗口**内查找，返回里的 `searched` 会列出
    * 「在哪些流的多少条里找过」，便于判断「确实没有」还是「窗口太小」。
+   * 注意窗口外可能还有数据 —— **「没找到」不等于「不存在」**。
    */
-  traceRequest: (requestId: string) => api.get<DatahubTrace>('/datahub/trace', { requestId }),
+  traceRequest: (requestId: string, window?: number) =>
+    api.get<DatahubTrace>('/datahub/trace', { requestId, window }),
 }
 
 /* -------------------------------- 账户用户 -------------------------------- */
@@ -293,10 +301,18 @@ export const storageApi = {
 export const monitorApi = {
   /**
    * 时序指标（供 ECharts 画趋势）。
-   * window 为时间窗，如 '15m' / '1h'。
+   *
+   * ⚠️ 返回是 `TimeSeriesView` 而不是裸的点数组：现场**没有时序库**，
+   * 只有能从 Redis 现有数据回溯的指标才有曲线（条目到达速率 ——
+   * 靠 Stream 条目 ID 里的毫秒时间戳）。`lag` / `pending` 只有当前快照，
+   * 此时 `points` 为空、`historyAvailable=false`、`note` 说明原因 ——
+   * 页面据此显示空态，**不能**拿 `currentValue` 凑一条假曲线。
    */
   getTimeSeries: (metric: string, window?: string) =>
-    api.get<TimeSeriesPoint[]>('/monitor/series', { metric, window }),
+    api.get<TimeSeriesView>('/monitor/series', { metric, window }),
+
+  /** 可用指标清单（含「有没有历史」，省得页面猜指标键） */
+  listMetrics: () => api.get<MonitorMetricOption[]>('/monitor/metrics'),
 }
 
 /* -------------------------------- 系统管理 -------------------------------- */

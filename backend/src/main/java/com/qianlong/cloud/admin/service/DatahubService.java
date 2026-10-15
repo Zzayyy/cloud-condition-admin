@@ -288,8 +288,11 @@ public class DatahubService {
                                 && !key.toLowerCase().contains(query.getKeyword().toLowerCase().trim())) {
                             continue;
                         }
+                        // 最后一条条目：ID 是毫秒时间戳，可直接算出「多久没进新数据」
+                        String lastId = lastEntryId(cmd, key, len);
+                        Long lastAge = ageSecOfId(lastId);
                         all.add(new DatahubStreamView(key, len, groupsOf(cmd, key),
-                                host, db, role));
+                                host, db, role, lastId, lastAge));
                     } catch (Exception ex) {
                         log.warn("读流失败 {} db{} {}：{}", host, db, key, ex.getMessage());
                     }
@@ -302,6 +305,56 @@ public class DatahubService {
                 Comparator.comparingLong(DatahubStreamView::length);
         all.sort(asc ? byLen : byLen.reversed());
         return all;
+    }
+
+    /**
+     * 取流的最后一条条目 ID；空流返回 {@code null}。
+     *
+     * <p>用 {@code XREVRANGE} 反向取一条 —— 在 1412 万条的流上也是 O(log N)，
+     * 实测毫秒级。**不要**用 {@code XRANGE} 从头取再截断。
+     *
+     * <p>⚠️ 区间参数是 {@code Range.create("-", "+")}，不是 {@code ("+", "-")}
+     * （与直觉相反；写错会**静默返回空**，见 {@link #tail} 的说明）。
+     */
+    private static String lastEntryId(RedisCommands<String, String> cmd, String key, long len) {
+        if (len <= 0) {
+            return null;
+        }
+        try {
+            List<StreamMessage<String, String>> one =
+                    cmd.xrevrange(key, Range.create("-", "+"), Limit.from(1));
+            return one == null || one.isEmpty() ? null : one.get(0).getId();
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    /**
+     * 条目 ID → 距现在多少秒。
+     *
+     * <p>Redis Stream 的条目 ID 形如 {@code 1791946676151-1}，前一段是
+     * **毫秒时间戳**（Redis 的约定，现场实测与墙上时间一致）。
+     * 所以「最后一条距今多久」可以直接从 ID 算出来，**不需要任何额外存储** ——
+     * 这正是本模块能回答「这条流还在进数据吗」的原因。
+     *
+     * <p>⚠️ 这个数要留意：实测 137 db0 的 {@code DataHub_req_stream} 最后一条在
+     * <b>24 小时前</b>、{@code ST-15} 在 <b>15 天前</b>，说明那 1400 万条
+     * 是历史堆积而非当前流量。只看 XLEN 会误判成「流量很大」。
+     *
+     * @return 秒数；ID 为 null / 解析不出时返回 {@code null}（**不返回 0 冒充「刚刚」**）
+     */
+    private static Long ageSecOfId(String entryId) {
+        if (entryId == null || entryId.isBlank()) {
+            return null;
+        }
+        try {
+            int dash = entryId.indexOf('-');
+            String msPart = dash < 0 ? entryId : entryId.substring(0, dash);
+            long ms = Long.parseLong(msPart.trim());
+            return Math.max(0L, (System.currentTimeMillis() - ms) / 1000L);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     /**
