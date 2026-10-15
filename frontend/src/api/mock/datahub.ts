@@ -8,7 +8,9 @@
  *  - 后端接通后本文件可整个删掉。
  */
 import type {
-  DatahubNodeDetail,
+  DatahubChannelScan,
+  DatahubNode,
+  DatahubNodePage,
   RedisPubSubChannel,
   RedisStreamEntry,
   RedisStreamInfo,
@@ -22,39 +24,62 @@ const rand: Rand = seededRandom(20261011)
 /* ------------------------------ 实例与节点 ------------------------------ */
 
 /**
- * 现场实测（快照）：
- *   192.168.1.136  version 8.6.2  uptime 86.6 天  clients 12  mem 87.01M
- *                  db0: unique_id=166，10 条 stream（69257 条目），14 个频道
- *                  db1: unique_id=55，10 条 stream（40478 条目）
- *   192.168.1.137  version 8.6.2  uptime 56.9 天  clients 1   mem 1.47G
- *                  db0: 78 条 stream（4579537 条目），**0 个频道**
+ * 现场实测（快照，2026-10-14）：
+ *   192.168.1.136  version 8.6.2  uptime 91.7 天  clients 14  mem 266.59M
+ *                  db0: unique_id=217，10 条 stream（242194 条目），14 个频道
+ *                  db1: unique_id=56，10 条 stream（40484 条目）
+ *   192.168.1.137  version 8.6.2  uptime 61.9 天  clients 2   mem 4.52G
+ *                  db0: **无 unique_id**，116 条 stream（15174665 条目），0 个频道
  *                  db1: unique_id=4，10 条 stream（26 条目）
- *                  db2: 3 条 stream（6004 条目，破坏测试流）
+ *                  db2: **无 unique_id**，3 条 stream（6004 条目，破坏测试流）
+ *
+ * ⚠️ 这里刻意**不含** mac / lastActiveTime：Redis 侧没有这两个数据源
+ * （心跳报文只有 `{"level":2,"role":1}`）。演示态若编出这两个字段，
+ * 页面就会以为真实态也该有，上线后变成两列空白。
+ *
+ * ⚠️ `online` 用 `null`（未知）而不是全 `true`：真实态刚启动时就是未知，
+ * 演示态全给 true 会让「未知」这条分支从未被走通过。
  */
-export const DATAHUB_NODES: DatahubNodeDetail[] = [
+export const DATAHUB_NODES: DatahubNode[] = [
   {
-    id: 0,
+    id: '192.168.1.136',
     ip: '192.168.1.136',
-    mac: '2cea7fd9d5c0',
+    port: '6379',
     online: true,
-    lastActiveTime: '2026-10-09 15:20:11',
-    uniqueId: 166,
+    state: 'ONLINE',
+    lastBeatAgeSec: 3,
+    beatCount: 1284,
+    subscribed: true,
+    subscribeError: null,
+    dbs: [
+      { db: 0, keys: 13, uniqueId: 217, entryTotal: 242194, streamTotal: 10 },
+      { db: 1, keys: 29, uniqueId: 56, entryTotal: 40484, streamTotal: 10 },
+    ],
+    dbKeysTotal: 42,
+    entryTotal: 282678,
+    streamTotal: 20,
     channels: 14,
-    streams: 20,
-    entryTotal: 69257 + 40478,
-    enable: true,
   },
   {
-    id: 1,
+    id: '192.168.1.137',
     ip: '192.168.1.137',
-    mac: '20474789c674',
-    online: true,
-    lastActiveTime: '2026-10-09 15:19:48',
-    uniqueId: 4,
+    port: '6379',
+    // 137 的 Redis 上没有任何中台心跳（实测订阅 6 秒 0 条）—— 如实显示离线
+    online: false,
+    state: 'OFFLINE',
+    lastBeatAgeSec: null,
+    beatCount: 0,
+    subscribed: true,
+    subscribeError: null,
+    dbs: [
+      { db: 0, keys: 117, uniqueId: null, entryTotal: 15174665, streamTotal: 116 },
+      { db: 1, keys: 15, uniqueId: 4, entryTotal: 26, streamTotal: 10 },
+      { db: 2, keys: 3, uniqueId: null, entryTotal: 6004, streamTotal: 3 },
+    ],
+    dbKeysTotal: 135,
+    entryTotal: 15180695,
+    streamTotal: 129,
     channels: 0,
-    streams: 91,
-    entryTotal: 4579537 + 26 + 6004,
-    enable: true,
   },
 ]
 
@@ -262,17 +287,52 @@ export const SAMPLE_ENTRIES: Array<{ stream: string; instance: string; db: numbe
 /* ----------------------------- 对外接口 ----------------------------- */
 
 export const mockDatahubApi = {
-  listNodes(query: PageQuery = {}): PageResult<DatahubNodeDetail> {
-    return paginate(
+  /**
+   * 实例列表 —— 返回结构与真实接口一致（含 `meta`）。
+   *
+   * 演示态若少这一块，页面会走进一条与真实态不同的分支，
+   * 等于「未知/在线」这类判定从未在演示态验证过。
+   */
+  listNodes(query: PageQuery = {}): DatahubNodePage {
+    const page = paginate(
       DATAHUB_NODES,
       query,
-      (row, kw) => row.ip.includes(kw) || row.mac.toLowerCase().includes(kw.toLowerCase()),
-      { id: (r) => r.id, uniqueId: (r) => r.uniqueId ?? 0 },
+      (row, kw) => row.ip.includes(kw),
+      { id: (r) => r.id, dbKeysTotal: (r) => r.dbKeysTotal },
     )
+    const onlineCount = DATAHUB_NODES.filter((n) => n.online === true).length
+    const offlineCount = DATAHUB_NODES.filter((n) => n.online === false).length
+    const unknownCount = DATAHUB_NODES.length - onlineCount - offlineCount
+    return {
+      ...page,
+      meta: {
+        total: DATAHUB_NODES.length,
+        onlineCount,
+        offlineCount,
+        unknownCount,
+        heartbeatEnabled: true,
+        heartbeatChannels: ['datahub_beat', 'datahub_beat_1'],
+        offlineAfterSec: 30,
+        observedInstances: DATAHUB_NODES.filter((n) => n.subscribed).length,
+        redisInstances: ['192.168.1.136/db0', '192.168.1.136/db1', '192.168.1.137/db1'],
+        redisUnavailable: [],
+        note:
+          '一行 = 一台 Redis 实例（中台在 Redis 侧没有节点清单键）。' +
+          '「在线」指该实例上近期收到过中台心跳，不等于「这台机器上跑着中台」。',
+      },
+    }
   },
 
-  listChannels(): RedisPubSubChannel[] {
-    return DATAHUB_CHANNELS
+  listChannels(): DatahubChannelScan {
+    return {
+      channels: DATAHUB_CHANNELS,
+      /*
+       * 演示态也保留这个提示位：现场 137 原本 0 个频道，
+       * 本后台为判定心跳订阅了 datahub_beat_1 后才"出现"一个。
+       * 演示态若恒为空数组，页面这条分支就从未被验证过。
+       */
+      selfOnlyChannels: ['192.168.1.137 datahub_beat_1'],
+    }
   },
 
   listStreams(query: PageQuery = {}): RedisStreamInfo[] {

@@ -14,6 +14,7 @@
 | 数据存储 | Redis 管理 | ✅ 只读 + 删键（高危，需权限点） |
 | 数据存储 | 数据库管理 | ✅ 只读（表清单 / 结构 / 分页读表 / 只读 SQL） |
 | 服务器管理 | 委托服务器 | ✅ **只读**（节点清单 + 账号分配关系，**不做启停**） |
+| 服务器管理 | 数据中台 | ✅ **只读**（心跳在线判定 + 频道 + 流规模 + 尾部窗口取条目） |
 
 | 项 | 版本 |
 |---|---|
@@ -437,6 +438,137 @@ app:
 > ⚠️ 修掉了一个原有缺陷：这张图原先**无条件**调 `mockServerLoad()`，
 > 于是真实态下也在用演示数据画图、而且不报错 —— 与 README 前面记的
 > 「Redis 管理页类型分布图无条件调 mock」是同一类坑。
+
+### 服务器管理：数据中台 `datahubApi`（**只读**）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/datahub/nodes` | 实例清单（一行 = 一台 Redis 实例）+ 各 db 统计 + 心跳状态 |
+| GET | `/datahub/channels` | Pub/Sub 频道（**已扣除本后台自己那份订阅**） |
+| GET | `/datahub/streams` | 跨实例跨 db 的流清单（含消费组与积压） |
+| GET | `/datahub/streams/{key}/entries` | 某流的条目（**只在尾部窗口内**） |
+| GET | `/datahub/trace` | 按 `request_id` 串联一次请求（同样只在尾部窗口内） |
+
+#### ⚠️ 三条与「委托服务器」本质不同的地方
+
+**1. 中台在 Redis 侧没有节点清单键 —— 所以「节点」是 Redis 实例，不是中台。**
+
+委托服务器有 `traderserver` 键（里面写着 `id/ip/mac/lastActiveTimeLong`）；
+中台翻遍 136/137 只有 `DataHub_req_stream` / `DataHub_reply_stream` / `unique_id`，
+**没有任何注册表**。因此一行 = 一台 Redis 实例，页面标题也写的是
+「Redis 实例（中台通信侧）」，绝不能说成「2 个中台实例」。
+
+**2. 心跳报文不含身份 —— 只能判断「这台 Redis 上有没有中台在活动」。**
+
+实测心跳是 `{"level":2,"role":1}`，**没有 id / ip / mac**；
+而 Redis Pub/Sub 也**不携带发布者信息**。所以：
+
+| 问题 | 能否回答 |
+|---|---|
+| 这台 Redis 上有没有中台在活动 | ✅ 能 |
+| 现场一共有几个中台 | ⚠️ 不能（多中台共用一台 Redis 时只看到「在发」） |
+| 是哪几台机器上的中台 | ❌ 不能 |
+
+> ⚠️ **`level` / `role` 不能当节点 ID。** 它们的语义未在协议文档中定义，
+> 且一台机器只能观察到一个取值（现场只有 `role=1`）。若当 ID 用，
+> 多个中台发同一个值时会造成**静默串行 / 漏行**，而界面上看不出来。
+> 本模块不解析、不展示这两个字段的含义。
+
+> **现场实况**：中台进程在 **137**（`./DataHub`），但它的心跳是发到 **136 的 Redis** 上的。
+> 所以 136 显示「有中台活动」、137 显示「未知」，这**不代表**「137 上没跑中台」。
+
+**3. `online` 是三态，`null`（未知）不是离线。**
+
+```java
+State.ONLINE / State.OFFLINE / State.UNKNOWN   // UNKNOWN → API 返回 null
+```
+
+判定顺序：开关关掉 → 订阅失败 → 从未收到心跳 → 都算 `UNKNOWN`；
+超过阈值才算 `OFFLINE`。**把「我们没在看」显示成「它离线了」是最危险的错**——
+对一个专门看「活着吗」的页面，假的「全离线」会让人去现场排查一个根本不存在的问题。
+meta 里 `onlineCount` / `offlineCount` / `unknownCount` **三者分开**。
+
+#### ⚠️ 观测者效应：我们的订阅会「造出」频道（真实踩到）
+
+为判定心跳，后端在每台实例上常驻订阅 `datahub_beat_1`。
+而 `PUBSUB CHANNELS` **只列有订阅者的频道** —— 于是：
+
+```
+现场 137 原本 0 个频道  →  我们订阅后「出现」1 个
+136 的 datahub_beat_1 订阅者原本 1  →  变成 2
+```
+
+不修正的话，看这个页面（以及 **Redis 管理页**）的人会以为现场真有这些频道。
+处理方式：
+
+* `channels` —— 真实频道，订阅者数**已扣除我们那一份**，并标 `selfSubscribed`；
+* `selfOnlyChannels` —— **只因为我们才存在**的频道（现场 137 那个），
+  单列出来并在页面上如实提示，**既不混进真实频道、也不悄悄丢掉**。
+
+> 早先的实现为了「防后缀写错」同时订阅了 `datahub_beat` 与 `datahub_beat_1`，
+> 结果**凭空造出了不带后缀的那个频道**。现在只订阅实际在用的全名：
+> 频道名写错 → 状态显示「未知」（诚实、可查），而不是造出一个假频道。
+
+#### ⚠️ 键数 ≠ 条目数（本页最容易误读的地方）
+
+现场 137 db0：`DBSIZE = 117` 个键，但单个 `DataHub_req_stream` 就有
+**1412 万**条目。所以接口把它们做成**不同字段**：`keys`（DBSIZE，O(1)）
+与 `length`（XLEN，逐键查且有上限）。混着看会得出完全错误的容量判断。
+
+#### ⚠️ `unique_id` 各 db 独立，且可能不存在
+
+它是 string 键、**不是全局计数器**。实测：136 db0=217 / db1=56、137 db1=4；
+而 **137 db0 与 db2 没有这个键** → 返回 `null`。
+**不能用 0 表示「没有」**（0 是一个真实水位）。页面显示「无此键」。
+
+#### ⚠️ 流条目只在尾部窗口内取
+
+`/datahub/streams/{key}/entries` 与 `/datahub/trace` 都**只查最近 N 条**
+（默认 200，硬上限 5000），响应里带 `truncatedWindow`。
+
+理由：1412 万条的流全量拉取要么超时、要么把 Redis 拖垮。
+实测取 `DataHub_req_stream`（1412 万条）的尾部窗口 **38ms** 返回。
+
+> **「没找到」不等于「不存在」** —— 这是本接口的固有限制，不是偷懒。
+> 所以 `trace` 额外返回 `searched`，列出「在哪些流的多少条里找过」，
+> 便于判断「确实没有」还是「窗口太小没覆盖到」。
+
+#### 两个实现坑（都真实踩到）
+
+1. **`xrevrange` 的区间参数与直觉相反。**
+   Lettuce 7.5.2 里必须写 `Range.create("-", "+")`（**不是** `("+", "-")`）。
+   实测对比：
+
+   ```
+   XLEN = 20140
+   xrevrange(("+","-"), 3) → 0 条        ← 静默返回空，不报错
+   xrevrange(("-","+"), 3) → 最新 3 条    ← 正确（降序）
+   ```
+
+   写错的表现是「流明明有 2 万条，页面一条都看不到」，而且**没有任何报错**。
+
+2. **`max-db` 别设成 16。** Redis 合法 db 下标是 0~15，db16 会报
+   `ERR DB index is out of range`，而该失败会在**每次请求**时重试一遍、
+   把日志刷满。现在 `app.datahub.max-db: 15`，且失败的 (host,db)
+   会在本次运行内记住、不再重试。
+
+#### 配置（`app.datahub.*`）
+
+```yaml
+app:
+  datahub:
+    offline-after-sec: 30     # 心跳超时（现场心跳约 10 秒一次）
+    max-db: 15                # ⚠️ 不是 16（见上）
+    scan-limit: 2000          # 每个 db 最多扫多少键
+    heartbeat:
+      enabled: true           # 关掉后页面显示「未知」而不是「离线」
+      channels:               # ⚠️ 写实际在用的全名，不要拼后缀（会造出假频道）
+        - datahub_beat_1
+```
+
+> **订阅开销与「中台数量」无关**：每台 Redis 一条订阅连接。
+> Pub/Sub 频道是实例级的、不按 db 隔离（实测 136 的 db0 与 db1 收到的是同一份），
+> 所以 50 个中台也还是这一条连接。
 
 ### 业务数据：策略日志 `strategyApi.listLogs`
 
@@ -868,7 +1000,8 @@ backend/
     │   │   │   ├── MybatisPlusConfig.java
     │   │   │   ├── JacksonConfig.java
     │   │   │   ├── RedisProperties.java         # app.redis.instances 实例清单
-    │   │   │   └── TradeServerProperties.java   # app.trade.* 委托服务器（只读）
+    │   │   │   ├── TradeServerProperties.java   # app.trade.* 委托服务器（只读）
+    │   │   │   └── DatahubProperties.java       # app.datahub.* 数据中台（只读）
     │   │   ├── controller/          # HTTP 层（原 web 包）
     │   │   │   ├── AccountController.java       # 账户与用户
     │   │   │   └── ...（系统管理各 Controller）
@@ -881,6 +1014,8 @@ backend/
     │   │       ├── AccountService.java          # ★ MySQL+Redis 合并
     │   │       ├── TraderServerRepository.java  # ★ 委托服务器注册表只读（跨实例全读）
     │   │       ├── TradeServerService.java      # ★ 委托服务器节点 + 分配关系
+    │   │       ├── DatahubHeartbeatMonitor.java # ★ 中台心跳常驻订阅（三态：含「未知」）
+    │   │       ├── DatahubService.java          # ★ 中台实例/频道/流/条目
     │   │       └── AccountLogService.java
     │   └── resources/application.yml
     └── test/java/.../AdminApplicationTests.java   # 冒烟 + 守护鉴权不失效
@@ -926,6 +1061,12 @@ backend/
   当前未做乐观锁；若现场有多人同时运维，建议给 `T_AdminRole` 加 `version` 字段。
 * **委托服务器不做启停**（需求方明确要求）：只呈现状态。
   `action:server-trade:toggle` 已从可授予权限中撤销，仅保留为历史审计标签。
+* **数据中台的「节点」是 Redis 实例，不是中台实例**：中台没有节点清单键，
+  心跳报文也不含身份（`{"level":2,"role":1}`），所以无法回答「有几台中台、是哪几台」。
+  能回答的只有「这台 Redis 上近期有没有中台在活动」。
+* **数据中台的心跳订阅是常驻的**：关掉（`app.datahub.heartbeat.enabled=false`）
+  之后在线状态全部显示「未知」——这是刻意的，不是为了省事。
+  另外订阅本身会「造出」频道（见上文观测者效应），接口已做扣除与单列。
 * **委托服务器页的「承载账号数」按 `id` 匹配**：现场 `id` 会重复
   （`136 db1` 有 4 个 `id=0`），所以那几个同 id 的节点会显示承载同一批账号。
   这是数据本身如此，接口与页面都已注明；不去猜一个更细的匹配规则

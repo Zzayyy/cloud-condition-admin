@@ -53,30 +53,149 @@ export interface StrategyServer {
   enable: boolean
 }
 
-/** 数据中台节点（Redis 侧没有节点清单，靠 datahub_* 频道 + unique_id 推导） */
+/**
+ * 数据中台「节点」。
+ *
+ * ⚠️ **一行 = 一台 Redis 实例，不是一台中台。**
+ * 中台在 Redis 侧**没有节点清单键**（委托服务器有 `traderserver`，中台没有对应物），
+ * 所以只能按实例分；`online` 的含义是「这台 Redis 上近期有没有中台在通信」，
+ * **不等于**「这台机器上跑着中台」——现场中台进程在 137，连的却是 136 的 Redis。
+ *
+ * ⚠️ 原来这里有 `mac` / `lastActiveTime` 两个字段：**Redis 侧根本没有这两个数据源**
+ * （心跳报文只有 `{"level":2,"role":1}`，没有 id/ip/mac），
+ * 留着只会显示成永远空白的列，让人以为「没读到」。现已删除，页面也不再显示这两列。
+ */
 export interface DatahubNode {
-  id: number
+  /** 实例标识，就是主机地址（与 Redis 管理页同一口径） */
+  id: string
   ip: string
-  mac: string
-  online: boolean
-  lastActiveTime: string
+  port: string
+  /**
+   * 该实例上有没有中台在通信。
+   *
+   * **`null` = 未知**（订阅关闭 / 连不上 / 还没收到第一条心跳），
+   * 与 `false`（确认离线）是两件事 —— 对专门看「活着吗」的页面，
+   * 把「我们没在看」显示成「它离线了」是最危险的错。
+   */
+  online: boolean | null
+  /** 状态原文：ONLINE / OFFLINE / UNKNOWN */
+  state: 'ONLINE' | 'OFFLINE' | 'UNKNOWN'
+  /** 距上次心跳秒数；从未收到为 null */
+  lastBeatAgeSec: number | null
+  /** 累计收到的心跳条数；0 = 一条都没收到 */
+  beatCount: number
+  /** 该实例的心跳订阅是否正常建立 */
+  subscribed: boolean
+  /** 订阅失败原因（没有则 null） */
+  subscribeError: string | null
+  /** 各 db 统计（键数 / unique_id 水位 / stream 规模） */
+  dbs: DatahubDbStat[]
+  dbKeysTotal: number
+  entryTotal: number
+  streamTotal: number
+  /** Pub/Sub 频道数（实例级，与 db 无关） */
+  channels: number
+}
+
+/** 一个 db 的统计 */
+export interface DatahubDbStat {
+  db: number
+  /** 键数（DBSIZE 口径）。⚠️ 键数 ≠ 条目数 */
+  keys: number
+  /** 该 db 的 unique_id 水位；该 db 没有这个键时为 **null**（0 是真实水位，不能混用） */
+  uniqueId: number | null
+  /** 该 db 的 stream 条目合计 */
+  entryTotal: number
+  streamTotal: number
 }
 
 /**
- * 节点详情：在基础节点上补充该实例的规模信息。
- * 这些值来自对 Redis 的只读探查（dbsize / XLEN / PUBSUB CHANNELS / unique_id）。
+ * 频道扫描结果。
+ *
+ * 分两部分是为消除**观测者效应**：本后台为判定中台心跳而常驻订阅了
+ * `datahub_beat_1`，而 Redis 的 `PUBSUB CHANNELS` 只列「有订阅者的频道」——
+ * 我们一订阅，那个频道就从「不存在」变成「存在」。
  */
-export interface DatahubNodeDetail extends DatahubNode {
-  /** 该实例已分配的唯一编号水位（唯一 string 键 unique_id，各 db 独立） */
-  uniqueId?: number
-  /** 该实例上的 Pub/Sub 频道数 */
-  channels?: number
-  /** 该实例上的 stream 数 */
-  streams?: number
-  /** 该实例的 stream 条目总量 */
-  entryTotal?: number
-  /** 是否启用（沿用 traderserver 那套 enable 约定；中台侧暂无此字段，预留） */
-  enable?: boolean
+export interface DatahubChannelScan {
+  /** 真实存在的频道（订阅者数已扣除本后台自己那一份） */
+  channels: RedisPubSubChannel[]
+  /**
+   * **只因为我们订阅才出现**的频道（如现场 137 原本 0 个频道）。
+   *
+   * 单列出来而不是混进 `channels`，让「这个实例上其实没有频道」这个事实
+   * 仍然看得见；也不是悄悄丢掉，否则会让人以为我们没在听。
+   */
+  selfOnlyChannels: string[]
+}
+
+/**
+ * 中台实例列表的附加信息（后端 meta）。
+ *
+ * `unknownCount` 必须与 `offlineCount` 分开：合并会失去「我们没在看」这个信号。
+ */
+export interface DatahubNodeListMeta {
+  total: number
+  onlineCount: number
+  offlineCount: number
+  /** **未知**实例数（观测不到，不等于离线） */
+  unknownCount: number
+  heartbeatEnabled: boolean
+  /** 实际订阅的频道名 —— 用来确认「听的是对的那一套频道」 */
+  heartbeatChannels: string[]
+  offlineAfterSec: number
+  observedInstances: number
+  redisInstances: string[]
+  redisUnavailable: string[]
+  /** 后端给的如实说明（「节点=Redis 实例」这件事） */
+  note: string
+}
+
+/** 中台实例列表返回 */
+export interface DatahubNodePage {
+  list: DatahubNode[]
+  total: number
+  page: number
+  pageSize: number
+  meta: DatahubNodeListMeta
+}
+
+/**
+ * 流条目分页结果。
+ *
+ * ⚠️ `truncatedWindow` 是本接口最重要的字段：现场入口流有 1400 万条，
+ * 只在**尾部窗口**内取，所以「查不到」**不等于**「不存在」。
+ */
+export interface DatahubEntryPage {
+  list: RedisStreamEntry[]
+  total: number
+  page: number
+  pageSize: number
+  /** 本次是在最近多少条里查的 */
+  windowSize: number
+  /** 该流真实总长度（XLEN） */
+  streamLength: number
+  /** true = 只查了尾部窗口，窗口外可能还有数据 */
+  truncatedWindow: boolean
+  instance: string
+  db: number
+  key: string
+}
+
+/** 按 request_id 追踪的结果 */
+export interface DatahubTrace {
+  requestId: string
+  hits: Array<{
+    instance: string
+    db: number
+    stream: string
+    entryId: string
+    fields: Record<string, string>
+  }>
+  /** 在哪些 (实例/db/流) 的尾部窗口里找过 —— 便于判断「确实没有」还是「窗口太小」 */
+  searched: string[]
+  windowSize: number
+  truncatedWindow: boolean
+  found: boolean
 }
 
 /** 委托服务器节点列表的附加信息（后端 meta，非表格契约字段） */
@@ -561,11 +680,19 @@ export interface RedisStreamEntry {
 
 export interface RedisPubSubChannel {
   name: string
-  /** 订阅者数量 */
+  /** 订阅者数量（已扣除本后台自己的订阅，否则会永远多 1） */
   subscribers: number
   /** 频道分类 */
   group?: PubSubGroup
   instance?: string
+  /**
+   * 是否**只有本后台在订阅**。
+   *
+   * 本后台为判定中台心跳而常驻订阅了 `datahub_beat_1`，
+   * 所以这个标记用于区分「真有人听」与「只有我们在听」——
+   * 两者含义完全不同，不能静默合并。
+   */
+  selfSubscribed?: boolean
 }
 
 /**

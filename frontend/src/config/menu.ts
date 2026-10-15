@@ -142,13 +142,18 @@ export const menuTree: MenuNode[] = [
           title: '数据中台',
           icon: GitNetworkOutline,
           status: 'ready',
-          desc: '数据中台实例的上线与心跳状态。',
+          desc: '数据中台的在线状态、频道与消息规模。⚠️「节点」是 Redis 实例 —— 中台在 Redis 侧没有节点清单键，心跳报文也不含身份。',
           refs: [
-            { label: 'Pub/Sub 频道', value: 'datahub_online / _beat / _offline / _select / _oncall' },
-            { label: 'Redis JSON 键', value: 'unique_id（已分配的最大唯一编号）' },
+            { label: 'Pub/Sub 频道', value: 'datahub_online / _beat / _offline / _select / _oncall（现场均为 _1 后缀）' },
+            { label: 'Redis string 键', value: 'unique_id（**各 db 独立**；137 db0/db2 没有这个键）' },
             { label: '协议说明', value: '请求接口doc.txt 第 7~9 条' },
           ],
-          todos: ['中台实例列表与心跳', 'unique_id 分配水位查看', '向在线节点下发心跳（datahub → WT/ST 频道）'],
+          todos: [
+            '实例清单 + 心跳在线判定（已完成，三态：在线/离线/未知）',
+            'unique_id 分配水位（已完成，按 db 展示）',
+            'Pub/Sub 频道与订阅者数（已完成，已扣除本后台自身订阅）',
+            '向在线节点下发心跳（datahub → WT/ST 频道）—— 未做，属写操作',
+          ],
         },
       },
       {

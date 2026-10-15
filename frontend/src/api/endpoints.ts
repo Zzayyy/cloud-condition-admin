@@ -13,7 +13,9 @@ import type {
   AuditLog,
   Conditional,
   DashboardOverview,
-  DatahubNodeDetail,
+  DatahubEntryPage,
+  DatahubNodePage,
+  DatahubTrace,
   LoginDailyRow,
   LoginResult,
   MysqlTable,
@@ -140,21 +142,46 @@ export const tradeApi = {
 /* -------------------------------- 数据中台 -------------------------------- */
 
 export const datahubApi = {
-  listNodes: (query?: PageQuery) => api.get<PageResult<DatahubNodeDetail>>('/datahub/nodes', query),
+  /**
+   * 中台实例列表。
+   *
+   * 返回类型不是通用 `PageResult`：它多带一个 `meta`（在线/离线/**未知**三态计数、
+   * 实际订阅的心跳频道、以及「一行=一台 Redis 实例」的说明）。
+   * 少了 meta，页面就没法把「未知」与「离线」分开，也没法自检听的是不是对的频道。
+   */
+  listNodes: (query?: PageQuery) => api.get<DatahubNodePage>('/datahub/nodes', query),
 
-  /** Pub/Sub 频道总览（含订阅者数，用于判断「有没有人在听」） */
-  listChannels: () => api.get<RedisPubSubChannel[]>('/datahub/channels'),
+  /**
+   * Pub/Sub 频道总览（含订阅者数，用于判断「有没有人在听」）。
+   *
+   * 返回分成两部分以消除**观测者效应**（本后台为判定心跳而常驻订阅了
+   * `datahub_beat_1`，而 PUBSUB CHANNELS 只列有订阅者的频道）：
+   *  - `channels` —— 真实频道，订阅者数已扣除我们那一份；
+   *  - `selfOnlyChannels` —— 只因为我们订阅才出现的频道（现场 137 就是），
+   *    单列出来而不是混进列表。
+   */
+  listChannels: () => api.get<DatahubChannelScan>('/datahub/channels'),
 
-  /** 消息总线总览：跨实例的各流长度与消费组积压 */
+  /** 消息总线总览：跨实例的各流长度与消费组积压（整表返回，页面再自行派生统计） */
   listStreams: (query?: PageQuery) => api.get<RedisStreamInfo[]>('/datahub/streams', query),
 
-  /** 某个流的条目（分页/范围） */
+  /**
+   * 某个流的条目。
+   *
+   * ⚠️ 后端**只在尾部窗口内**取（现场入口流有 1400 万条），
+   * 返回里的 `truncatedWindow` 说明「只查了最近 N 条」——
+   * 「没查到」不等于「不存在」，页面必须把这句显示出来。
+   */
   listStreamEntries: (key: string, query?: PageQuery) =>
-    api.get<PageResult<RedisStreamEntry>>(`/datahub/streams/${encodeURIComponent(key)}/entries`, query),
+    api.get<DatahubEntryPage>(`/datahub/streams/${encodeURIComponent(key)}/entries`, query),
 
-  /** 按 request_id 串联一次请求的收发（入口 → 下发 → 回执） */
-  traceRequest: (requestId: string) =>
-    api.get<RedisStreamEntry[]>('/datahub/trace', { requestId }),
+  /**
+   * 按 request_id 串联一次请求的收发（入口 → 下发 → 回执）。
+   *
+   * ⚠️ 同样只在尾部窗口内查找，返回里的 `searched` 会列出
+   * 「在哪些流的多少条里找过」，便于判断「确实没有」还是「窗口太小」。
+   */
+  traceRequest: (requestId: string) => api.get<DatahubTrace>('/datahub/trace', { requestId }),
 }
 
 /* -------------------------------- 账户用户 -------------------------------- */

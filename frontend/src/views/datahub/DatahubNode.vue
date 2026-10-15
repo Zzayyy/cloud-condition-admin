@@ -34,7 +34,7 @@ import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { datahubApi } from '@/api/endpoints'
 import { mockDatahubApi } from '@/api/mock/datahub'
-import type { DatahubNodeDetail, RedisPubSubChannel, RedisStreamInfo } from '@/api/domain'
+import type { DatahubDbStat, DatahubNode, RedisPubSubChannel, RedisStreamInfo } from '@/api/domain'
 import { useResource } from '@/composables/useResource'
 import { withDelay } from '@/api/mock/_shared'
 import { thousands } from '@/utils/format'
@@ -42,10 +42,20 @@ import { thousands } from '@/utils/format'
 /**
  * 中台节点页。
  *
+ * ⚠️ **一行 = 一台 Redis 实例，不是一台中台。**
+ * 中台在 Redis 侧**没有节点清单键**（委托服务器有 `traderserver`，中台没有对应物，
+ * 翻遍 136/137 只有 DataHub_req_stream / DataHub_reply_stream / unique_id）。
+ * 所以只能按实例来分；`online` 的含义是「这台 Redis 上近期有没有中台在通信」，
+ * **不等于**「这台机器上跑着中台」——现场中台进程在 137，连的却是 136 的 Redis。
+ *
  * 数据来源（现场只读实测）：
  *  - Pub/Sub 频道 datahub_online / _beat / _offline / _select / _oncall（均带 _1 后缀）
- *  - Redis string 键 unique_id（各 db 独立：136 db0=166、db1=55；137 db1=4）
- *  - 各实例的 dbsize / stream 规模
+ *  - Redis string 键 unique_id（**各 db 独立**，且部分 db 根本没有这个键）
+ *  - 各实例的 DBSIZE / stream 规模
+ *
+ * 心跳判定说明：后端常驻订阅 `datahub_beat_1`，某实例上收到过心跳 = 在线。
+ * 心跳报文**不含身份**（实测 `{"level":2,"role":1}`，没有 id/ip/mac），
+ * 所以**无法**把心跳归属到具体某一台中台 —— 页面也不做这种断言。
  */
 
 const accent = '#dd7a15'
@@ -54,6 +64,7 @@ const {
   data: nodeData,
   loading: nodeLoading,
   error: nodeError,
+  usingMock: nodeUsingMock,
   load: loadNodes,
 } = useResource(
   (params: Record<string, unknown>) => datahubApi.listNodes(params),
@@ -70,7 +81,8 @@ function reload() {
 
 onMounted(reload)
 
-const nodes = computed<DatahubNodeDetail[]>(() => nodeData.value?.list ?? [])
+const nodes = computed<DatahubNode[]>(() => nodeData.value?.list ?? [])
+const nodeMeta = computed(() => nodeData.value?.meta ?? null)
 
 /* ------------------------------ 频道 ------------------------------ */
 
@@ -91,7 +103,17 @@ const {
   { mock: () => withDelay(mockDatahubApi.listChannels(), 200) },
 )
 
-const channels = computed<RedisPubSubChannel[]>(() => channelData.value ?? [])
+const channels = computed<RedisPubSubChannel[]>(() => channelData.value?.channels ?? [])
+
+/**
+ * 「只因为我们订阅才存在」的频道。
+ *
+ * 现场 137 原本 0 个频道；本后台为了判定心跳常驻订阅了 `datahub_beat_1`，
+ * 而 `PUBSUB CHANNELS` 只列有订阅者的频道 —— 于是那个实例上会"出现"一个频道。
+ * 后端已把它从 `channels` 里剔除并单列到 `selfOnlyChannels`，
+ * 页面把它如实提示出来（而不是假装没有，也不是混进真实频道里）。
+ */
+const selfOnlyChannels = computed(() => channelData.value?.selfOnlyChannels ?? [])
 
 /** 频道分组的中文名 */
 const GROUP_LABEL: Record<string, string> = {
@@ -177,15 +199,58 @@ const backlogStreams = computed(() =>
     .sort((a, b) => b.lag - a.lag),
 )
 
+/**
+ * 汇总指标。
+ *
+ * ⚠️ 在线/离线/未知**三态分开计数**：合并会把「我们没在看」混进「它离线了」，
+ * 而这两件事的处置完全不同（一个是查我们自己，一个是查现场）。
+ * 真实态直接用后端 meta 的口径；演示态退回本地统计。
+ */
 const summary = computed(() => {
+  const m = nodeMeta.value
   const list = nodes.value
+  const total = m?.total ?? list.length
+  const online = m?.onlineCount ?? list.filter((n) => n.online === true).length
+  const offline = m?.offlineCount ?? list.filter((n) => n.online === false).length
+  const unknown = m?.unknownCount ?? total - online - offline
   return {
-    total: list.length,
-    online: list.filter((n) => n.online).length,
+    total,
+    online,
+    offline,
+    unknown,
     channels: channels.value.length,
     entryTotal: list.reduce((s, n) => s + (n.entryTotal ?? 0), 0),
   }
 })
+
+/**
+ * 观测能力提示。
+ *
+ * 「在线 0 个」有两种完全不同的原因：真的没有中台，或者我们**根本没在听**
+ * （订阅关闭 / 连接失败 / 频道名听错了）。必须能区分，否则会误判成现场故障。
+ */
+const observeNote = computed(() => {
+  if (nodeUsingMock.value) return null
+  const m = nodeMeta.value
+  if (!m) return null
+  const parts: string[] = []
+  if (!m.heartbeatEnabled) {
+    parts.push('后端未开启心跳订阅，在线状态显示为「未知」（不是离线）。')
+  }
+  if (m.redisUnavailable?.length) {
+    parts.push(`有 ${m.redisUnavailable.length} 个实例连不上（${m.redisUnavailable.join('、')}），统计可能不完整。`)
+  }
+  if (m.unknownCount > 0) {
+    parts.push(
+      `有 ${m.unknownCount} 个实例状态为「未知」：` +
+        '可能是刚启动还没等到第一条心跳，或该实例的订阅没建立成功。',
+    )
+  }
+  return parts.length ? parts.join(' ') : null
+})
+
+/** 实际订阅的频道名（确认「我们听的是对的那一套」） */
+const beatChannels = computed(() => nodeMeta.value?.heartbeatChannels ?? [])
 
 const loadOption = computed(() => {
   // 从当前流数据推导各实例条目数（非演示态下没有数据就是空图）
@@ -248,52 +313,97 @@ const channelOption = computed(() => {
   }
 })
 
-/* ------------------------------ 节点表格 ------------------------------ */
-
-const columns: DataTableColumns<DatahubNodeDetail> = [
+/**
+ * 中台实例表格。
+ *
+ * ⚠️ 这里**没有** MAC / 最后活跃 两列：Redis 侧没有这两个数据源
+ * （心跳报文里没有 id/ip/mac，中台也没有节点清单键）。
+ * 早先显示这两列时值是编的 —— 留着只会让人以为「没读到」。
+ */
+const columns: DataTableColumns<DatahubNode> = [
   {
     title: '状态',
-    key: 'online',
-    width: 88,
-    render: (row) =>
-      h(
-        NTag,
-        { size: 'small', round: true, bordered: false, type: row.online ? 'success' : 'error' },
-        {
-          icon: () => h(NIcon, null, { default: () => h(row.online ? CheckmarkCircleOutline : AlertCircleOutline) }),
-          default: () => (row.online ? '在线' : '离线'),
-        },
-      ),
-  },
-  { title: '节点 ID', key: 'id', width: 90, render: (row) => h('span', { class: 'mono' }, String(row.id)) },
-  {
-    title: 'IP 地址',
-    key: 'ip',
-    width: 160,
-    render: (row) => h('span', { class: 'mono', style: { fontWeight: 500 } }, row.ip),
-  },
-  { title: 'MAC', key: 'mac', width: 180, render: (row) => h('span', { class: 'mono' }, row.mac) },
-  {
-    title: 'unique_id 水位',
-    key: 'uniqueId',
-    width: 150,
-    render: (row) =>
-      h(
+    key: 'state',
+    width: 96,
+    render: (row) => {
+      // 三态：在线 / 离线 / **未知**。未知不能显示成离线。
+      const type = row.online === true ? 'success' : row.online === false ? 'error' : 'default'
+      const label = row.online === true ? '在线' : row.online === false ? '离线' : '未知'
+      const icon = row.online === true
+        ? CheckmarkCircleOutline
+        : row.online === false
+          ? AlertCircleOutline
+          : InformationCircleOutline
+      return h(
         NTooltip,
         { trigger: 'hover' },
         {
           trigger: () =>
-            h('span', { class: 'num' }, row.uniqueId != null ? thousands(row.uniqueId) : '-'),
-          default: () => 'unique_id 是 string 键，各 db 独立；用于给上线服务器分配唯一编号',
+            h(
+              NTag,
+              { size: 'small', round: true, bordered: false, type },
+              { icon: () => h(NIcon, null, { default: () => h(icon) }), default: () => label },
+            ),
+          default: () =>
+            row.online === null
+              ? '未知：我们观测不到（订阅关闭 / 连接失败 / 还没收到第一条心跳）\n' +
+                '这不是「离线」—— 两者处置方式完全不同\n' +
+                (row.subscribeError ? `订阅失败原因：${row.subscribeError}` : '')
+              : `该实例上近期${row.online ? '收到过' : '没有'}中台心跳\n` +
+                `累计心跳 ${row.beatCount} 条` +
+                (row.lastBeatAgeSec != null ? `，最近一次在 ${row.lastBeatAgeSec} 秒前` : '') +
+                `\n阈值 ${nodeMeta?.offlineAfterSec ?? 30} 秒`,
         },
-      ),
+      )
+    },
+  },
+  {
+    title: '实例地址',
+    key: 'ip',
+    width: 170,
+    render: (row) =>
+      h('span', { class: 'mono', style: { fontWeight: 500 } }, `${row.ip}:${row.port ?? '6379'}`),
+  },
+  {
+    title: '各 db 键数',
+    key: 'dbs',
+    width: 230,
+    render: (row) => {
+      if (!row.dbs?.length) {
+        return h('span', { class: 'text-muted' }, '无键')
+      }
+      return h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () =>
+            h(
+              'span',
+              { class: 'mono', style: { fontSize: '12px' } },
+              row.dbs.map((d) => `db${d.db}=${thousands(d.keys)}`).join('  '),
+            ),
+          /*
+           * 键数与 unique_id 必须一起看：unique_id 是 string 键、**各 db 独立**，
+           * 且部分 db 根本没有它（137 db0/db2）。显示成 0 会让人以为水位是 0。
+           */
+          default: () =>
+            row.dbs
+              .map(
+                (d) =>
+                  `db${d.db}：${thousands(d.keys)} 个键，${thousands(d.entryTotal)} 条目，` +
+                  `${d.streamTotal} 条流，unique_id=${d.uniqueId ?? '（该 db 无此键）'}`,
+              )
+              .join('\n'),
+        },
+      )
+    },
   },
   {
     title: 'stream 数',
-    key: 'streams',
+    key: 'streamTotal',
     width: 110,
     align: 'right',
-    render: (row) => h('span', { class: 'num' }, row.streams != null ? thousands(row.streams) : '-'),
+    render: (row) => h('span', { class: 'num' }, row.streamTotal != null ? thousands(row.streamTotal) : '-'),
   },
   {
     title: '条目总量',
@@ -303,9 +413,21 @@ const columns: DataTableColumns<DatahubNodeDetail> = [
     render: (row) => {
       const v = row.entryTotal ?? 0
       return h(
-        'span',
-        { class: 'num', style: v > 1_000_000 ? 'color:var(--danger);font-weight:600' : '' },
-        v ? thousands(v) : '-',
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          /*
+           * 「键数 ≠ 条目数」是本页最容易误读的地方：137 db0 只有 117 个键，
+           * 但单个入口流就有 1400 万条目。两个数混着看会得出错误的容量判断。
+           */
+          trigger: () =>
+            h(
+              'span',
+              { class: 'num', style: v > 1_000_000 ? 'color:var(--danger);font-weight:600' : '' },
+              v ? thousands(v) : '-',
+            ),
+          default: () => `各 db 的 stream 条目合计（XLEN 口径）\n⚠️ 与「键数」不是一回事：\n137 db0 只有 117 个键，但入口流一条就有 1400 万条目`,
+        },
       )
     },
   },
@@ -317,17 +439,15 @@ const columns: DataTableColumns<DatahubNodeDetail> = [
     render: (row) => {
       const v = row.channels ?? 0
       return h(
-        'span',
-        { class: 'num', style: v === 0 ? 'color:var(--warning)' : '' },
-        String(v),
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () =>
+            h('span', { class: 'num', style: v === 0 ? 'color:var(--warning)' : '' }, String(v)),
+          default: () => 'Pub/Sub 频道是实例级的，与 db 无关（订阅不区分 db）',
+        },
       )
     },
-  },
-  {
-    title: '最后活跃',
-    key: 'lastActiveTime',
-    width: 165,
-    render: (row) => row.lastActiveTime || '-',
   },
   {
     title: '操作',
@@ -343,12 +463,67 @@ const columns: DataTableColumns<DatahubNodeDetail> = [
   },
 ]
 
+/** 各 db 明细表（抽屉里） */
+const dbColumns: DataTableColumns<DatahubDbStat> = [
+  { title: 'db', key: 'db', width: 60, align: 'right', render: (row) => `db${row.db}` },
+  {
+    title: '键数',
+    key: 'keys',
+    width: 100,
+    align: 'right',
+    render: (row) => h('span', { class: 'num' }, thousands(row.keys)),
+  },
+  {
+    title: 'unique_id',
+    key: 'uniqueId',
+    width: 110,
+    align: 'right',
+    render: (row) =>
+      h(
+        NTooltip,
+        { trigger: 'hover' },
+        {
+          trigger: () =>
+            h(
+              'span',
+              { class: 'num', style: row.uniqueId == null ? 'color:var(--text-muted)' : '' },
+              row.uniqueId == null ? '无此键' : thousands(row.uniqueId),
+            ),
+          // 与 0 区分开：0 是一个真实水位，不能与「没有这个键」混用
+          default: () =>
+            row.uniqueId == null
+              ? '该 db 没有 unique_id 这个键（现场 137 db0/db2 就是这样）\n注意：这不是 0 —— 0 是一个真实水位'
+              : 'unique_id 是 string 键，**各 db 独立**（不是全局计数器）',
+        },
+      ),
+  },
+  {
+    title: 'stream 数',
+    key: 'streamTotal',
+    width: 100,
+    align: 'right',
+    render: (row) => h('span', { class: 'num' }, thousands(row.streamTotal)),
+  },
+  {
+    title: '条目总量',
+    key: 'entryTotal',
+    width: 120,
+    align: 'right',
+    render: (row) =>
+      h(
+        'span',
+        { class: 'num', style: row.entryTotal > 1_000_000 ? 'color:var(--danger);font-weight:600' : '' },
+        thousands(row.entryTotal),
+      ),
+  },
+]
+
 /* ------------------------------ 详情抽屉 ------------------------------ */
 
 const showDetail = ref(false)
-const active = ref<DatahubNodeDetail | null>(null)
+const active = ref<DatahubNode | null>(null)
 
-function openDetail(row: DatahubNodeDetail) {
+function openDetail(row: DatahubNode) {
   active.value = row
   showDetail.value = true
 }
@@ -387,28 +562,49 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
   <div>
     <QueryErrorAlert v-if="nodeError" :message="nodeError" :loading="nodeLoading" @retry="reload" />
 
+    <!--
+      「在线 0 个」有两种完全不同的原因：真的没中台，或我们根本没在听。
+      必须显式说清，否则会被误判成现场故障。
+    -->
+    <n-alert
+      v-if="observeNote"
+      type="warning"
+      :bordered="false"
+      size="small"
+      style="margin-bottom: 14px"
+    >
+      {{ observeNote }}
+    </n-alert>
+
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>
-        <StatCard label="中台实例" :value="summary.total" suffix="个" :icon="ServerOutline" :color="accent" hint="按 Redis 实例统计" />
-      </n-gi>
-      <n-gi>
         <StatCard
-          label="在线实例"
-          :value="summary.online"
+          label="Redis 实例"
+          :value="summary.total"
           suffix="个"
-          :icon="CheckmarkCircleOutline"
-          color="#2f9e5f"
-          hint="datahub_beat 频道有心跳"
+          :icon="ServerOutline"
+          :color="accent"
+          hint="一行 = 一台实例；中台在 Redis 侧没有节点清单键，故不等于「中台个数」"
         />
       </n-gi>
       <n-gi>
         <StatCard
-          label="Pub/Sub 频道"
-          :value="summary.channels"
+          label="有中台活动的实例"
+          :value="summary.online"
           suffix="个"
-          :icon="WifiOutline"
-          color="#7c5cf0"
-          hint="全部带 _1 后缀（现场真中台订阅的那套）"
+          :icon="CheckmarkCircleOutline"
+          color="#2f9e5f"
+          :hint="`该实例上近期收到过 datahub_beat 心跳（阈值 ${nodeMeta?.offlineAfterSec ?? 30} 秒）`"
+        />
+      </n-gi>
+      <n-gi>
+        <StatCard
+          label="无活动 / 未知"
+          :value="`${summary.offline} / ${summary.unknown}`"
+          suffix="个"
+          :icon="AlertCircleOutline"
+          color="#d6455e"
+          hint="前一个=确认无心跳；后一个=我们观测不到（不是离线）"
         />
       </n-gi>
       <n-gi>
@@ -417,8 +613,8 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
           :value="thousands(summary.entryTotal)"
           suffix="条"
           :icon="LayersOutline"
-          color="#d6455e"
-          hint="入口流积压严重，详见「消息总线」"
+          color="#dd7a15"
+          hint="XLEN 口径（≠ 键数）；入口流积压严重，详见「消息总线」"
         />
       </n-gi>
     </n-grid>
@@ -456,11 +652,14 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
       <template #header>
         <span class="section-title">
           <n-icon :component="ServerOutline" :color="accent" :size="17" />
-          中台实例
+          Redis 实例（中台通信侧）
         </span>
       </template>
       <template #header-extra>
-        <n-button size="small" :loading="nodeLoading" @click="reload">
+        <n-tag v-if="beatChannels.length" size="tiny" round :bordered="false" type="info">
+          监听 {{ beatChannels.join(' / ') }}
+        </n-tag>
+        <n-button size="small" :loading="nodeLoading" @click="reload" style="margin-left: 8px">
           <template #icon>
             <n-icon :component="RefreshOutline" />
           </template>
@@ -475,7 +674,7 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
         :bordered="false"
         :single-line="false"
         size="small"
-        :row-key="(row: DatahubNodeDetail) => String(row.id)"
+        :row-key="(row: DatahubNode) => row.id"
         :scroll-x="1260"
         :pagination="false"
       />
@@ -513,6 +712,10 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
             >
               订阅者 {{ c.subscribers }}
             </n-tag>
+            <!-- 「只有我们在听」与「真有人在听」含义完全不同，必须标出来 -->
+            <n-tag v-if="c.selfSubscribed" size="tiny" round :bordered="false" type="info">
+              含本后台
+            </n-tag>
             <span class="text-muted ch-inst mono">{{ c.instance }}</span>
           </div>
         </div>
@@ -520,6 +723,22 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
 
       <div v-if="!channels.length && !channelLoading" class="text-muted" style="padding: 12px 0">
         暂无频道数据。
+      </div>
+
+      <!--
+        观测者效应提示：我们自己订阅出来的频道必须说出来。
+        不说的话，看 Redis 管理页的人会以为现场真有个频道。
+      -->
+      <div v-if="selfOnlyChannels.length" class="detail-note" style="margin-top: 14px">
+        <n-icon :component="InformationCircleOutline" :color="accent" />
+        <div>
+          <b>{{ selfOnlyChannels.length }} 个频道只因为本后台在订阅才存在</b>，已从上面的列表剔除：
+          <code v-for="c in selfOnlyChannels" :key="c" style="margin-right: 6px">{{ c }}</code>
+          <br />
+          本后台为判定中台心跳而常驻订阅了 <code>datahub_beat_1</code>，
+          而 Redis 的 <code>PUBSUB CHANNELS</code> 只列「有订阅者的频道」——
+          这些频道在现场本来是不存在的（现场 137 原本 0 个频道）。
+        </div>
       </div>
     </n-card>
 
@@ -582,32 +801,68 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
       <n-drawer-content :title="`中台实例详情 · ${active?.ip ?? ''}`" closable>
         <template v-if="active">
           <n-descriptions :column="1" label-placement="left" size="small" bordered>
-            <n-descriptions-item label="节点 ID">
-              <span class="mono">{{ active.id }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="IP 地址">
-              <span class="mono">{{ active.ip }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="MAC">
-              <span class="mono">{{ active.mac }}</span>
+            <n-descriptions-item label="实例地址">
+              <span class="mono">{{ active.ip }}:{{ active.port ?? '6379' }}</span>
             </n-descriptions-item>
             <n-descriptions-item label="状态">
-              <n-tag size="small" round :bordered="false" :type="active.online ? 'success' : 'error'">
-                {{ active.online ? '在线' : '离线' }}
+              <!-- 三态：未知不能显示成离线 -->
+              <n-tag
+                size="small"
+                round
+                :bordered="false"
+                :type="active.online === true ? 'success' : active.online === false ? 'error' : 'default'"
+              >
+                {{ active.online === true ? '在线' : active.online === false ? '离线' : '未知' }}
               </n-tag>
+              <span v-if="active.online === null" class="text-muted" style="margin-left: 8px; font-size: 12px">
+                观测不到，不等于离线
+              </span>
             </n-descriptions-item>
-            <n-descriptions-item label="unique_id 水位">
-              {{ active.uniqueId != null ? thousands(active.uniqueId) : '-' }}
+            <n-descriptions-item label="心跳">
+              <template v-if="active.beatCount > 0">
+                累计 {{ thousands(active.beatCount) }} 条
+                <span v-if="active.lastBeatAgeSec != null" class="text-muted">
+                  ，最近一次 {{ active.lastBeatAgeSec }} 秒前
+                </span>
+              </template>
+              <span v-else class="text-muted">尚未收到任何心跳</span>
+            </n-descriptions-item>
+            <n-descriptions-item label="订阅状态">
+              <n-tag size="tiny" round :bordered="false" :type="active.subscribed ? 'success' : 'warning'">
+                {{ active.subscribed ? '已订阅' : '未建立' }}
+              </n-tag>
+              <span v-if="active.subscribeError" class="text-muted" style="margin-left: 8px; font-size: 12px">
+                {{ active.subscribeError }}
+              </span>
+            </n-descriptions-item>
+            <n-descriptions-item label="键数合计">
+              {{ thousands(active.dbKeysTotal) }}
+              <span class="text-muted" style="margin-left: 6px; font-size: 12px">（DBSIZE 口径，≠ 条目数）</span>
             </n-descriptions-item>
             <n-descriptions-item label="stream 数">
-              {{ active.streams != null ? thousands(active.streams) : '-' }}
+              {{ active.streamTotal != null ? thousands(active.streamTotal) : '-' }}
             </n-descriptions-item>
             <n-descriptions-item label="条目总量">
               {{ active.entryTotal != null ? thousands(active.entryTotal) : '-' }}
             </n-descriptions-item>
             <n-descriptions-item label="频道数">{{ active.channels ?? 0 }}</n-descriptions-item>
-            <n-descriptions-item label="最后活跃">{{ active.lastActiveTime || '-' }}</n-descriptions-item>
           </n-descriptions>
+
+          <!-- 各 db 明细：unique_id 各 db 独立，且部分 db 没有这个键 -->
+          <div class="detail-block">
+            <div class="detail-title">
+              <n-icon :component="LayersOutline" :color="accent" />
+              各 db 明细
+            </div>
+            <n-data-table
+              :columns="dbColumns"
+              :data="active.dbs ?? []"
+              :bordered="false"
+              size="small"
+              :pagination="false"
+              :max-height="240"
+            />
+          </div>
 
           <div class="detail-block">
             <div class="detail-title">
@@ -645,9 +900,17 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
           <div class="detail-note">
             <n-icon :component="CashOutline" :color="accent" />
             <div>
-              该实例上 <code>unique_id</code> 是 string 键且<b>各 db 独立</b>
-              （现场 136 db0=166 / db1=55；137 db1=4）。
-              中台没有节点清单键，在线状态只能靠 <code>datahub_*</code> 频道判断。
+              <b>这一行是一个 Redis 实例，不是一台中台。</b>
+              中台在 Redis 侧没有节点清单键，所以「在线」只能靠该实例上有没有
+              <code>datahub_beat</code> 心跳来判断 —— 它<b>不等于</b>「这台机器上跑着中台」
+              （现场中台进程在 137，连的却是 136 的 Redis）。
+              <br />
+              心跳报文不含 id / ip / mac（实测只有 <code>{"level":2,"role":1}</code>），
+              所以<b>无法</b>归属到具体某一台中台；<code>level</code>/<code>role</code>
+              的语义协议未定义，也不当作节点 ID。
+              <br />
+              <code>unique_id</code> 是 string 键且<b>各 db 独立</b>
+              （现场 136 db0=217 / db1=56；137 db1=4，而 137 db0/db2 没有这个键）。
             </div>
           </div>
         </template>

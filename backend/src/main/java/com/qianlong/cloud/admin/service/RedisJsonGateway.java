@@ -18,6 +18,7 @@ import io.lettuce.core.RedisURI;
 import io.lettuce.core.ScanArgs;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 
@@ -51,6 +52,27 @@ public class RedisJsonGateway {
     /** 每个实例一个连接；key = 实例 id */
     private final Map<String, StatefulRedisConnection<String, String>> connections = new LinkedHashMap<>();
 
+    /** 每个实例一个客户端（用于按需创建「钉在某个 db 上」的连接） */
+    private final Map<String, RedisClient> clients = new LinkedHashMap<>();
+
+    /**
+     * 「钉在某个 (host, db) 上」的连接缓存。
+     *
+     * <p><b>为什么要单独缓存，而不是复用实例连接再 {@code SELECT} 切换：</b>
+     * 实例连接是**全应用共享**的，而 {@code SELECT} 作用在整个连接上。
+     * 两个请求并发时（A 切到 db1、B 切到 db0）会互相插队，
+     * 表现就是「随机查到别的 db 的键」—— 这类 bug 极难定位
+     * （README 里记过这条，本文件下面 {@code connectionByHost} 的旧用法就是这样）。
+     * 这里改为「每个 db 一条自己的连接」，建立时 select 一次、此后不再切换，
+     * 从根上取消这种竞态。
+     *
+     * <p>连接数 = 需要访问的 (host, db) 组合数，现场个位数，代价可忽略。
+     */
+    private final Map<String, StatefulRedisConnection<String, String>> dbConnections = new LinkedHashMap<>();
+
+    /** 建立失败的 (host, db) —— 避免每次请求都重试同一个必然失败的连接 */
+    private final java.util.Set<String> failedDbConnections = new java.util.LinkedHashSet<>();
+
     /** 连接失败的实例 id -> 失败原因（供接口如实告知前端） */
     private final Map<String, String> failures = new LinkedHashMap<>();
 
@@ -70,6 +92,7 @@ public class RedisJsonGateway {
                 StatefulRedisConnection<String, String> conn = client.connect(new StringCodec());
                 conn.setTimeout(Duration.ofMillis(properties.getTimeoutMs()));
                 connections.put(instance.getId(), conn);
+                clients.put(instance.getId(), client);
                 log.info("Redis 实例已连接：{}", instance.display());
             } catch (Exception ex) {
                 failures.put(instance.getId(), ex.getClass().getSimpleName() + ": " + ex.getMessage());
@@ -80,6 +103,14 @@ public class RedisJsonGateway {
 
     @PreDestroy
     public void close() {
+        dbConnections.values().forEach(conn -> {
+            try {
+                conn.close();
+            } catch (Exception ignored) {
+                // 关闭失败无所谓，进程都要退了
+            }
+        });
+        dbConnections.clear();
         connections.values().forEach(conn -> {
             try {
                 conn.close();
@@ -88,6 +119,82 @@ public class RedisJsonGateway {
             }
         });
         connections.clear();
+        clients.values().forEach(client -> {
+            try {
+                client.shutdown();
+            } catch (Exception ignored) {
+                // 同上
+            }
+        });
+        clients.clear();
+    }
+
+    /**
+     * 取一条**钉在指定 (host, db) 上**的连接（首次调用时建立并缓存）。
+     *
+     * <p>调用方**不需要**（也**不要**）再调 {@code SELECT} —— 连接已经在这个 db 上，
+     * 反复切换正是上面注释里说的竞态来源。
+     *
+     * @return 连接；该主机连不上时返回 {@code null}（调用方须如实处理，不要假装成功）
+     */
+    public synchronized StatefulRedisConnection<String, String> connectionFor(String host, int db) {
+        String key = host + "/db" + db;
+        StatefulRedisConnection<String, String> cached = dbConnections.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        /*
+         * 建过的失败要记住，不要每次请求都重试一遍。
+         * 典型场景：db 下标超范围（Redis 默认只有 db0~db15），
+         * 每一轮统计都会试着连一次、再失败一次 —— 日志被同一条告警刷满，
+         * 而且每次都要白等一个连接超时。
+         */
+        if (failedDbConnections.contains(key)) {
+            return null;
+        }
+        RedisClient client = clientByHost(host);
+        if (client == null) {
+            return null;
+        }
+        try {
+            StatefulRedisConnection<String, String> conn = client.connect(new StringCodec());
+            conn.setTimeout(Duration.ofMillis(properties.getTimeoutMs()));
+            // 只在建立时切一次；此后这条连接专属于这个 db
+            conn.sync().select(db);
+            dbConnections.put(key, conn);
+            return conn;
+        } catch (Exception ex) {
+            failedDbConnections.add(key);
+            failures.put(key, ex.getClass().getSimpleName() + ": " + ex.getMessage());
+            log.warn("建立 {} 的连接失败（本次运行内不再重试）：{}", key, ex.getMessage());
+            return null;
+        }
+    }
+
+    /** 该主机对应的客户端（按配置顺序取第一条） */
+    private RedisClient clientByHost(String host) {
+        for (RedisProperties.Instance i : properties.getInstances()) {
+            if (i.getHost().equals(host) && clients.containsKey(i.getId())) {
+                return clients.get(i.getId());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 为某台实例开一条 <b>Pub/Sub 专用</b>连接（心跳订阅用）。
+     *
+     * <p>Pub/Sub 不能用普通命令连接：一旦进入订阅模式，这条连接就只能收消息。
+     * 所以单独开一条，由调用方负责 {@code close()}。
+     *
+     * <p>频道是**实例级**的（不按 db 隔离），所以这里不关心 db。
+     */
+    public StatefulRedisPubSubConnection<String, String> openPubSub(String host) {
+        RedisClient client = clientByHost(host);
+        if (client == null) {
+            return null;
+        }
+        return client.connectPubSub(new StringCodec());
     }
 
     /** 当前不可用的实例（实例 id -> 原因） */
