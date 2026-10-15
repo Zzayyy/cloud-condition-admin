@@ -7,8 +7,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -404,118 +402,116 @@ const prettyOrderParam = computed(() => formatJson(relatedOrder.value?.OrderPara
     </n-card>
 
     <!-- 成交详情 -->
-    <n-drawer v-model:show="showDetail" :width="620" placement="right">
-      <n-drawer-content :title="`成交详情 · ${active?.TradeNO ?? ''}`" closable>
-        <template v-if="active">
-          <n-descriptions :column="2" label-placement="top" size="small" bordered>
-            <n-descriptions-item label="成交编号">
-              <span class="mono">{{ orDash(active.TradeNO) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="委托编号">
-              <span class="mono">{{ orDash(active.OrderNo) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="策略编号">
-              <span class="mono">{{ orDash(active.StrategyID) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="账号">
-              <span class="mono">{{ orDash(active.Account) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="下单账号">
-              <span class="mono">{{ orDash(active.UserAccount) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="合约">
-              <span class="mono">{{ orDash(active.Code) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="市场">{{ orDash(active.Market) }}</n-descriptions-item>
-            <n-descriptions-item label="成交量">{{ orDash(active.Volumn) }}</n-descriptions-item>
-            <n-descriptions-item label="成交价">
-              <span class="num">{{ active.Price != null ? active.Price.toFixed(4) : '-' }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="成交金额">
+    <AppDialog v-model:show="showDetail" :title="`成交详情 · ${active?.TradeNO ?? ''}`" :width="620" mask-closable>
+      <template v-if="active">
+        <n-descriptions :column="2" label-placement="top" size="small" bordered>
+          <n-descriptions-item label="成交编号">
+            <span class="mono">{{ orDash(active.TradeNO) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="委托编号">
+            <span class="mono">{{ orDash(active.OrderNo) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="策略编号">
+            <span class="mono">{{ orDash(active.StrategyID) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="账号">
+            <span class="mono">{{ orDash(active.Account) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="下单账号">
+            <span class="mono">{{ orDash(active.UserAccount) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="合约">
+            <span class="mono">{{ orDash(active.Code) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="市场">{{ orDash(active.Market) }}</n-descriptions-item>
+          <n-descriptions-item label="成交量">{{ orDash(active.Volumn) }}</n-descriptions-item>
+          <n-descriptions-item label="成交价">
+            <span class="num">{{ active.Price != null ? active.Price.toFixed(4) : '-' }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="成交金额">
+            <span class="num">
+              {{ active.Price != null ? ((active.Price * Number(active.Volumn ?? 0))).toFixed(2) : '-' }}
+            </span>
+          </n-descriptions-item>
+          <n-descriptions-item label="成交时间" :span="2">{{ orDash(active.TradeTime) }}</n-descriptions-item>
+        </n-descriptions>
+
+        <!-- 成交 → 委托 下钻 -->
+        <div class="detail-block">
+          <div class="detail-title">
+            <n-icon :component="LinkOutline" :color="accent" />
+            关联委托
+          </div>
+          <div v-if="relatedOrder" class="rel-card">
+            <div class="rel-row">
+              <span class="rel-k">委托编号</span>
+              <span class="mono">{{ orDash(relatedOrder.OrderNo) }}</span>
+            </div>
+            <div class="rel-row">
+              <span class="rel-k">合约</span>
+              <span class="mono">{{ orDash(relatedOrder.Code) }} {{ orDash(relatedOrder.CodeName) }}</span>
+            </div>
+            <div class="rel-row">
+              <span class="rel-k">委托价 / 量</span>
               <span class="num">
-                {{ active.Price != null ? ((active.Price * Number(active.Volumn ?? 0))).toFixed(2) : '-' }}
+                {{ relatedOrder.OrderPrice != null ? relatedOrder.OrderPrice.toFixed(4) : '-' }}
+                /
+                {{ relatedOrder.OrderVolumn ?? '-' }}
               </span>
-            </n-descriptions-item>
-            <n-descriptions-item label="成交时间" :span="2">{{ orDash(active.TradeTime) }}</n-descriptions-item>
-          </n-descriptions>
-
-          <!-- 成交 → 委托 下钻 -->
-          <div class="detail-block">
-            <div class="detail-title">
-              <n-icon :component="LinkOutline" :color="accent" />
-              关联委托
             </div>
-            <div v-if="relatedOrder" class="rel-card">
-              <div class="rel-row">
-                <span class="rel-k">委托编号</span>
-                <span class="mono">{{ orDash(relatedOrder.OrderNo) }}</span>
-              </div>
-              <div class="rel-row">
-                <span class="rel-k">合约</span>
-                <span class="mono">{{ orDash(relatedOrder.Code) }} {{ orDash(relatedOrder.CodeName) }}</span>
-              </div>
-              <div class="rel-row">
-                <span class="rel-k">委托价 / 量</span>
-                <span class="num">
-                  {{ relatedOrder.OrderPrice != null ? relatedOrder.OrderPrice.toFixed(4) : '-' }}
-                  /
-                  {{ relatedOrder.OrderVolumn ?? '-' }}
-                </span>
-              </div>
-              <div class="rel-row">
-                <span class="rel-k">委托状态</span>
-                <n-tag size="small" round :bordered="false" type="info">
-                  {{ orDash(relatedOrder.StatueDis) }}
-                </n-tag>
-              </div>
-              <div class="rel-row">
-                <span class="rel-k">委托时间</span>
-                <span>{{ orDash(relatedOrder.OrderTime) }}</span>
-              </div>
+            <div class="rel-row">
+              <span class="rel-k">委托状态</span>
+              <n-tag size="small" round :bordered="false" type="info">
+                {{ orDash(relatedOrder.StatueDis) }}
+              </n-tag>
             </div>
-            <div v-else class="text-muted" style="font-size: 13px">
-              未在当前演示数据中找到对应委托（真实实现应由后端按委托号反查 T_Order / T_Order_his）。
+            <div class="rel-row">
+              <span class="rel-k">委托时间</span>
+              <span>{{ orDash(relatedOrder.OrderTime) }}</span>
             </div>
           </div>
-
-          <!-- 同委托的其他成交 -->
-          <div v-if="siblingTrades.length" class="detail-block">
-            <div class="detail-title">
-              <n-icon :component="CashOutline" :color="accent" />
-              同一委托的其他成交（{{ siblingTrades.length }}）
-            </div>
-            <n-data-table
-              :columns="siblingColumns"
-              :data="siblingTrades"
-              :bordered="false"
-              size="small"
-              :pagination="false"
-              :max-height="220"
-            />
+          <div v-else class="text-muted" style="font-size: 13px">
+            未在当前演示数据中找到对应委托（真实实现应由后端按委托号反查 T_Order / T_Order_his）。
           </div>
+        </div>
 
-          <div v-if="relatedOrder" class="detail-block">
-            <div class="detail-title">
-              <n-icon :component="CodeSlashOutline" :color="accent" />
-              委托的下单参数
-            </div>
-            <n-code :code="prettyOrderParam" language="json" show-line-numbers word-wrap />
+        <!-- 同委托的其他成交 -->
+        <div v-if="siblingTrades.length" class="detail-block">
+          <div class="detail-title">
+            <n-icon :component="CashOutline" :color="accent" />
+            同一委托的其他成交（{{ siblingTrades.length }}）
           </div>
+          <n-data-table
+            :columns="siblingColumns"
+            :data="siblingTrades"
+            :bordered="false"
+            size="small"
+            :pagination="false"
+            :max-height="220"
+          />
+        </div>
 
-          <div class="detail-note">
-            <n-icon :component="InformationCircleOutline" :color="accent" />
-            <div>
-              数据来自 MySQL 表 <code>T_Trade</code> / <code>T_Trade_his</code>；
-              通过 <code>OrderNo</code> 与委托表 <code>T_Order</code> 关联。
-            </div>
+        <div v-if="relatedOrder" class="detail-block">
+          <div class="detail-title">
+            <n-icon :component="CodeSlashOutline" :color="accent" />
+            委托的下单参数
           </div>
-        </template>
+          <n-code :code="prettyOrderParam" language="json" show-line-numbers word-wrap />
+        </div>
 
-        <template #footer>
-          <n-button size="small" @click="showDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+        <div class="detail-note">
+          <n-icon :component="InformationCircleOutline" :color="accent" />
+          <div>
+            数据来自 MySQL 表 <code>T_Trade</code> / <code>T_Trade_his</code>；
+            通过 <code>OrderNo</code> 与委托表 <code>T_Order</code> 关联。
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 

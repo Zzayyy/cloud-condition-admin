@@ -4,8 +4,6 @@ import {
   NButton,
   NCard,
   NDataTable,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -590,63 +588,61 @@ function openDetail(row: UserLog) {
     </n-card>
 
     <!-- 日志详情 -->
-    <n-drawer v-model:show="showDetail" :width="560" placement="right">
-      <n-drawer-content :title="`日志详情 #${active?.id ?? ''}`" closable>
-        <template v-if="active">
+    <AppDialog v-model:show="showDetail" :title="`日志详情 #${active?.id ?? ''}`" :width="560" mask-closable>
+      <template v-if="active">
+        <n-descriptions :column="1" label-placement="left" size="small" bordered>
+          <n-descriptions-item label="日志 ID">
+            <span class="mono">{{ active.id }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="账号">
+            <span class="mono">{{ orDash(active.Account) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="时间">{{ orDash(active.LogTime) }}</n-descriptions-item>
+          <n-descriptions-item label="信息">{{ orDash(active.Info) }}</n-descriptions-item>
+          <n-descriptions-item label="来源 IP">
+            <span v-if="active.LogIP" class="mono">{{ active.LogIP }}</span>
+            <span v-else class="text-muted mono">NULL（现场均为空）</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="来源 MAC">
+            <span v-if="active.LogMAC" class="mono">{{ active.LogMAC }}</span>
+            <span v-else class="text-muted mono">NULL（现场均为空）</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="登录系统">
+            <span v-if="active.LogOS">{{ active.LogOS }}</span>
+            <span v-else class="text-muted">NULL（现场均为空）</span>
+          </n-descriptions-item>
+        </n-descriptions>
+
+        <div v-if="activeStat" class="detail-block">
+          <div class="detail-title">
+            <n-icon :component="BarChartOutline" :color="accent" />
+            该账号的日志汇总
+          </div>
           <n-descriptions :column="1" label-placement="left" size="small" bordered>
-            <n-descriptions-item label="日志 ID">
-              <span class="mono">{{ active.id }}</span>
+            <n-descriptions-item label="日志条数">
+              <span class="num">{{ thousands(activeStat.count) }}</span>
             </n-descriptions-item>
-            <n-descriptions-item label="账号">
-              <span class="mono">{{ orDash(active.Account) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="时间">{{ orDash(active.LogTime) }}</n-descriptions-item>
-            <n-descriptions-item label="信息">{{ orDash(active.Info) }}</n-descriptions-item>
-            <n-descriptions-item label="来源 IP">
-              <span v-if="active.LogIP" class="mono">{{ active.LogIP }}</span>
-              <span v-else class="text-muted mono">NULL（现场均为空）</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="来源 MAC">
-              <span v-if="active.LogMAC" class="mono">{{ active.LogMAC }}</span>
-              <span v-else class="text-muted mono">NULL（现场均为空）</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="登录系统">
-              <span v-if="active.LogOS">{{ active.LogOS }}</span>
-              <span v-else class="text-muted">NULL（现场均为空）</span>
-            </n-descriptions-item>
+            <n-descriptions-item label="最早">{{ orDash(activeStat.firstTime) }}</n-descriptions-item>
+            <n-descriptions-item label="最近">{{ orDash(activeStat.lastTime) }}</n-descriptions-item>
           </n-descriptions>
+        </div>
 
-          <div v-if="activeStat" class="detail-block">
-            <div class="detail-title">
-              <n-icon :component="BarChartOutline" :color="accent" />
-              该账号的日志汇总
-            </div>
-            <n-descriptions :column="1" label-placement="left" size="small" bordered>
-              <n-descriptions-item label="日志条数">
-                <span class="num">{{ thousands(activeStat.count) }}</span>
-              </n-descriptions-item>
-              <n-descriptions-item label="最早">{{ orDash(activeStat.firstTime) }}</n-descriptions-item>
-              <n-descriptions-item label="最近">{{ orDash(activeStat.lastTime) }}</n-descriptions-item>
-            </n-descriptions>
+        <div class="detail-note">
+          <n-icon :component="InformationCircleOutline" :color="accent" />
+          <div>
+            数据来自 MySQL 表 <code>T_UserLog</code>。
+            该表 <code>LogIP</code> / <code>LogMAC</code> / <code>LogOS</code>
+            在现场<b>全为 NULL</b>；如需来源设备，需要中台侧补写这三列，
+            或改用 <code>T_StrategyLog</code> 的 <code>FromIP</code> / <code>FromMac</code>
+            （那边有值）。
           </div>
+        </div>
+      </template>
 
-          <div class="detail-note">
-            <n-icon :component="InformationCircleOutline" :color="accent" />
-            <div>
-              数据来自 MySQL 表 <code>T_UserLog</code>。
-              该表 <code>LogIP</code> / <code>LogMAC</code> / <code>LogOS</code>
-              在现场<b>全为 NULL</b>；如需来源设备，需要中台侧补写这三列，
-              或改用 <code>T_StrategyLog</code> 的 <code>FromIP</code> / <code>FromMac</code>
-              （那边有值）。
-            </div>
-          </div>
-        </template>
-
-        <template #footer>
-          <n-button size="small" @click="showDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+      <template #footer>
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 

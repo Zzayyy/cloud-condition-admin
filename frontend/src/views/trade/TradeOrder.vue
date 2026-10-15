@@ -7,8 +7,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -573,106 +571,104 @@ const marketOrderType = computed(() => {
     </n-card>
 
     <!-- 委托详情 -->
-    <n-drawer v-model:show="showDetail" :width="680" placement="right">
-      <n-drawer-content :title="`委托详情 · ${active?.OrderNo ?? ''}`" closable>
-        <template v-if="active">
-          <n-tabs v-model:value="detailTab" type="line" size="small">
-            <n-tab-pane name="basic">
-              <template #tab>基本信息</template>
+    <AppDialog v-model:show="showDetail" :title="`委托详情 · ${active?.OrderNo ?? ''}`" :width="680" mask-closable>
+      <template v-if="active">
+        <n-tabs v-model:value="detailTab" type="line" size="small">
+          <n-tab-pane name="basic">
+            <template #tab>基本信息</template>
 
-              <n-descriptions :column="2" label-placement="top" size="small" bordered>
-                <n-descriptions-item label="委托编号">
-                  <span class="mono">{{ orDash(active.OrderNo) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="策略编号">
-                  <span class="mono">{{ orDash(active.StrategyID) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="账号">
-                  <span class="mono">{{ orDash(active.Account) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="下单账号">
-                  <span class="mono">{{ orDash(active.UserAccount) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="合约">
-                  <span class="mono">{{ orDash(active.Code) }}</span>
-                  <span class="text-muted" style="margin-left: 6px">{{ orDash(active.CodeName) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="市场">{{ orDash(active.Market) }}</n-descriptions-item>
-                <n-descriptions-item label="买卖方向">
-                  {{ active.BSType != null ? BS_TYPES[active.BSType] : '-' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="开平方向">
-                  {{ active.OCType != null ? OC_TYPES[active.OCType] : '-' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="委托价">
-                  <span class="num">{{ active.OrderPrice != null ? active.OrderPrice.toFixed(4) : '-' }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="委托量">
-                  <span class="num">{{ active.OrderVolumn != null ? thousands(active.OrderVolumn) : '-' }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="委托金额">
-                  <span class="num">
-                    {{ active.OrderPrice != null && active.OrderVolumn != null
-                      ? ((active.OrderPrice * active.OrderVolumn)).toFixed(2) : '-' }}
-                  </span>
-                </n-descriptions-item>
-                <n-descriptions-item label="委托时间">{{ orDash(active.OrderTime) }}</n-descriptions-item>
-                <n-descriptions-item label="委托状态">
-                  {{ orDash(active.StatueDis) }}
-                  <span class="text-muted" style="margin-left: 6px; font-size: 12px">
-                    OrderStatue={{ active.OrderStatue ?? '-' }}
-                  </span>
-                </n-descriptions-item>
-                <n-descriptions-item label="委托方式">
-                  {{ marketOrderType != null ? (MARKET_ORDER_TYPES[marketOrderType] ?? marketOrderType) : '-' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="失败原因" :span="2">{{ orDash(active.Reason) }}</n-descriptions-item>
-              </n-descriptions>
-
-              <div class="detail-note">
-                <n-icon :component="InformationCircleOutline" :color="accent" />
-                <div>{{ ORDER_STATUS_NOTE }}</div>
-              </div>
-            </n-tab-pane>
-
-            <n-tab-pane name="trades">
-              <template #tab>成交明细（{{ relatedTrades.length }}）</template>
-              <div class="json-head">
-                <n-icon :component="CashOutline" :color="accent" />
-                <span>
-                  按委托号 <code>{{ active.OrderNo }}</code> 关联 MySQL 表
-                  <code>T_Trade</code> / <code>T_Trade_his</code>。
+            <n-descriptions :column="2" label-placement="top" size="small" bordered>
+              <n-descriptions-item label="委托编号">
+                <span class="mono">{{ orDash(active.OrderNo) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="策略编号">
+                <span class="mono">{{ orDash(active.StrategyID) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="账号">
+                <span class="mono">{{ orDash(active.Account) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="下单账号">
+                <span class="mono">{{ orDash(active.UserAccount) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="合约">
+                <span class="mono">{{ orDash(active.Code) }}</span>
+                <span class="text-muted" style="margin-left: 6px">{{ orDash(active.CodeName) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="市场">{{ orDash(active.Market) }}</n-descriptions-item>
+              <n-descriptions-item label="买卖方向">
+                {{ active.BSType != null ? BS_TYPES[active.BSType] : '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="开平方向">
+                {{ active.OCType != null ? OC_TYPES[active.OCType] : '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="委托价">
+                <span class="num">{{ active.OrderPrice != null ? active.OrderPrice.toFixed(4) : '-' }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="委托量">
+                <span class="num">{{ active.OrderVolumn != null ? thousands(active.OrderVolumn) : '-' }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="委托金额">
+                <span class="num">
+                  {{ active.OrderPrice != null && active.OrderVolumn != null
+                    ? ((active.OrderPrice * active.OrderVolumn)).toFixed(2) : '-' }}
                 </span>
-              </div>
-              <n-data-table
-                :columns="tradeColumns"
-                :data="relatedTrades"
-                :bordered="false"
-                size="small"
-                :pagination="false"
-                :max-height="320"
-              />
-            </n-tab-pane>
-
-            <n-tab-pane name="param">
-              <template #tab>下单参数</template>
-              <div class="json-head">
-                <n-icon :component="CodeSlashOutline" :color="accent" />
-                <span>
-                  对应 <code>T_Order.OrderParam</code> 字段，即客户端
-                  <code>createOrder</code> 协议原文（其他非统一的下单参数以 JSON 存放）。
+              </n-descriptions-item>
+              <n-descriptions-item label="委托时间">{{ orDash(active.OrderTime) }}</n-descriptions-item>
+              <n-descriptions-item label="委托状态">
+                {{ orDash(active.StatueDis) }}
+                <span class="text-muted" style="margin-left: 6px; font-size: 12px">
+                  OrderStatue={{ active.OrderStatue ?? '-' }}
                 </span>
-              </div>
-              <n-code :code="prettyParam" language="json" show-line-numbers word-wrap />
-            </n-tab-pane>
-          </n-tabs>
-        </template>
+              </n-descriptions-item>
+              <n-descriptions-item label="委托方式">
+                {{ marketOrderType != null ? (MARKET_ORDER_TYPES[marketOrderType] ?? marketOrderType) : '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="失败原因" :span="2">{{ orDash(active.Reason) }}</n-descriptions-item>
+            </n-descriptions>
 
-        <template #footer>
-          <n-button size="small" @click="showDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+            <div class="detail-note">
+              <n-icon :component="InformationCircleOutline" :color="accent" />
+              <div>{{ ORDER_STATUS_NOTE }}</div>
+            </div>
+          </n-tab-pane>
+
+          <n-tab-pane name="trades">
+            <template #tab>成交明细（{{ relatedTrades.length }}）</template>
+            <div class="json-head">
+              <n-icon :component="CashOutline" :color="accent" />
+              <span>
+                按委托号 <code>{{ active.OrderNo }}</code> 关联 MySQL 表
+                <code>T_Trade</code> / <code>T_Trade_his</code>。
+              </span>
+            </div>
+            <n-data-table
+              :columns="tradeColumns"
+              :data="relatedTrades"
+              :bordered="false"
+              size="small"
+              :pagination="false"
+              :max-height="320"
+            />
+          </n-tab-pane>
+
+          <n-tab-pane name="param">
+            <template #tab>下单参数</template>
+            <div class="json-head">
+              <n-icon :component="CodeSlashOutline" :color="accent" />
+              <span>
+                对应 <code>T_Order.OrderParam</code> 字段，即客户端
+                <code>createOrder</code> 协议原文（其他非统一的下单参数以 JSON 存放）。
+              </span>
+            </div>
+            <n-code :code="prettyParam" language="json" show-line-numbers word-wrap />
+          </n-tab-pane>
+        </n-tabs>
+      </template>
+
+      <template #footer>
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 

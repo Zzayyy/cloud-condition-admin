@@ -6,8 +6,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -797,129 +795,127 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
     </n-card>
 
     <!-- 节点详情 -->
-    <n-drawer v-model:show="showDetail" :width="620" placement="right">
-      <n-drawer-content :title="`中台实例详情 · ${active?.ip ?? ''}`" closable>
-        <template v-if="active">
-          <n-descriptions :column="1" label-placement="left" size="small" bordered>
-            <n-descriptions-item label="实例地址">
-              <span class="mono">{{ active.ip }}:{{ active.port ?? '6379' }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="状态">
-              <!-- 三态：未知不能显示成离线 -->
-              <n-tag
-                size="small"
-                round
-                :bordered="false"
-                :type="active.online === true ? 'success' : active.online === false ? 'error' : 'default'"
-              >
-                {{ active.online === true ? '在线' : active.online === false ? '离线' : '未知' }}
-              </n-tag>
-              <span v-if="active.online === null" class="text-muted" style="margin-left: 8px; font-size: 12px">
-                观测不到，不等于离线
-              </span>
-            </n-descriptions-item>
-            <n-descriptions-item label="心跳">
-              <template v-if="active.beatCount > 0">
-                累计 {{ thousands(active.beatCount) }} 条
-                <span v-if="active.lastBeatAgeSec != null" class="text-muted">
-                  ，最近一次 {{ active.lastBeatAgeSec }} 秒前
-                </span>
-              </template>
-              <span v-else class="text-muted">尚未收到任何心跳</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="订阅状态">
-              <n-tag size="tiny" round :bordered="false" :type="active.subscribed ? 'success' : 'warning'">
-                {{ active.subscribed ? '已订阅' : '未建立' }}
-              </n-tag>
-              <span v-if="active.subscribeError" class="text-muted" style="margin-left: 8px; font-size: 12px">
-                {{ active.subscribeError }}
-              </span>
-            </n-descriptions-item>
-            <n-descriptions-item label="键数合计">
-              {{ thousands(active.dbKeysTotal) }}
-              <span class="text-muted" style="margin-left: 6px; font-size: 12px">（DBSIZE 口径，≠ 条目数）</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="stream 数">
-              {{ active.streamTotal != null ? thousands(active.streamTotal) : '-' }}
-            </n-descriptions-item>
-            <n-descriptions-item label="条目总量">
-              {{ active.entryTotal != null ? thousands(active.entryTotal) : '-' }}
-            </n-descriptions-item>
-            <n-descriptions-item label="频道数">{{ active.channels ?? 0 }}</n-descriptions-item>
-          </n-descriptions>
-
-          <!-- 各 db 明细：unique_id 各 db 独立，且部分 db 没有这个键 -->
-          <div class="detail-block">
-            <div class="detail-title">
-              <n-icon :component="LayersOutline" :color="accent" />
-              各 db 明细
-            </div>
-            <n-data-table
-              :columns="dbColumns"
-              :data="active.dbs ?? []"
-              :bordered="false"
+    <AppDialog v-model:show="showDetail" :title="`中台实例详情 · ${active?.ip ?? ''}`" :width="620" mask-closable>
+      <template v-if="active">
+        <n-descriptions :column="1" label-placement="left" size="small" bordered>
+          <n-descriptions-item label="实例地址">
+            <span class="mono">{{ active.ip }}:{{ active.port ?? '6379' }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="状态">
+            <!-- 三态：未知不能显示成离线 -->
+            <n-tag
               size="small"
-              :pagination="false"
-              :max-height="240"
-            />
-          </div>
-
-          <div class="detail-block">
-            <div class="detail-title">
-              <n-icon :component="WifiOutline" :color="accent" />
-              该实例的频道（{{ nodeChannels.length }}）
-            </div>
-            <div v-if="nodeChannels.length" class="ch-list">
-              <div v-for="c in nodeChannels" :key="c.name" class="ch-item">
-                <span class="mono ch-name">{{ c.name }}</span>
-                <n-tag size="tiny" round :bordered="false" :type="c.subscribers > 0 ? 'success' : 'warning'">
-                  订阅者 {{ c.subscribers }}
-                </n-tag>
-              </div>
-            </div>
-            <div v-else class="text-muted" style="font-size: 13px">
-              该实例上没有 Pub/Sub 频道（现场 137 实测为 0 个）。
-            </div>
-          </div>
-
-          <div v-if="nodeBacklog.length" class="detail-block">
-            <div class="detail-title">
-              <n-icon :component="WarningOutline" color="#dd7a15" />
-              该实例的积压流（{{ nodeBacklog.length }}）
-            </div>
-            <n-data-table
-              :columns="backlogColumns"
-              :data="nodeBacklog"
+              round
               :bordered="false"
-              size="small"
-              :pagination="false"
-              :max-height="240"
-            />
-          </div>
+              :type="active.online === true ? 'success' : active.online === false ? 'error' : 'default'"
+            >
+              {{ active.online === true ? '在线' : active.online === false ? '离线' : '未知' }}
+            </n-tag>
+            <span v-if="active.online === null" class="text-muted" style="margin-left: 8px; font-size: 12px">
+              观测不到，不等于离线
+            </span>
+          </n-descriptions-item>
+          <n-descriptions-item label="心跳">
+            <template v-if="active.beatCount > 0">
+              累计 {{ thousands(active.beatCount) }} 条
+              <span v-if="active.lastBeatAgeSec != null" class="text-muted">
+                ，最近一次 {{ active.lastBeatAgeSec }} 秒前
+              </span>
+            </template>
+            <span v-else class="text-muted">尚未收到任何心跳</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="订阅状态">
+            <n-tag size="tiny" round :bordered="false" :type="active.subscribed ? 'success' : 'warning'">
+              {{ active.subscribed ? '已订阅' : '未建立' }}
+            </n-tag>
+            <span v-if="active.subscribeError" class="text-muted" style="margin-left: 8px; font-size: 12px">
+              {{ active.subscribeError }}
+            </span>
+          </n-descriptions-item>
+          <n-descriptions-item label="键数合计">
+            {{ thousands(active.dbKeysTotal) }}
+            <span class="text-muted" style="margin-left: 6px; font-size: 12px">（DBSIZE 口径，≠ 条目数）</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="stream 数">
+            {{ active.streamTotal != null ? thousands(active.streamTotal) : '-' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="条目总量">
+            {{ active.entryTotal != null ? thousands(active.entryTotal) : '-' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="频道数">{{ active.channels ?? 0 }}</n-descriptions-item>
+        </n-descriptions>
 
-          <div class="detail-note">
-            <n-icon :component="CashOutline" :color="accent" />
-            <div>
-              <b>这一行是一个 Redis 实例，不是一台中台。</b>
-              中台在 Redis 侧没有节点清单键，所以「在线」只能靠该实例上有没有
-              <code>datahub_beat</code> 心跳来判断 —— 它<b>不等于</b>「这台机器上跑着中台」
-              （现场中台进程在 137，连的却是 136 的 Redis）。
-              <br />
-              心跳报文不含 id / ip / mac（实测只有 <code>{"level":2,"role":1}</code>），
-              所以<b>无法</b>归属到具体某一台中台；<code>level</code>/<code>role</code>
-              的语义协议未定义，也不当作节点 ID。
-              <br />
-              <code>unique_id</code> 是 string 键且<b>各 db 独立</b>
-              （现场 136 db0=217 / db1=56；137 db1=4，而 137 db0/db2 没有这个键）。
+        <!-- 各 db 明细：unique_id 各 db 独立，且部分 db 没有这个键 -->
+        <div class="detail-block">
+          <div class="detail-title">
+            <n-icon :component="LayersOutline" :color="accent" />
+            各 db 明细
+          </div>
+          <n-data-table
+            :columns="dbColumns"
+            :data="active.dbs ?? []"
+            :bordered="false"
+            size="small"
+            :pagination="false"
+            :max-height="240"
+          />
+        </div>
+
+        <div class="detail-block">
+          <div class="detail-title">
+            <n-icon :component="WifiOutline" :color="accent" />
+            该实例的频道（{{ nodeChannels.length }}）
+          </div>
+          <div v-if="nodeChannels.length" class="ch-list">
+            <div v-for="c in nodeChannels" :key="c.name" class="ch-item">
+              <span class="mono ch-name">{{ c.name }}</span>
+              <n-tag size="tiny" round :bordered="false" :type="c.subscribers > 0 ? 'success' : 'warning'">
+                订阅者 {{ c.subscribers }}
+              </n-tag>
             </div>
           </div>
-        </template>
+          <div v-else class="text-muted" style="font-size: 13px">
+            该实例上没有 Pub/Sub 频道（现场 137 实测为 0 个）。
+          </div>
+        </div>
 
-        <template #footer>
-          <n-button size="small" @click="showDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+        <div v-if="nodeBacklog.length" class="detail-block">
+          <div class="detail-title">
+            <n-icon :component="WarningOutline" color="#dd7a15" />
+            该实例的积压流（{{ nodeBacklog.length }}）
+          </div>
+          <n-data-table
+            :columns="backlogColumns"
+            :data="nodeBacklog"
+            :bordered="false"
+            size="small"
+            :pagination="false"
+            :max-height="240"
+          />
+        </div>
+
+        <div class="detail-note">
+          <n-icon :component="CashOutline" :color="accent" />
+          <div>
+            <b>这一行是一个 Redis 实例，不是一台中台。</b>
+            中台在 Redis 侧没有节点清单键，所以「在线」只能靠该实例上有没有
+            <code>datahub_beat</code> 心跳来判断 —— 它<b>不等于</b>「这台机器上跑着中台」
+            （现场中台进程在 137，连的却是 136 的 Redis）。
+            <br />
+            心跳报文不含 id / ip / mac（实测只有 <code>{"level":2,"role":1}</code>），
+            所以<b>无法</b>归属到具体某一台中台；<code>level</code>/<code>role</code>
+            的语义协议未定义，也不当作节点 ID。
+            <br />
+            <code>unique_id</code> 是 string 键且<b>各 db 独立</b>
+            （现场 136 db0=217 / db1=56；137 db1=4，而 137 db0/db2 没有这个键）。
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 

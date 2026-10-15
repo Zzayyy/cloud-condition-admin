@@ -7,8 +7,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -536,137 +534,133 @@ const protocolColumns: DataTableColumns<(typeof PROTOCOL_ROWS)[number]> = [
     </n-card>
 
     <!-- 账号签署详情 -->
-    <n-drawer v-model:show="showDetail" :width="660" placement="right">
-      <n-drawer-content :title="`签署详情 · ${active?.account ?? ''}`" closable>
-        <template v-if="active">
-          <n-tabs v-model:value="detailTab" type="line" size="small">
-            <n-tab-pane name="sign">
-              <template #tab>签署与股东号</template>
+    <AppDialog v-model:show="showDetail" :title="`签署详情 · ${active?.account ?? ''}`" :width="660" mask-closable>
+      <template v-if="active">
+        <n-tabs v-model:value="detailTab" type="line" size="small">
+          <n-tab-pane name="sign">
+            <template #tab>签署与股东号</template>
 
-              <n-descriptions :column="2" label-placement="top" size="small" bordered>
-                <n-descriptions-item label="唯一账号">
-                  <span class="mono">{{ active.account }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="用户账号">
-                  <span class="mono">{{ active.useraccount }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="客户名称">{{ orDash(active.name) }}</n-descriptions-item>
-                <n-descriptions-item label="交易账号">
-                  <span class="mono">{{ orDash(active.tradeAccount) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="签署状态">
-                  <n-tag size="small" round :bordered="false" :type="active.signed ? 'success' : 'warning'">
-                    {{ active.signed ? '已签署' : '未签署' }}
-                  </n-tag>
-                </n-descriptions-item>
-                <n-descriptions-item label="营业部">
-                  <span class="mono">{{ orDash(active.branchNo) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="账号类型">
-                  {{ active.accounttype != null ? ACCOUNT_TYPES[active.accounttype] ?? active.accounttype : '-' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="渠道">
-                  {{ active.accatt != null ? ACC_ATTS[active.accatt] ?? active.accatt : '-' }}
-                </n-descriptions-item>
-              </n-descriptions>
+            <n-descriptions :column="2" label-placement="top" size="small" bordered>
+              <n-descriptions-item label="唯一账号">
+                <span class="mono">{{ active.account }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="用户账号">
+                <span class="mono">{{ active.useraccount }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="客户名称">{{ orDash(active.name) }}</n-descriptions-item>
+              <n-descriptions-item label="交易账号">
+                <span class="mono">{{ orDash(active.tradeAccount) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="签署状态">
+                <n-tag size="small" round :bordered="false" :type="active.signed ? 'success' : 'warning'">
+                  {{ active.signed ? '已签署' : '未签署' }}
+                </n-tag>
+              </n-descriptions-item>
+              <n-descriptions-item label="营业部">
+                <span class="mono">{{ orDash(active.branchNo) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="账号类型">
+                {{ active.accounttype != null ? ACCOUNT_TYPES[active.accounttype] ?? active.accounttype : '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="渠道">
+                {{ active.accatt != null ? ACC_ATTS[active.accatt] ?? active.accatt : '-' }}
+              </n-descriptions-item>
+            </n-descriptions>
 
-              <!-- 股东号按市场分组 -->
-              <div class="detail-block">
-                <div class="detail-title">
-                  <n-icon :component="SwapHorizontalOutline" :color="accent" />
-                  股东号（按市场）
-                </div>
-                <div v-if="sharesByMarket.length" class="market-list">
-                  <div v-for="m in sharesByMarket" :key="m.market" class="market-item">
-                    <div class="market-head">
-                      <n-tag
-                        size="small"
-                        round
-                        :bordered="false"
-                        :type="m.market === 1 ? 'info' : 'success'"
-                      >
-                        {{ m.label }}
-                      </n-tag>
-                      <span class="text-muted" style="font-size: 12px">{{ m.list.length }} 个股东号</span>
-                    </div>
-                    <div class="market-body">
-                      <span v-for="s in m.list" :key="s.SAccount" class="mono sh-chip">{{ s.SAccount }}</span>
-                    </div>
+            <!-- 股东号按市场分组 -->
+            <div class="detail-block">
+              <div class="detail-title">
+                <n-icon :component="SwapHorizontalOutline" :color="accent" />
+                股东号（按市场）
+              </div>
+              <div v-if="sharesByMarket.length" class="market-list">
+                <div v-for="m in sharesByMarket" :key="m.market" class="market-item">
+                  <div class="market-head">
+                    <n-tag
+                      size="small"
+                      round
+                      :bordered="false"
+                      :type="m.market === 1 ? 'info' : 'success'"
+                    >
+                      {{ m.label }}
+                    </n-tag>
+                    <span class="text-muted" style="font-size: 12px">{{ m.list.length }} 个股东号</span>
+                  </div>
+                  <div class="market-body">
+                    <span v-for="s in m.list" :key="s.SAccount" class="mono sh-chip">{{ s.SAccount }}</span>
                   </div>
                 </div>
-                <div v-else class="text-muted" style="font-size: 13px">
-                  该账号没有股东号（现场 <code>acc-010110018838_7_6</code> 的 shareHolders 就是空数组）。
-                </div>
               </div>
-            </n-tab-pane>
-
-            <n-tab-pane name="template">
-              <template #tab>报文模板</template>
-              <div class="json-head">
-                <n-icon :component="CodeSlashOutline" :color="accent" />
-                <span>
-                  照 <code>请求接口字段.txt</code> 的协议结构生成，账号信息已按当前账号填好；
-                  <b>密码用占位符</b>，页面上不会填真实密码。
-                </span>
+              <div v-else class="text-muted" style="font-size: 13px">
+                该账号没有股东号（现场 <code>acc-010110018838_7_6</code> 的 shareHolders 就是空数组）。
               </div>
-
-              <div class="tpl-block">
-                <div class="tpl-head">
-                  <span class="mono">acc_sign</span>
-                  <n-button size="tiny" quaternary @click="copyText(signTemplate, 'acc_sign 模板')">
-                    <template #icon>
-                      <n-icon :component="CopyOutline" />
-                    </template>
-                    复制
-                  </n-button>
-                </div>
-                <n-code :code="signTemplate" language="json" show-line-numbers word-wrap />
-              </div>
-
-              <div class="tpl-block">
-                <div class="tpl-head">
-                  <span class="mono">acc_update</span>
-                  <n-button size="tiny" quaternary @click="copyText(updateTemplate, 'acc_update 模板')">
-                    <template #icon>
-                      <n-icon :component="CopyOutline" />
-                    </template>
-                    复制
-                  </n-button>
-                </div>
-                <n-code :code="updateTemplate" language="json" show-line-numbers word-wrap />
-              </div>
-            </n-tab-pane>
-          </n-tabs>
-
-          <div class="detail-note">
-            <n-icon :component="KeyOutline" :color="accent" />
-            <div>
-              签署与更新都<b>需要加密并编码</b>（文档注明）。
-              <code>Passwd</code> / <code>TradePwd</code> 属于敏感字段，后台不提供查看。
             </div>
-          </div>
-        </template>
+          </n-tab-pane>
 
-        <template #footer>
-          <div class="drawer-footer">
-            <n-button size="small" type="primary" @click="handleSign">
-              <template #icon>
-                <n-icon :component="CreateOutline" />
-              </template>
-              {{ active?.signed ? '重新签署' : '签署' }}
-            </n-button>
-            <n-button size="small" @click="handleLogout">
-              <template #icon>
-                <n-icon :component="AlertCircleOutline" />
-              </template>
-              登出
-            </n-button>
-            <div class="spacer" />
-            <n-button size="small" @click="showDetail = false">关闭</n-button>
+          <n-tab-pane name="template">
+            <template #tab>报文模板</template>
+            <div class="json-head">
+              <n-icon :component="CodeSlashOutline" :color="accent" />
+              <span>
+                照 <code>请求接口字段.txt</code> 的协议结构生成，账号信息已按当前账号填好；
+                <b>密码用占位符</b>，页面上不会填真实密码。
+              </span>
+            </div>
+
+            <div class="tpl-block">
+              <div class="tpl-head">
+                <span class="mono">acc_sign</span>
+                <n-button size="tiny" quaternary @click="copyText(signTemplate, 'acc_sign 模板')">
+                  <template #icon>
+                    <n-icon :component="CopyOutline" />
+                  </template>
+                  复制
+                </n-button>
+              </div>
+              <n-code :code="signTemplate" language="json" show-line-numbers word-wrap />
+            </div>
+
+            <div class="tpl-block">
+              <div class="tpl-head">
+                <span class="mono">acc_update</span>
+                <n-button size="tiny" quaternary @click="copyText(updateTemplate, 'acc_update 模板')">
+                  <template #icon>
+                    <n-icon :component="CopyOutline" />
+                  </template>
+                  复制
+                </n-button>
+              </div>
+              <n-code :code="updateTemplate" language="json" show-line-numbers word-wrap />
+            </div>
+          </n-tab-pane>
+        </n-tabs>
+
+        <div class="detail-note">
+          <n-icon :component="KeyOutline" :color="accent" />
+          <div>
+            签署与更新都<b>需要加密并编码</b>（文档注明）。
+            <code>Passwd</code> / <code>TradePwd</code> 属于敏感字段，后台不提供查看。
           </div>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+        </div>
+      </template>
+
+      <template #footer>
+        <n-button size="small" type="primary" @click="handleSign">
+          <template #icon>
+            <n-icon :component="CreateOutline" />
+          </template>
+          {{ active?.signed ? '重新签署' : '签署' }}
+        </n-button>
+        <n-button size="small" @click="handleLogout">
+          <template #icon>
+            <n-icon :component="AlertCircleOutline" />
+          </template>
+          登出
+        </n-button>
+        <div class="spacer" />
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 
@@ -799,11 +793,6 @@ const protocolColumns: DataTableColumns<(typeof PROTOCOL_ROWS)[number]> = [
   color: var(--danger);
 }
 
-.drawer-footer {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
 
 .spacer {
   flex: 1;

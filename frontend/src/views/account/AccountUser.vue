@@ -8,8 +8,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -549,121 +547,119 @@ const shareholderColumns: DataTableColumns<Shareholder> = [
     </n-card>
 
     <!-- 账号详情 -->
-    <n-drawer v-model:show="showDetail" :width="680" placement="right">
-      <n-drawer-content :title="`账号详情 · ${active?.account ?? ''}`" closable>
-        <template v-if="active">
-          <n-tabs v-model:value="detailTab" type="line" size="small">
-            <n-tab-pane name="overview">
-              <template #tab>基本信息</template>
+    <AppDialog v-model:show="showDetail" :title="`账号详情 · ${active?.account ?? ''}`" :width="680" mask-closable>
+      <template v-if="active">
+        <n-tabs v-model:value="detailTab" type="line" size="small">
+          <n-tab-pane name="overview">
+            <template #tab>基本信息</template>
 
-              <n-descriptions :column="2" label-placement="top" size="small" bordered>
-                <n-descriptions-item label="唯一账号">
-                  <span class="mono">{{ active.account }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="用户账号">
-                  <span class="mono">{{ active.useraccount }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="客户名称">{{ orDash(active.name) }}</n-descriptions-item>
-                <n-descriptions-item label="交易账号">
-                  <span class="mono">{{ orDash(active.tradeAccount) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="账号类型">
-                  {{ active.accounttype != null ? ACCOUNT_TYPES[active.accounttype] ?? active.accounttype : '-' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="渠道">
-                  {{ active.accatt != null ? ACC_ATTS[active.accatt] ?? active.accatt : '-' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="营业部">
-                  <span class="mono">{{ orDash(active.branchNo) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="签署状态">
-                  <n-tag size="small" round :bordered="false" :type="active.signed ? 'success' : 'warning'">
-                    {{ active.signed ? '已签署' : '未签署' }}
+            <n-descriptions :column="2" label-placement="top" size="small" bordered>
+              <n-descriptions-item label="唯一账号">
+                <span class="mono">{{ active.account }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="用户账号">
+                <span class="mono">{{ active.useraccount }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="客户名称">{{ orDash(active.name) }}</n-descriptions-item>
+              <n-descriptions-item label="交易账号">
+                <span class="mono">{{ orDash(active.tradeAccount) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="账号类型">
+                {{ active.accounttype != null ? ACCOUNT_TYPES[active.accounttype] ?? active.accounttype : '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="渠道">
+                {{ active.accatt != null ? ACC_ATTS[active.accatt] ?? active.accatt : '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="营业部">
+                <span class="mono">{{ orDash(active.branchNo) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="签署状态">
+                <n-tag size="small" round :bordered="false" :type="active.signed ? 'success' : 'warning'">
+                  {{ active.signed ? '已签署' : '未签署' }}
+                </n-tag>
+              </n-descriptions-item>
+              <n-descriptions-item label="注册时间">{{ orDash(active.regtime) }}</n-descriptions-item>
+              <n-descriptions-item label="最后登录">{{ orDash(active.logintime) }}</n-descriptions-item>
+              <n-descriptions-item label="登录 IP">
+                <span class="mono">{{ orDash(active.loginIP) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="登录系统">{{ orDash(active.loginOS) }}</n-descriptions-item>
+              <n-descriptions-item label="密码">
+                <n-tag size="small" round :bordered="false" type="success">
+                  <template #icon>
+                    <n-icon :component="KeyOutline" />
+                  </template>
+                  已设置（不回显）
+                </n-tag>
+              </n-descriptions-item>
+              <n-descriptions-item label="数据来源">
+                <div class="src-cell">
+                  <n-tag size="tiny" round :bordered="false" :type="active.userId ? 'success' : 'default'">
+                    MySQL {{ active.userId ? '✓' : '✗' }}
                   </n-tag>
-                </n-descriptions-item>
-                <n-descriptions-item label="注册时间">{{ orDash(active.regtime) }}</n-descriptions-item>
-                <n-descriptions-item label="最后登录">{{ orDash(active.logintime) }}</n-descriptions-item>
-                <n-descriptions-item label="登录 IP">
-                  <span class="mono">{{ orDash(active.loginIP) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="登录系统">{{ orDash(active.loginOS) }}</n-descriptions-item>
-                <n-descriptions-item label="密码">
-                  <n-tag size="small" round :bordered="false" type="success">
-                    <template #icon>
-                      <n-icon :component="KeyOutline" />
-                    </template>
-                    已设置（不回显）
+                  <n-tag size="tiny" round :bordered="false" :type="active.hasRedis ? 'success' : 'default'">
+                    Redis {{ active.hasRedis ? '✓' : '✗' }}
                   </n-tag>
-                </n-descriptions-item>
-                <n-descriptions-item label="数据来源">
-                  <div class="src-cell">
-                    <n-tag size="tiny" round :bordered="false" :type="active.userId ? 'success' : 'default'">
-                      MySQL {{ active.userId ? '✓' : '✗' }}
-                    </n-tag>
-                    <n-tag size="tiny" round :bordered="false" :type="active.hasRedis ? 'success' : 'default'">
-                      Redis {{ active.hasRedis ? '✓' : '✗' }}
-                    </n-tag>
-                  </div>
-                </n-descriptions-item>
-              </n-descriptions>
+                </div>
+              </n-descriptions-item>
+            </n-descriptions>
 
-              <div class="detail-block">
-                <div class="detail-title">
-                  <n-icon :component="BusinessOutline" :color="accent" />
-                  股东号（{{ active.shareHolders.length }}）
-                </div>
-                <n-data-table
-                  v-if="active.shareHolders.length"
-                  :columns="shareholderColumns"
-                  :data="active.shareHolders"
-                  :bordered="false"
-                  size="small"
-                  :pagination="false"
-                />
-                <div v-else class="text-muted" style="font-size: 13px">
-                  该账号没有股东号。现场 <code>acc-010110018838_7_6</code> 的 shareHolders 就是空数组。
-                </div>
+            <div class="detail-block">
+              <div class="detail-title">
+                <n-icon :component="BusinessOutline" :color="accent" />
+                股东号（{{ active.shareHolders.length }}）
               </div>
-            </n-tab-pane>
+              <n-data-table
+                v-if="active.shareHolders.length"
+                :columns="shareholderColumns"
+                :data="active.shareHolders"
+                :bordered="false"
+                size="small"
+                :pagination="false"
+              />
+              <div v-else class="text-muted" style="font-size: 13px">
+                该账号没有股东号。现场 <code>acc-010110018838_7_6</code> 的 shareHolders 就是空数组。
+              </div>
+            </div>
+          </n-tab-pane>
 
-            <n-tab-pane name="redis">
-              <template #tab>Redis 实时态</template>
+          <n-tab-pane name="redis">
+            <template #tab>Redis 实时态</template>
 
-              <n-alert v-if="!active.hasRedis" type="info" :bordered="false">
-                该账号在 Redis 里没有对应的 <code>acc-*</code> 键。
+            <n-alert v-if="!active.hasRedis" type="info" :bordered="false">
+              该账号在 Redis 里没有对应的 <code>acc-*</code> 键。
+            </n-alert>
+
+            <template v-else>
+              <n-alert v-if="redisError" type="error" :bordered="false" style="margin-bottom: 12px">
+                读取失败：{{ redisError }}
               </n-alert>
 
-              <template v-else>
-                <n-alert v-if="redisError" type="error" :bordered="false" style="margin-bottom: 12px">
-                  读取失败：{{ redisError }}
-                </n-alert>
+              <div class="json-head">
+                <n-icon :component="CodeSlashOutline" :color="accent" />
+                <span>
+                  对应 Redis 键 <code>acc-{{ active.account }}</code> 的完整内容。
+                </span>
+              </div>
+              <n-code :code="prettyRedis" language="json" show-line-numbers word-wrap />
+            </template>
+          </n-tab-pane>
+        </n-tabs>
 
-                <div class="json-head">
-                  <n-icon :component="CodeSlashOutline" :color="accent" />
-                  <span>
-                    对应 Redis 键 <code>acc-{{ active.account }}</code> 的完整内容。
-                  </span>
-                </div>
-                <n-code :code="prettyRedis" language="json" show-line-numbers word-wrap />
-              </template>
-            </n-tab-pane>
-          </n-tabs>
-
-          <div class="detail-note">
-            <n-icon :component="InformationCircleOutline" :color="accent" />
-            <div>
-              MySQL 侧来自 <code>T_User</code>；Redis 侧来自
-              <code>acc-&lt;FAccount&gt;_&lt;AccountType&gt;_&lt;AccAtt&gt;</code>。
-              现场多数账号只在 Redis 里，<code>T_User</code> 只有 1 行。
-            </div>
+        <div class="detail-note">
+          <n-icon :component="InformationCircleOutline" :color="accent" />
+          <div>
+            MySQL 侧来自 <code>T_User</code>；Redis 侧来自
+            <code>acc-&lt;FAccount&gt;_&lt;AccountType&gt;_&lt;AccAtt&gt;</code>。
+            现场多数账号只在 Redis 里，<code>T_User</code> 只有 1 行。
           </div>
-        </template>
+        </div>
+      </template>
 
-        <template #footer>
-          <n-button size="small" @click="showDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+      <template #footer>
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 

@@ -7,8 +7,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -884,85 +882,83 @@ const isActiveOnline = computed(() => {
     </n-card>
 
     <!-- 节点详情 -->
-    <n-drawer v-model:show="showDetail" :width="560" placement="right">
-      <n-drawer-content :title="`节点详情 · ${active?.ip ?? ''}`" closable>
-        <template v-if="active">
-          <n-descriptions :column="1" label-placement="left" size="small" bordered>
-            <n-descriptions-item label="节点 ID">
-              <span class="mono">{{ active.id }}</span>
-              <span class="text-muted" style="margin-left: 8px; font-size: 12px">（现场会重复，非唯一键）</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="IP 地址">
-              <span class="mono">{{ active.ip }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="MAC">
-              <span class="mono">{{ active.mac }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="状态">
-              <!--
-                真实态优先用后端给的 online（与汇总卡同一口径，页面自算那份会随时间跳变，
-                两者可能显示不一致）；演示态没有该字段时退回本地判定。
-              -->
-              <n-tag
-                size="small"
-                round
-                :bordered="false"
-                :type="isActiveOnline ? 'success' : active.enable ? 'error' : 'default'"
-              >
-                {{ isActiveOnline ? '在线' : active.enable ? '离线' : '停用' }}
-              </n-tag>
-            </n-descriptions-item>
-            <n-descriptions-item label="最后活跃">
-              {{ active['last-active-time'] }}
-              <span class="text-muted" style="margin-left: 6px">{{ relativeTime(active.lastActiveTimeLong) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="心跳间隔">
-              {{ heartbeatAge }} 秒前
-            </n-descriptions-item>
-            <n-descriptions-item label="来源实例">
-              <span class="mono">{{ active.instance ?? '-' }}</span>
-              <span class="text-muted" style="margin-left: 8px; font-size: 12px">
-                （数组下标 {{ active.arrayIndex ?? '-' }}；同一键在多个库上各存一份且内容不同）
-              </span>
-            </n-descriptions-item>
-            <n-descriptions-item label="承载账号数">
-              {{ nodeAccounts.length }} 个（按 id 匹配，因 id 会重复仅供参考）
-            </n-descriptions-item>
-          </n-descriptions>
-
-          <div class="detail-block">
-            <div class="detail-title">
-              <n-icon :component="PersonOutline" :color="accent" />
-              该节点上的账号
-            </div>
-            <n-data-table
-              :columns="nodeAccountColumns"
-              :data="nodeAccounts"
-              :bordered="false"
+    <AppDialog v-model:show="showDetail" :title="`节点详情 · ${active?.ip ?? ''}`" :width="560" mask-closable>
+      <template v-if="active">
+        <n-descriptions :column="1" label-placement="left" size="small" bordered>
+          <n-descriptions-item label="节点 ID">
+            <span class="mono">{{ active.id }}</span>
+            <span class="text-muted" style="margin-left: 8px; font-size: 12px">（现场会重复，非唯一键）</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="IP 地址">
+            <span class="mono">{{ active.ip }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="MAC">
+            <span class="mono">{{ active.mac }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="状态">
+            <!--
+              真实态优先用后端给的 online（与汇总卡同一口径，页面自算那份会随时间跳变，
+              两者可能显示不一致）；演示态没有该字段时退回本地判定。
+            -->
+            <n-tag
               size="small"
-              :pagination="false"
-              :max-height="240"
-            />
-          </div>
+              round
+              :bordered="false"
+              :type="isActiveOnline ? 'success' : active.enable ? 'error' : 'default'"
+            >
+              {{ isActiveOnline ? '在线' : active.enable ? '离线' : '停用' }}
+            </n-tag>
+          </n-descriptions-item>
+          <n-descriptions-item label="最后活跃">
+            {{ active['last-active-time'] }}
+            <span class="text-muted" style="margin-left: 6px">{{ relativeTime(active.lastActiveTimeLong) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="心跳间隔">
+            {{ heartbeatAge }} 秒前
+          </n-descriptions-item>
+          <n-descriptions-item label="来源实例">
+            <span class="mono">{{ active.instance ?? '-' }}</span>
+            <span class="text-muted" style="margin-left: 8px; font-size: 12px">
+              （数组下标 {{ active.arrayIndex ?? '-' }}；同一键在多个库上各存一份且内容不同）
+            </span>
+          </n-descriptions-item>
+          <n-descriptions-item label="承载账号数">
+            {{ nodeAccounts.length }} 个（按 id 匹配，因 id 会重复仅供参考）
+          </n-descriptions-item>
+        </n-descriptions>
 
-          <div class="detail-note">
-            <n-icon :component="SwapHorizontalOutline" :color="accent" />
-            <div>
-              数据对应 Redis 键 <code>traderserver</code>；账号的分配关系存在
-              <code>acc-&lt;账号&gt;</code> 键的 <code>traderserver</code> 字段里。
-              心跳阈值 {{ SERVER_OFFLINE_AFTER_SEC }} 秒（<code>tradeserver_beat</code> 频道）。
-              <br />
-              <b>本页只读</b>：不提供启停。现场该键里的 <code>id</code> 与 <code>mac</code>
-              都可能重复，按它们猜着写回容易改到一台并不属于本次范围的机器。
-            </div>
+        <div class="detail-block">
+          <div class="detail-title">
+            <n-icon :component="PersonOutline" :color="accent" />
+            该节点上的账号
           </div>
-        </template>
+          <n-data-table
+            :columns="nodeAccountColumns"
+            :data="nodeAccounts"
+            :bordered="false"
+            size="small"
+            :pagination="false"
+            :max-height="240"
+          />
+        </div>
 
-        <template #footer>
-          <n-button size="small" @click="showDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+        <div class="detail-note">
+          <n-icon :component="SwapHorizontalOutline" :color="accent" />
+          <div>
+            数据对应 Redis 键 <code>traderserver</code>；账号的分配关系存在
+            <code>acc-&lt;账号&gt;</code> 键的 <code>traderserver</code> 字段里。
+            心跳阈值 {{ SERVER_OFFLINE_AFTER_SEC }} 秒（<code>tradeserver_beat</code> 频道）。
+            <br />
+            <b>本页只读</b>：不提供启停。现场该键里的 <code>id</code> 与 <code>mac</code>
+            都可能重复，按它们猜着写回容易改到一台并不属于本次范围的机器。
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 

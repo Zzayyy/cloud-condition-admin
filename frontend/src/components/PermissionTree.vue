@@ -505,8 +505,18 @@ function renderSuffix(info: { option: TreeOption }): VNodeChild {
   color: var(--text-secondary);
 }
 
+/*
+ * 树改为内滚（而不是把整个编辑面板撑高）。
+ *
+ * 高度从 520px 降到 380px：这个组件现在只在「角色与权限」的**弹窗**里用，
+ * 而弹窗自身已经是一个滚动容器（`AppDialog` 的 `max-height` + `content-scrollable`，
+ * 超高的部分在内容区滚）。树的 520px 叠上表单与提示后，
+ * 会出现「弹窗滚一层、树再滚一层」的双层滚动 ——
+ * 鼠标停在树上时滚的是树，停在树外滚的是弹窗，很难用。
+ * 降到 380px 让整块内容大致落在弹窗可视区内，只有权限树自己滚。
+ */
 .perm-tree-scroll {
-  max-height: 520px;
+  max-height: 380px;
   padding: 6px 2px;
   overflow: auto;
   border: 1px solid var(--border);

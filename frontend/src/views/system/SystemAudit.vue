@@ -9,8 +9,6 @@ import {
   NDatePicker,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -1387,150 +1385,146 @@ function openLoginDetail(row: AdminLoginLog) {
       </n-card>
     </template>
 
-    <!-- ============================ 审计详情抽屉 ============================ -->
-    <n-drawer v-model:show="showAuditDetail" :width="620" placement="right">
-      <n-drawer-content :title="`审计详情 #${activeAudit?.id ?? ''}`" closable>
-        <template v-if="activeAudit">
-          <n-descriptions :column="1" label-placement="left" size="small" bordered>
-            <n-descriptions-item label="记录 ID">
-              <span class="mono">{{ activeAudit.id }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="操作时间">
-              {{ orDash(activeAudit.createdAt) }}
-            </n-descriptions-item>
-            <n-descriptions-item label="操作人">
-              <span class="mono">{{ orDash(activeAudit.operator) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="级别">
-              <n-tag
-                size="small"
-                round
-                :bordered="false"
-                :type="levelTagType(activeAudit.level)"
-              >
-                {{ LEVEL_LABEL[activeAudit.level] }}
-              </n-tag>
-            </n-descriptions-item>
-            <n-descriptions-item label="动作名">
-              {{ orDash(activeAudit.actionLabel) }}
-            </n-descriptions-item>
-            <n-descriptions-item label="动作键">
-              <span class="mono">{{ activeAudit.action }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="归属模块">
-              {{ MODULE_LABEL[activeAudit.module] ?? activeAudit.module }}（{{ activeAudit.module }}）
-            </n-descriptions-item>
-            <n-descriptions-item label="目标">
-              <span class="mono">{{ orDash(activeAudit.target) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="结果">
-              <n-tag
-                size="small"
-                round
-                :bordered="false"
-                :type="resultTagType(activeAudit.result === 'success')"
-              >
-                {{ activeAudit.result === 'success' ? '成功' : '失败' }}
-              </n-tag>
-            </n-descriptions-item>
-            <n-descriptions-item label="耗时">
-              {{ activeAudit.costMs === null ? '-' : `${activeAudit.costMs} ms` }}
-            </n-descriptions-item>
-            <n-descriptions-item label="来源 IP">
-              <span class="mono">{{ orDash(activeAudit.ip) }}</span>
-            </n-descriptions-item>
-          </n-descriptions>
+    <!-- ============================ 审计详情弹窗 ============================ -->
+    <AppDialog v-model:show="showAuditDetail" :title="`审计详情 #${activeAudit?.id ?? ''}`" :width="620" mask-closable>
+      <template v-if="activeAudit">
+        <n-descriptions :column="1" label-placement="left" size="small" bordered>
+          <n-descriptions-item label="记录 ID">
+            <span class="mono">{{ activeAudit.id }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="操作时间">
+            {{ orDash(activeAudit.createdAt) }}
+          </n-descriptions-item>
+          <n-descriptions-item label="操作人">
+            <span class="mono">{{ orDash(activeAudit.operator) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="级别">
+            <n-tag
+              size="small"
+              round
+              :bordered="false"
+              :type="levelTagType(activeAudit.level)"
+            >
+              {{ LEVEL_LABEL[activeAudit.level] }}
+            </n-tag>
+          </n-descriptions-item>
+          <n-descriptions-item label="动作名">
+            {{ orDash(activeAudit.actionLabel) }}
+          </n-descriptions-item>
+          <n-descriptions-item label="动作键">
+            <span class="mono">{{ activeAudit.action }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="归属模块">
+            {{ MODULE_LABEL[activeAudit.module] ?? activeAudit.module }}（{{ activeAudit.module }}）
+          </n-descriptions-item>
+          <n-descriptions-item label="目标">
+            <span class="mono">{{ orDash(activeAudit.target) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="结果">
+            <n-tag
+              size="small"
+              round
+              :bordered="false"
+              :type="resultTagType(activeAudit.result === 'success')"
+            >
+              {{ activeAudit.result === 'success' ? '成功' : '失败' }}
+            </n-tag>
+          </n-descriptions-item>
+          <n-descriptions-item label="耗时">
+            {{ activeAudit.costMs === null ? '-' : `${activeAudit.costMs} ms` }}
+          </n-descriptions-item>
+          <n-descriptions-item label="来源 IP">
+            <span class="mono">{{ orDash(activeAudit.ip) }}</span>
+          </n-descriptions-item>
+        </n-descriptions>
 
-          <div class="detail-block">
-            <div class="detail-title">
-              <n-icon :component="DocumentTextOutline" :color="accent" />
-              message 原文
-            </div>
-            <div class="audit-msg">
-              <n-code :code="activeAudit.message ?? '（本条没有说明）'" language="text" word-wrap />
-            </div>
-            <div class="text-muted" style="font-size: 12px; margin-top: 6px">
-              说明按原样展示，不做任何加工 —— 失败原因不美化。
-            </div>
+        <div class="detail-block">
+          <div class="detail-title">
+            <n-icon :component="DocumentTextOutline" :color="accent" />
+            message 原文
           </div>
-
-          <div class="detail-note">
-            <n-icon :component="KeyOutline" :color="accent" />
-            <div>
-              动作键与 <code>src/config/permissions.ts</code> 的权限键<b>同源</b>
-              （<code>action:&lt;模块&gt;:&lt;动作&gt;</code>），所以审计筛选与权限树能对上。
-              <template v-if="isPermissionKey(activeAudit.action)">
-                本动作在权限表里存在<template v-if="dangerousOf(activeAudit.action)">
-                ，且标记为<b>高危</b>（需二次确认 + 写审计）</template>。
-              </template>
-              <template v-else>
-                本动作键未出现在权限表（例如 <code>system:login</code> /
-                <code>system:connection</code>），属于「需要留痕但没有独立权限点」的登记型审计。
-              </template>
-              <br />
-              记录来自管理端审计表 <code>T_AdminAudit</code>。
-              导出审计日志本身也是一个审计动作（<code>action:system-audit:export</code>）。
-            </div>
+          <div class="audit-msg">
+            <n-code :code="activeAudit.message ?? '（本条没有说明）'" language="text" word-wrap />
           </div>
-        </template>
-
-        <template #footer>
-          <n-button size="small" @click="showAuditDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
-
-    <!-- ========================== 登录日志详情抽屉 ========================== -->
-    <n-drawer v-model:show="showLoginDetail" :width="560" placement="right">
-      <n-drawer-content :title="`登录记录 #${activeLogin?.id ?? ''}`" closable>
-        <template v-if="activeLogin">
-          <n-descriptions :column="1" label-placement="left" size="small" bordered>
-            <n-descriptions-item label="记录 ID">
-              <span class="mono">{{ activeLogin.id }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="账号">
-              <span class="mono">{{ orDash(activeLogin.username) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="登录时间">
-              {{ orDash(activeLogin.loginTime) }}
-            </n-descriptions-item>
-            <n-descriptions-item label="结果">
-              <n-tag
-                size="small"
-                round
-                :bordered="false"
-                :type="resultTagType(activeLogin.success)"
-              >
-                {{ activeLogin.success ? '成功' : '失败' }}
-              </n-tag>
-            </n-descriptions-item>
-            <n-descriptions-item label="来源 IP">
-              <span class="mono">{{ orDash(activeLogin.loginIP) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="客户端 / OS">
-              {{ orDash(activeLogin.loginOS) }}
-            </n-descriptions-item>
-            <n-descriptions-item label="说明">
-              {{ orDash(activeLogin.info) }}
-            </n-descriptions-item>
-          </n-descriptions>
-
-          <div class="detail-note">
-            <n-icon :component="WarningOutline" :color="accent" />
-            <div>
-              这是<b>管理端</b>登录日志（<code>T_AdminLoginLog</code>）。
-              云单客户登录日志是 <code>T_UserLog</code>（19.1 万行，
-              <code>LogIP</code> / <code>LogMAC</code> / <code>LogOS</code> 三列全 NULL），
-              在「账户与用户 / 登录日志」看，<b>不要在这里找客户账号的登录记录</b>。
-            </div>
+          <div class="text-muted" style="font-size: 12px; margin-top: 6px">
+            说明按原样展示，不做任何加工 —— 失败原因不美化。
           </div>
-        </template>
+        </div>
 
-        <template #footer>
-          <n-button size="small" @click="showLoginDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+        <div class="detail-note">
+          <n-icon :component="KeyOutline" :color="accent" />
+          <div>
+            动作键与 <code>src/config/permissions.ts</code> 的权限键<b>同源</b>
+            （<code>action:&lt;模块&gt;:&lt;动作&gt;</code>），所以审计筛选与权限树能对上。
+            <template v-if="isPermissionKey(activeAudit.action)">
+              本动作在权限表里存在<template v-if="dangerousOf(activeAudit.action)">
+              ，且标记为<b>高危</b>（需二次确认 + 写审计）</template>。
+            </template>
+            <template v-else>
+              本动作键未出现在权限表（例如 <code>system:login</code> /
+              <code>system:connection</code>），属于「需要留痕但没有独立权限点」的登记型审计。
+            </template>
+            <br />
+            记录来自管理端审计表 <code>T_AdminAudit</code>。
+            导出审计日志本身也是一个审计动作（<code>action:system-audit:export</code>）。
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <n-button size="small" @click="showAuditDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
+
+    <!-- ========================== 登录日志详情弹窗 ========================== -->
+    <AppDialog v-model:show="showLoginDetail" :title="`登录记录 #${activeLogin?.id ?? ''}`" :width="560" mask-closable>
+      <template v-if="activeLogin">
+        <n-descriptions :column="1" label-placement="left" size="small" bordered>
+          <n-descriptions-item label="记录 ID">
+            <span class="mono">{{ activeLogin.id }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="账号">
+            <span class="mono">{{ orDash(activeLogin.username) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="登录时间">
+            {{ orDash(activeLogin.loginTime) }}
+          </n-descriptions-item>
+          <n-descriptions-item label="结果">
+            <n-tag
+              size="small"
+              round
+              :bordered="false"
+              :type="resultTagType(activeLogin.success)"
+            >
+              {{ activeLogin.success ? '成功' : '失败' }}
+            </n-tag>
+          </n-descriptions-item>
+          <n-descriptions-item label="来源 IP">
+            <span class="mono">{{ orDash(activeLogin.loginIP) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="客户端 / OS">
+            {{ orDash(activeLogin.loginOS) }}
+          </n-descriptions-item>
+          <n-descriptions-item label="说明">
+            {{ orDash(activeLogin.info) }}
+          </n-descriptions-item>
+        </n-descriptions>
+
+        <div class="detail-note">
+          <n-icon :component="WarningOutline" :color="accent" />
+          <div>
+            这是<b>管理端</b>登录日志（<code>T_AdminLoginLog</code>）。
+            云单客户登录日志是 <code>T_UserLog</code>（19.1 万行，
+            <code>LogIP</code> / <code>LogMAC</code> / <code>LogOS</code> 三列全 NULL），
+            在「账户与用户 / 登录日志」看，<b>不要在这里找客户账号的登录记录</b>。
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <n-button size="small" @click="showLoginDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 

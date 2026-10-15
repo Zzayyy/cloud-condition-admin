@@ -6,8 +6,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -411,61 +409,59 @@ const relatedTimeline = computed(() => {
     </n-card>
 
     <!-- 日志详情 -->
-    <n-drawer v-model:show="showDetail" :width="560" placement="right">
-      <n-drawer-content :title="`日志详情 #${active?.id ?? ''}`" closable>
-        <template v-if="active">
-          <n-descriptions :column="1" label-placement="left" size="small" bordered>
-            <n-descriptions-item label="发生时间">{{ orDash(active.OccurTIme) }}</n-descriptions-item>
-            <n-descriptions-item label="状态">
-              <n-tag size="small" round :bordered="false" :type="statusType(active.Status)">
-                {{ orDash(active.Status) }}
-              </n-tag>
-            </n-descriptions-item>
-            <n-descriptions-item label="条件单号">
-              <span class="mono">{{ orDash(active.Strategy) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="来源账号">
-              <span class="mono">{{ orDash(active.FromAccount) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="来源 IP">
-              <span class="mono">{{ orDash(active.FromIP) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="来源 MAC">
-              <span class="mono">{{ orDash(active.FromMac) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="日志内容">{{ orDash(active.Info) }}</n-descriptions-item>
-          </n-descriptions>
+    <AppDialog v-model:show="showDetail" :title="`日志详情 #${active?.id ?? ''}`" :width="560" mask-closable>
+      <template v-if="active">
+        <n-descriptions :column="1" label-placement="left" size="small" bordered>
+          <n-descriptions-item label="发生时间">{{ orDash(active.OccurTIme) }}</n-descriptions-item>
+          <n-descriptions-item label="状态">
+            <n-tag size="small" round :bordered="false" :type="statusType(active.Status)">
+              {{ orDash(active.Status) }}
+            </n-tag>
+          </n-descriptions-item>
+          <n-descriptions-item label="条件单号">
+            <span class="mono">{{ orDash(active.Strategy) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="来源账号">
+            <span class="mono">{{ orDash(active.FromAccount) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="来源 IP">
+            <span class="mono">{{ orDash(active.FromIP) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="来源 MAC">
+            <span class="mono">{{ orDash(active.FromMac) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="日志内容">{{ orDash(active.Info) }}</n-descriptions-item>
+        </n-descriptions>
 
-          <div v-if="relatedTimeline.length > 1" class="timeline-block">
-            <div class="timeline-title">
-              <n-icon :component="TimeOutline" :color="accent" />
-              该条件单的轨迹（当前页 {{ relatedTimeline.length }} 条）
-            </div>
-            <n-timeline>
-              <n-timeline-item
-                v-for="item in relatedTimeline"
-                :key="item.id"
-                :type="statusType(item.Status)"
-                :title="item.Status ?? ''"
-                :content="`${shortDateTime(item.OccurTIme)} · ${item.Info ?? ''}`"
-              />
-            </n-timeline>
+        <div v-if="relatedTimeline.length > 1" class="timeline-block">
+          <div class="timeline-title">
+            <n-icon :component="TimeOutline" :color="accent" />
+            该条件单的轨迹（当前页 {{ relatedTimeline.length }} 条）
           </div>
+          <n-timeline>
+            <n-timeline-item
+              v-for="item in relatedTimeline"
+              :key="item.id"
+              :type="statusType(item.Status)"
+              :title="item.Status ?? ''"
+              :content="`${shortDateTime(item.OccurTIme)} · ${item.Info ?? ''}`"
+            />
+          </n-timeline>
+        </div>
 
-          <div class="detail-note">
-            <n-icon :component="InformationCircleOutline" :color="accent" />
-            <div>
-              数据来自 MySQL 表 <code>T_StrategyLog</code>；
-              条件单号对应 <code>Strategy</code> 字段，可据此回到「条件单策略」页查看完整明细。
-            </div>
+        <div class="detail-note">
+          <n-icon :component="InformationCircleOutline" :color="accent" />
+          <div>
+            数据来自 MySQL 表 <code>T_StrategyLog</code>；
+            条件单号对应 <code>Strategy</code> 字段，可据此回到「条件单策略」页查看完整明细。
           </div>
-        </template>
+        </div>
+      </template>
 
-        <template #footer>
-          <n-button size="small" @click="showDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+      <template #footer>
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 

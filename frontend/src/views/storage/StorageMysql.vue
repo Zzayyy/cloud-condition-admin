@@ -8,8 +8,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -690,118 +688,114 @@ function useSample(s: string) {
       </div>
     </n-card>
 
-    <!-- 表结构抽屉 -->
-    <n-drawer v-model:show="showSchema" :width="780" placement="right">
-      <n-drawer-content :title="`表结构 · ${activeTable?.name ?? ''}`" closable>
-        <template v-if="activeTable">
-          <n-alert v-if="schemaError" type="error" :bordered="false" style="margin-bottom: 12px">
-            读取失败：{{ schemaError }}
-          </n-alert>
-
-          <n-descriptions :column="3" label-placement="top" size="small" bordered>
-            <n-descriptions-item label="表名">
-              <span class="mono">{{ activeTable.name }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="类型">
-              {{ activeTable.type === 'VIEW' ? '视图' : '基础表' }}
-            </n-descriptions-item>
-            <n-descriptions-item label="引擎">{{ activeTable.engine ?? '—' }}</n-descriptions-item>
-            <n-descriptions-item label="真实行数">
-              <span class="num">{{ activeTable.exactRows !== null && activeTable.exactRows !== undefined ? thousands(activeTable.exactRows) : '—' }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="近似行数">
-              {{ activeTable.approxRows !== null && activeTable.approxRows !== undefined ? thousands(activeTable.approxRows) : '—' }}
-            </n-descriptions-item>
-            <n-descriptions-item label="数据大小">
-              {{ activeTable.dataLength ? (activeTable.dataLength / 1024).toFixed(0) + ' KB' : '—' }}
-            </n-descriptions-item>
-          </n-descriptions>
-
-          <n-tabs v-model:value="schemaTab" type="line" size="small" style="margin-top: 16px">
-            <n-tab-pane name="columns">
-              <template #tab>字段（{{ schema?.columns.length ?? 0 }}）</template>
-              <n-data-table
-                :columns="columnColumns"
-                :data="schema?.columns ?? []"
-                :loading="schemaLoading"
-                :bordered="false"
-                size="small"
-                :pagination="false"
-                :max-height="420"
-                :scroll-x="820"
-              />
-            </n-tab-pane>
-
-            <n-tab-pane name="indexes">
-              <template #tab>索引（{{ schema?.indexes.length ?? 0 }}）</template>
-              <n-data-table
-                :columns="indexColumns"
-                :data="schema?.indexes ?? []"
-                :bordered="false"
-                size="small"
-                :pagination="false"
-              />
-              <div v-if="schema && schema.indexes.length <= 1" class="detail-note" style="margin-top: 14px">
-                <n-icon :component="WarningOutline" color="#dd7a15" />
-                <div>
-                  该表<b>除主键外没有其它索引</b>。现场多数表都是这样，
-                  查询时要注意全表扫描的代价，务必带 LIMIT。
-                </div>
-              </div>
-            </n-tab-pane>
-
-            <n-tab-pane name="ddl">
-              <template #tab>DDL</template>
-              <n-code :code="schema?.ddl ?? ''" language="sql" show-line-numbers word-wrap />
-            </n-tab-pane>
-          </n-tabs>
-        </template>
-
-        <template #footer>
-          <n-button size="small" @click="showSchema = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
-
-    <!-- 表数据抽屉 -->
-    <n-drawer v-model:show="showData" :width="900" placement="right">
-      <n-drawer-content :title="`表数据 · ${dataTable?.name ?? ''}`" closable>
-        <n-alert v-if="dataError" type="error" :bordered="false" style="margin-bottom: 12px">
-          读取失败：{{ dataError }}
+    <!-- 表结构弹窗 -->
+    <AppDialog v-model:show="showSchema" :title="`表结构 · ${activeTable?.name ?? ''}`" :width="780" mask-closable>
+      <template v-if="activeTable">
+        <n-alert v-if="schemaError" type="error" :bordered="false" style="margin-bottom: 12px">
+          读取失败：{{ schemaError }}
         </n-alert>
 
-        <div class="json-head">
-          <n-icon :component="InformationCircleOutline" :color="accent" />
-          <span>
-            分页读取 <code>{{ DATABASE }}.{{ dataTable?.name }}</code>，共
-            <b>{{ thousands(dataTotal) }}</b> 行。
-            <template v-if="!dataRows.length && !dataLoading">
-              该表当前没有数据（现场多数业务表就是 0 行）。
-            </template>
-          </span>
-        </div>
+        <n-descriptions :column="3" label-placement="top" size="small" bordered>
+          <n-descriptions-item label="表名">
+            <span class="mono">{{ activeTable.name }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="类型">
+            {{ activeTable.type === 'VIEW' ? '视图' : '基础表' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="引擎">{{ activeTable.engine ?? '—' }}</n-descriptions-item>
+          <n-descriptions-item label="真实行数">
+            <span class="num">{{ activeTable.exactRows !== null && activeTable.exactRows !== undefined ? thousands(activeTable.exactRows) : '—' }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="近似行数">
+            {{ activeTable.approxRows !== null && activeTable.approxRows !== undefined ? thousands(activeTable.approxRows) : '—' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="数据大小">
+            {{ activeTable.dataLength ? (activeTable.dataLength / 1024).toFixed(0) + ' KB' : '—' }}
+          </n-descriptions-item>
+        </n-descriptions>
 
-        <n-data-table
-          :columns="dataColumns"
-          :data="dataRows"
-          :loading="dataLoading"
-          :bordered="false"
-          size="small"
-          :scroll-x="1000"
-          :max-height="520"
-          :pagination="{
-            page: dataPage,
-            pageSize: dataPageSize,
-            itemCount: dataTotal,
-            pageSizes: [20, 50, 100],
-            showSizePicker: true,
-            onUpdatePage: (p: number) => { dataPage = p; fetchTableData() },
-            onUpdatePageSize: (s: number) => { dataPageSize = s; dataPage = 1; fetchTableData() },
-            prefix: ({ itemCount }: { itemCount: number }) => `共 ${itemCount} 行`,
-          }"
-        />
-      </n-drawer-content>
-    </n-drawer>
+        <n-tabs v-model:value="schemaTab" type="line" size="small" style="margin-top: 16px">
+          <n-tab-pane name="columns">
+            <template #tab>字段（{{ schema?.columns.length ?? 0 }}）</template>
+            <n-data-table
+              :columns="columnColumns"
+              :data="schema?.columns ?? []"
+              :loading="schemaLoading"
+              :bordered="false"
+              size="small"
+              :pagination="false"
+              :max-height="420"
+              :scroll-x="820"
+            />
+          </n-tab-pane>
+
+          <n-tab-pane name="indexes">
+            <template #tab>索引（{{ schema?.indexes.length ?? 0 }}）</template>
+            <n-data-table
+              :columns="indexColumns"
+              :data="schema?.indexes ?? []"
+              :bordered="false"
+              size="small"
+              :pagination="false"
+            />
+            <div v-if="schema && schema.indexes.length <= 1" class="detail-note" style="margin-top: 14px">
+              <n-icon :component="WarningOutline" color="#dd7a15" />
+              <div>
+                该表<b>除主键外没有其它索引</b>。现场多数表都是这样，
+                查询时要注意全表扫描的代价，务必带 LIMIT。
+              </div>
+            </div>
+          </n-tab-pane>
+
+          <n-tab-pane name="ddl">
+            <template #tab>DDL</template>
+            <n-code :code="schema?.ddl ?? ''" language="sql" show-line-numbers word-wrap />
+          </n-tab-pane>
+        </n-tabs>
+      </template>
+
+      <template #footer>
+        <n-button size="small" @click="showSchema = false">关闭</n-button>
+      </template>
+    </AppDialog>
+
+    <!-- 表数据弹窗 -->
+    <AppDialog v-model:show="showData" :title="`表数据 · ${dataTable?.name ?? ''}`" :width="900" mask-closable>
+      <n-alert v-if="dataError" type="error" :bordered="false" style="margin-bottom: 12px">
+        读取失败：{{ dataError }}
+      </n-alert>
+
+      <div class="json-head">
+        <n-icon :component="InformationCircleOutline" :color="accent" />
+        <span>
+          分页读取 <code>{{ DATABASE }}.{{ dataTable?.name }}</code>，共
+          <b>{{ thousands(dataTotal) }}</b> 行。
+          <template v-if="!dataRows.length && !dataLoading">
+            该表当前没有数据（现场多数业务表就是 0 行）。
+          </template>
+        </span>
+      </div>
+
+      <n-data-table
+        :columns="dataColumns"
+        :data="dataRows"
+        :loading="dataLoading"
+        :bordered="false"
+        size="small"
+        :scroll-x="1000"
+        :max-height="520"
+        :pagination="{
+          page: dataPage,
+          pageSize: dataPageSize,
+          itemCount: dataTotal,
+          pageSizes: [20, 50, 100],
+          showSizePicker: true,
+          onUpdatePage: (p: number) => { dataPage = p; fetchTableData() },
+          onUpdatePageSize: (s: number) => { dataPageSize = s; dataPage = 1; fetchTableData() },
+          prefix: ({ itemCount }: { itemCount: number }) => `共 ${itemCount} 行`,
+        }"
+      />
+    </AppDialog>
   </div>
 </template>
 

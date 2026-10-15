@@ -5,8 +5,6 @@ import {
   NButton,
   NCard,
   NDataTable,
-  NDrawer,
-  NDrawerContent,
   NForm,
   NFormItem,
   NGi,
@@ -600,82 +598,84 @@ const columns: DataTableColumns<AdminRole> = [
     </div>
 
     <!-- 新建 / 编辑角色 -->
-    <n-drawer v-model:show="showForm" :width="640" placement="right">
-      <n-drawer-content :title="isCreating ? '新建角色' : `编辑角色 · ${form.code}`" closable>
-        <n-alert v-if="editingBuiltin" type="info" :bordered="false" size="small" style="margin-bottom: 14px">
-          <template #header>这是内置角色</template>
-          内置角色的 <code>code</code> 与名称<b>不可修改</b>（审计要靠 code 认人，改名会让审计记录对不上）。
-          权限仍可调整，但请谨慎：<b>改权限等于改所有用这个角色的人的可见范围</b>。
-        </n-alert>
+    <AppDialog
+      v-model:show="showForm"
+      :title="isCreating ? '新建角色' : `编辑角色 · ${form.code}`"
+      :width="640"
+      :mask-closable="false"
+      :close-on-esc="false"
+    >
+      <n-alert v-if="editingBuiltin" type="info" :bordered="false" size="small" style="margin-bottom: 14px">
+        <template #header>这是内置角色</template>
+        内置角色的 <code>code</code> 与名称<b>不可修改</b>（审计要靠 code 认人，改名会让审计记录对不上）。
+        权限仍可调整，但请谨慎：<b>改权限等于改所有用这个角色的人的可见范围</b>。
+      </n-alert>
 
-        <n-form label-placement="top" size="small">
-          <n-form-item label="角色编码 code">
-            <n-input
-              v-model:value="form.code"
-              placeholder="例：ops_readonly"
-              :disabled="!isCreating"
-              :input-props="{ autocapitalize: 'off', autocomplete: 'off' }"
-            />
-          </n-form-item>
-          <div class="field-hint">
-            <template v-if="isCreating">
-              小写字母开头，只能含小写字母、数字与下划线，长度 2~32。<b>创建后不可修改</b> ——
-              审计记录靠 code 认人，改名会让历史记录对不上。
-            </template>
-            <template v-else>角色编码创建后不可修改。</template>
-          </div>
-
-          <n-form-item label="角色名称">
-            <n-input
-              v-model:value="form.name"
-              placeholder="例：只读观察者"
-              :disabled="editingBuiltin"
-              maxlength="32"
-              show-count
-            />
-          </n-form-item>
-          <div v-if="editingBuiltin" class="field-hint">内置角色名称受保护，不可修改。</div>
-
-          <n-form-item label="说明">
-            <n-input
-              v-model:value="form.desc"
-              type="textarea"
-              placeholder="这个角色是干什么的、适合给谁用"
-              :autosize="{ minRows: 2, maxRows: 4 }"
-              maxlength="200"
-              show-count
-            />
-          </n-form-item>
-        </n-form>
-
-        <div class="form-section-title">
-          <n-icon :component="KeyOutline" :color="accent" />
-          权限（至少选一个）
+      <n-form label-placement="top" size="small">
+        <n-form-item label="角色编码 code">
+          <n-input
+            v-model:value="form.code"
+            placeholder="例：ops_readonly"
+            :disabled="!isCreating"
+            :input-props="{ autocapitalize: 'off', autocomplete: 'off' }"
+          />
+        </n-form-item>
+        <div class="field-hint">
+          <template v-if="isCreating">
+            小写字母开头，只能含小写字母、数字与下划线，长度 2~32。<b>创建后不可修改</b> ——
+            审计记录靠 code 认人，改名会让历史记录对不上。
+          </template>
+          <template v-else>角色编码创建后不可修改。</template>
         </div>
 
-        <n-alert v-if="editingWildcard" type="warning" :bordered="false" size="small" style="margin-bottom: 10px">
-          该角色是通配符 <code>*</code>，权限不由勾选决定；这里的勾选项不会写回角色。
-        </n-alert>
-        <PermissionTree
-          v-else
-          v-model:permissions="formPermissions"
-          :disabled="editingWildcard"
-          :color="accent"
-        />
+        <n-form-item label="角色名称">
+          <n-input
+            v-model:value="form.name"
+            placeholder="例：只读观察者"
+            :disabled="editingBuiltin"
+            maxlength="32"
+            show-count
+          />
+        </n-form-item>
+        <div v-if="editingBuiltin" class="field-hint">内置角色名称受保护，不可修改。</div>
 
-        <template #footer>
-          <div class="drawer-footer">
-            <n-button size="small" :disabled="saving" @click="showForm = false">取消</n-button>
-            <n-button size="small" type="primary" :loading="saving" @click="submitForm">
-              <template #icon>
-                <n-icon :component="SaveOutline" />
-              </template>
-              {{ isCreating ? '创建' : '保存' }}
-            </n-button>
-          </div>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+        <n-form-item label="说明">
+          <n-input
+            v-model:value="form.desc"
+            type="textarea"
+            placeholder="这个角色是干什么的、适合给谁用"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            maxlength="200"
+            show-count
+          />
+        </n-form-item>
+      </n-form>
+
+      <div class="form-section-title">
+        <n-icon :component="KeyOutline" :color="accent" />
+        权限（至少选一个）
+      </div>
+
+      <n-alert v-if="editingWildcard" type="warning" :bordered="false" size="small" style="margin-bottom: 10px">
+        该角色是通配符 <code>*</code>，权限不由勾选决定；这里的勾选项不会写回角色。
+      </n-alert>
+      <PermissionTree
+        v-else
+        v-model:permissions="formPermissions"
+        :disabled="editingWildcard"
+        :color="accent"
+      />
+
+      <template #footer>
+        <n-button size="small" :disabled="saving" @click="showForm = false">取消</n-button>
+        <n-button size="small" type="primary" :loading="saving" @click="submitForm">
+          <template #icon>
+            <n-icon :component="SaveOutline" />
+          </template>
+          {{ isCreating ? '创建' : '保存' }}
+        </n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 
@@ -739,11 +739,5 @@ const columns: DataTableColumns<AdminRole> = [
   margin: 6px 0 10px;
   font-size: 13px;
   font-weight: 600;
-}
-
-.drawer-footer {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
 }
 </style>

@@ -7,8 +7,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -608,90 +606,86 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
       />
     </n-card>
 
-    <!-- 明细抽屉 -->
-    <n-drawer v-model:show="showDetail" :width="640" placement="right">
-      <n-drawer-content :title="`条件单明细 · ${active?.id ?? ''}`" closable>
-        <template v-if="active">
-          <n-tabs v-model:value="detailTab" type="line" size="small">
-            <n-tab-pane name="basic">
-              <template #tab>基本信息</template>
-              <n-descriptions :column="2" label-placement="top" size="small" bordered>
-                <n-descriptions-item label="条件单号">
-                  <span class="mono">{{ active.id }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="账号">
-                  <span class="mono">{{ orDash(active.Account) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="用户账号">
-                  <span class="mono">{{ orDash(active.UserAccount) }}</span>
-                </n-descriptions-item>
-                <n-descriptions-item label="名称">{{ orDash(active.Name) }}</n-descriptions-item>
-                <n-descriptions-item label="类型">
-                  {{ active.Type != null ? CONDITIONAL_TYPES[active.Type as keyof typeof CONDITIONAL_TYPES] : '-' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="云单状态">
-                  {{ active.Mode != null ? CONDITIONAL_MODES[active.Mode as keyof typeof CONDITIONAL_MODES] : '-' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="触发状态">
-                  {{ active.Status === 1 ? '已触发' : '未触发' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="有效标志">
-                  {{ active.Flag != null ? CONDITIONAL_FLAGS[active.Flag as keyof typeof CONDITIONAL_FLAGS] : '-' }}
-                </n-descriptions-item>
-                <n-descriptions-item label="运行次数">{{ active.RunCount ?? 0 }}</n-descriptions-item>
-                <n-descriptions-item label="有效期">
-                  {{ active.Validity === 0 ? '长期有效' : orDash(active.Validity) }}
-                </n-descriptions-item>
-                <n-descriptions-item label="加入时间">{{ orDash(active.AddTime) }}</n-descriptions-item>
-                <n-descriptions-item label="修改时间">{{ orDash(active.ModifyTime) }}</n-descriptions-item>
-                <n-descriptions-item label="开始生效">{{ orDash(active.BeginTime) }}</n-descriptions-item>
-                <n-descriptions-item label="结束时间">{{ orDash(active.EndTime) }}</n-descriptions-item>
-                <n-descriptions-item label="触发时间">{{ orDash(active.TriggeredTime) }}</n-descriptions-item>
-                <n-descriptions-item label="关闭时间">{{ orDash(active.CloseTime) }}</n-descriptions-item>
-                <n-descriptions-item label="描述" :span="2">{{ orDash(active.Description) }}</n-descriptions-item>
-                <n-descriptions-item label="修改原因" :span="2">{{ orDash(active.Reason) }}</n-descriptions-item>
-              </n-descriptions>
-            </n-tab-pane>
+    <!-- 明细弹窗 -->
+    <AppDialog v-model:show="showDetail" :title="`条件单明细 · ${active?.id ?? ''}`" :width="640" mask-closable>
+      <template v-if="active">
+        <n-tabs v-model:value="detailTab" type="line" size="small">
+          <n-tab-pane name="basic">
+            <template #tab>基本信息</template>
+            <n-descriptions :column="2" label-placement="top" size="small" bordered>
+              <n-descriptions-item label="条件单号">
+                <span class="mono">{{ active.id }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="账号">
+                <span class="mono">{{ orDash(active.Account) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="用户账号">
+                <span class="mono">{{ orDash(active.UserAccount) }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item label="名称">{{ orDash(active.Name) }}</n-descriptions-item>
+              <n-descriptions-item label="类型">
+                {{ active.Type != null ? CONDITIONAL_TYPES[active.Type as keyof typeof CONDITIONAL_TYPES] : '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="云单状态">
+                {{ active.Mode != null ? CONDITIONAL_MODES[active.Mode as keyof typeof CONDITIONAL_MODES] : '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="触发状态">
+                {{ active.Status === 1 ? '已触发' : '未触发' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="有效标志">
+                {{ active.Flag != null ? CONDITIONAL_FLAGS[active.Flag as keyof typeof CONDITIONAL_FLAGS] : '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="运行次数">{{ active.RunCount ?? 0 }}</n-descriptions-item>
+              <n-descriptions-item label="有效期">
+                {{ active.Validity === 0 ? '长期有效' : orDash(active.Validity) }}
+              </n-descriptions-item>
+              <n-descriptions-item label="加入时间">{{ orDash(active.AddTime) }}</n-descriptions-item>
+              <n-descriptions-item label="修改时间">{{ orDash(active.ModifyTime) }}</n-descriptions-item>
+              <n-descriptions-item label="开始生效">{{ orDash(active.BeginTime) }}</n-descriptions-item>
+              <n-descriptions-item label="结束时间">{{ orDash(active.EndTime) }}</n-descriptions-item>
+              <n-descriptions-item label="触发时间">{{ orDash(active.TriggeredTime) }}</n-descriptions-item>
+              <n-descriptions-item label="关闭时间">{{ orDash(active.CloseTime) }}</n-descriptions-item>
+              <n-descriptions-item label="描述" :span="2">{{ orDash(active.Description) }}</n-descriptions-item>
+              <n-descriptions-item label="修改原因" :span="2">{{ orDash(active.Reason) }}</n-descriptions-item>
+            </n-descriptions>
+          </n-tab-pane>
 
-            <n-tab-pane name="json">
-              <template #tab>原始报文</template>
-              <div class="json-head">
-                <n-icon :component="CodeSlashOutline" :color="accent" />
-                <span>
-                  对应 <code>T_Conditional.Strategy</code> 字段 / Redis 键
-                  <code>strategy-&lt;账号&gt;</code> 中的 <code>strategy</code> 字段，
-                  即客户端 <code>create</code> 协议原文。
-                </span>
-              </div>
-              <n-code :code="prettyStrategy" language="json" show-line-numbers word-wrap />
-            </n-tab-pane>
-          </n-tabs>
-        </template>
+          <n-tab-pane name="json">
+            <template #tab>原始报文</template>
+            <div class="json-head">
+              <n-icon :component="CodeSlashOutline" :color="accent" />
+              <span>
+                对应 <code>T_Conditional.Strategy</code> 字段 / Redis 键
+                <code>strategy-&lt;账号&gt;</code> 中的 <code>strategy</code> 字段，
+                即客户端 <code>create</code> 协议原文。
+              </span>
+            </div>
+            <n-code :code="prettyStrategy" language="json" show-line-numbers word-wrap />
+          </n-tab-pane>
+        </n-tabs>
+      </template>
 
-        <template #footer>
-          <div class="drawer-footer">
-            <n-button
-              size="small"
-              :type="active?.Mode === 1 ? 'warning' : 'primary'"
-              @click="active && toggleRunning(active)"
-            >
-              <template #icon>
-                <n-icon :component="active?.Mode === 1 ? PauseOutline : PlayOutline" />
-              </template>
-              {{ active?.Mode === 1 ? '停止运行' : '开始运行' }}
-            </n-button>
-            <n-button size="small" type="error" ghost @click="active && removeConditional(active)">
-              <template #icon>
-                <n-icon :component="TrashOutline" />
-              </template>
-              删除
-            </n-button>
-            <div class="spacer" />
-            <n-button size="small" @click="showDetail = false">关闭</n-button>
-          </div>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+      <template #footer>
+        <n-button
+          size="small"
+          :type="active?.Mode === 1 ? 'warning' : 'primary'"
+          @click="active && toggleRunning(active)"
+        >
+          <template #icon>
+            <n-icon :component="active?.Mode === 1 ? PauseOutline : PlayOutline" />
+          </template>
+          {{ active?.Mode === 1 ? '停止运行' : '开始运行' }}
+        </n-button>
+        <n-button size="small" type="error" ghost @click="active && removeConditional(active)">
+          <template #icon>
+            <n-icon :component="TrashOutline" />
+          </template>
+          删除
+        </n-button>
+        <div class="spacer" />
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 
@@ -734,11 +728,6 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
   font-size: 12px;
 }
 
-.drawer-footer {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
 
 .spacer {
   flex: 1;

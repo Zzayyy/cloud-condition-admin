@@ -8,8 +8,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -755,121 +753,117 @@ function deleteKey(row: RedisKeyInfo) {
     </n-card>
 
     <!-- 键详情 -->
-    <n-drawer v-model:show="showDetail" :width="680" placement="right">
-      <n-drawer-content :title="`键详情 · ${active?.key ?? ''}`" closable>
-        <template v-if="active">
-          <n-alert v-if="detailError" type="error" :bordered="false" style="margin-bottom: 12px">
-            读取失败：{{ detailError }}
-          </n-alert>
+    <AppDialog v-model:show="showDetail" :title="`键详情 · ${active?.key ?? ''}`" :width="680" mask-closable>
+      <template v-if="active">
+        <n-alert v-if="detailError" type="error" :bordered="false" style="margin-bottom: 12px">
+          读取失败：{{ detailError }}
+        </n-alert>
 
-          <n-descriptions :column="2" label-placement="top" size="small" bordered>
-            <n-descriptions-item label="键名" :span="2">
-              <span class="mono" style="word-break: break-all">{{ active.key }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="类型">
-              <n-tag size="small" round :bordered="false" type="info">{{ active.type }}</n-tag>
-            </n-descriptions-item>
-            <n-descriptions-item label="归属">
-              {{ DOMAIN_LABEL[(active.domain ?? 'other') as RedisKeyDomain] }}
-            </n-descriptions-item>
-            <n-descriptions-item label="长度">
-              {{ active.length !== undefined ? thousands(active.length) : '—' }}
-            </n-descriptions-item>
-            <n-descriptions-item label="TTL">
-              <span :style="hasTtl(active) ? 'color:var(--warning);font-weight:600' : ''">
-                {{ ttlText(active.pttl) }}
-              </span>
-            </n-descriptions-item>
-            <n-descriptions-item label="编码">
-              <span class="mono">{{ detail?.encoding ?? '-' }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="内存占用">
-              <span class="num">{{ detail?.memoryUsage ? thousands(detail.memoryUsage) + ' 字节' : '—' }}</span>
-            </n-descriptions-item>
-          </n-descriptions>
+        <n-descriptions :column="2" label-placement="top" size="small" bordered>
+          <n-descriptions-item label="键名" :span="2">
+            <span class="mono" style="word-break: break-all">{{ active.key }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="类型">
+            <n-tag size="small" round :bordered="false" type="info">{{ active.type }}</n-tag>
+          </n-descriptions-item>
+          <n-descriptions-item label="归属">
+            {{ DOMAIN_LABEL[(active.domain ?? 'other') as RedisKeyDomain] }}
+          </n-descriptions-item>
+          <n-descriptions-item label="长度">
+            {{ active.length !== undefined ? thousands(active.length) : '—' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="TTL">
+            <span :style="hasTtl(active) ? 'color:var(--warning);font-weight:600' : ''">
+              {{ ttlText(active.pttl) }}
+            </span>
+          </n-descriptions-item>
+          <n-descriptions-item label="编码">
+            <span class="mono">{{ detail?.encoding ?? '-' }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="内存占用">
+            <span class="num">{{ detail?.memoryUsage ? thousands(detail.memoryUsage) + ' 字节' : '—' }}</span>
+          </n-descriptions-item>
+        </n-descriptions>
 
-          <!-- 按类型渲染 -->
-          <div v-if="detailLoading" class="text-muted" style="padding: 18px 0; text-align: center">
-            读取中…
-          </div>
+        <!-- 按类型渲染 -->
+        <div v-if="detailLoading" class="text-muted" style="padding: 18px 0; text-align: center">
+          读取中…
+        </div>
 
-          <div v-else-if="detail" class="detail-block">
-            <template v-if="detail.json">
-              <div class="detail-title">
-                <n-icon :component="CodeSlashOutline" :color="accent" />
-                JSON 内容
-              </div>
-              <n-code :code="prettyJson" language="json" show-line-numbers word-wrap />
-            </template>
-
-            <template v-else-if="detail.value !== undefined">
-              <div class="detail-title">
-                <n-icon :component="CodeSlashOutline" :color="accent" />
-                字符串值
-              </div>
-              <n-code :code="detail.value" language="text" show-line-numbers word-wrap />
-            </template>
-
-            <template v-else-if="detail.entries?.length">
-              <div class="detail-title">
-                <n-icon :component="LayersOutline" :color="accent" />
-                最近条目（{{ detail.entries.length }}）
-              </div>
-              <div v-for="e in detail.entries" :key="e.id" class="entry-card">
-                <div class="entry-id mono">{{ e.id }}</div>
-                <div v-for="(v, k) in e.fields" :key="k" class="entry-row">
-                  <span class="entry-k mono">{{ k }}</span>
-                  <span class="entry-v mono">{{ v }}</span>
-                </div>
-              </div>
-            </template>
-
-            <template v-else-if="detail.members?.length">
-              <div class="detail-title">
-                <n-icon :component="LayersOutline" :color="accent" />
-                成员（{{ detail.members.length }}）
-              </div>
-              <div class="members">
-                <span v-for="m in detail.members" :key="m" class="mono member-chip">{{ m }}</span>
-              </div>
-            </template>
-
-            <div v-else class="text-muted" style="font-size: 13px">该键没有可展示的内容。</div>
-          </div>
-
-          <div class="detail-note">
-            <n-icon :component="InformationCircleOutline" :color="accent" />
-            <div>
-              数据来自 Redis<template v-if="detail?.type === 'stream'">（
-                <code>XLEN</code> / <code>XRANGE</code>，只取最近若干条，不读全量）</template>。
-              删除键将执行 <code>DEL</code>，<b>不可撤销</b>，需后端加审计。
+        <div v-else-if="detail" class="detail-block">
+          <template v-if="detail.json">
+            <div class="detail-title">
+              <n-icon :component="CodeSlashOutline" :color="accent" />
+              JSON 内容
             </div>
-          </div>
-        </template>
+            <n-code :code="prettyJson" language="json" show-line-numbers word-wrap />
+          </template>
 
-        <template #footer>
-          <div class="drawer-footer">
-            <n-popconfirm
-              :on-positive-click="() => active && deleteKey(active)"
-              positive-text="删除"
-              negative-text="取消"
-            >
-              <template #trigger>
-                <n-button size="small" type="error" ghost>
-                  <template #icon>
-                    <n-icon :component="TrashOutline" />
-                  </template>
-                  删除此键
-                </n-button>
-              </template>
-              确认删除键 {{ active?.key }}？此操作不可撤销。
-            </n-popconfirm>
-            <div class="spacer" />
-            <n-button size="small" @click="showDetail = false">关闭</n-button>
+          <template v-else-if="detail.value !== undefined">
+            <div class="detail-title">
+              <n-icon :component="CodeSlashOutline" :color="accent" />
+              字符串值
+            </div>
+            <n-code :code="detail.value" language="text" show-line-numbers word-wrap />
+          </template>
+
+          <template v-else-if="detail.entries?.length">
+            <div class="detail-title">
+              <n-icon :component="LayersOutline" :color="accent" />
+              最近条目（{{ detail.entries.length }}）
+            </div>
+            <div v-for="e in detail.entries" :key="e.id" class="entry-card">
+              <div class="entry-id mono">{{ e.id }}</div>
+              <div v-for="(v, k) in e.fields" :key="k" class="entry-row">
+                <span class="entry-k mono">{{ k }}</span>
+                <span class="entry-v mono">{{ v }}</span>
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="detail.members?.length">
+            <div class="detail-title">
+              <n-icon :component="LayersOutline" :color="accent" />
+              成员（{{ detail.members.length }}）
+            </div>
+            <div class="members">
+              <span v-for="m in detail.members" :key="m" class="mono member-chip">{{ m }}</span>
+            </div>
+          </template>
+
+          <div v-else class="text-muted" style="font-size: 13px">该键没有可展示的内容。</div>
+        </div>
+
+        <div class="detail-note">
+          <n-icon :component="InformationCircleOutline" :color="accent" />
+          <div>
+            数据来自 Redis<template v-if="detail?.type === 'stream'">（
+              <code>XLEN</code> / <code>XRANGE</code>，只取最近若干条，不读全量）</template>。
+            删除键将执行 <code>DEL</code>，<b>不可撤销</b>，需后端加审计。
           </div>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+        </div>
+      </template>
+
+      <template #footer>
+        <n-popconfirm
+          :on-positive-click="() => active && deleteKey(active)"
+          positive-text="删除"
+          negative-text="取消"
+        >
+          <template #trigger>
+            <n-button size="small" type="error" ghost>
+              <template #icon>
+                <n-icon :component="TrashOutline" />
+              </template>
+              删除此键
+            </n-button>
+          </template>
+          确认删除键 {{ active?.key }}？此操作不可撤销。
+        </n-popconfirm>
+        <div class="spacer" />
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 
@@ -984,11 +978,6 @@ function deleteKey(row: RedisKeyInfo) {
   border-left: 3px solid v-bind(accent);
 }
 
-.drawer-footer {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
 
 .spacer {
   flex: 1;

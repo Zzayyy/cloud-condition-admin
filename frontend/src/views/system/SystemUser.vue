@@ -7,15 +7,12 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NForm,
   NFormItem,
   NGi,
   NGrid,
   NIcon,
   NInput,
-  NModal,
   NPopconfirm,
   NSelect,
   NSwitch,
@@ -1074,9 +1071,13 @@ async function submitReset() {
     </n-card>
 
     <!-- 账号详情 -->
-    <n-drawer v-model:show="showDetail" :width="560" placement="right">
-      <n-drawer-content :title="`管理账号详情 · ${active?.username ?? ''}`" closable>
-        <template v-if="active">
+    <AppDialog
+      v-model:show="showDetail"
+      :title="`管理账号详情 · ${active?.username ?? ''}`"
+      :width="560"
+      mask-closable
+    >
+      <template v-if="active">
           <n-descriptions :column="2" label-placement="top" size="small" bordered>
             <n-descriptions-item label="登录名">
               <span class="mono">{{ active.username }}</span>
@@ -1145,142 +1146,138 @@ async function submitReset() {
         </template>
 
         <template #footer>
-          <div class="drawer-footer">
-            <n-button
-              size="small"
-              type="primary"
-              :disabled="!canManage"
-              @click="active && editFromDetail(active)"
-            >
-              <template #icon>
-                <n-icon :component="CreateOutline" />
-              </template>
-              编辑
-            </n-button>
-            <n-button size="small" :disabled="!canManage" @click="active && openReset(active)">
-              <template #icon>
-                <n-icon :component="KeyOutline" />
-              </template>
-              重置密码
-            </n-button>
-            <div class="spacer" />
-            <n-button size="small" @click="showDetail = false">关闭</n-button>
-          </div>
+          <n-button
+            size="small"
+            type="primary"
+            :disabled="!canManage"
+            @click="active && editFromDetail(active)"
+          >
+            <template #icon>
+              <n-icon :component="CreateOutline" />
+            </template>
+            编辑
+          </n-button>
+          <n-button size="small" :disabled="!canManage" @click="active && openReset(active)">
+            <template #icon>
+              <n-icon :component="KeyOutline" />
+            </template>
+            重置密码
+          </n-button>
+          <div class="spacer" />
+          <n-button size="small" @click="showDetail = false">关闭</n-button>
         </template>
-      </n-drawer-content>
-    </n-drawer>
+      </AppDialog>
 
     <!-- 新建 / 编辑 -->
-    <n-drawer v-model:show="showForm" :width="560" placement="right">
-      <n-drawer-content
-        :title="editingId === null ? '新建管理账号' : `编辑管理账号 · ${formModel.username}`"
-        closable
+    <AppDialog
+      v-model:show="showForm"
+      :title="editingId === null ? '新建管理账号' : `编辑管理账号 · ${formModel.username}`"
+      :width="560"
+      :mask-closable="false"
+      :close-on-esc="false"
+    >
+      <n-alert v-if="editingId !== null" type="info" :bordered="false" size="small" style="margin-bottom: 14px">
+        登录名<b>不可修改</b>：改名会让审计认不出人（<code>T_AdminAudit.operator</code> 存的就是登录名）。
+        编辑也<b>不会</b>改密码 —— 改密请用列表里的「重置密码」。
+      </n-alert>
+
+      <n-form
+        ref="formRef"
+        :model="formModel"
+        :rules="userRules"
+        label-placement="top"
+        require-mark-placement="right-hanging"
       >
-        <n-alert v-if="editingId !== null" type="info" :bordered="false" size="small" style="margin-bottom: 14px">
-          登录名<b>不可修改</b>：改名会让审计认不出人（<code>T_AdminAudit.operator</code> 存的就是登录名）。
-          编辑也<b>不会</b>改密码 —— 改密请用列表里的「重置密码」。
-        </n-alert>
+        <n-form-item label="登录名" path="username">
+          <n-input
+            v-model:value="formModel.username"
+            :readonly="editingId !== null"
+            placeholder="如 yangsh（3-32 位字母 / 数字 / _ . -）"
+          />
+        </n-form-item>
 
-        <n-form
-          ref="formRef"
-          :model="formModel"
-          :rules="userRules"
-          label-placement="top"
-          require-mark-placement="right-hanging"
-        >
-          <n-form-item label="登录名" path="username">
-            <n-input
-              v-model:value="formModel.username"
-              :readonly="editingId !== null"
-              placeholder="如 yangsh（3-32 位字母 / 数字 / _ . -）"
-            />
-          </n-form-item>
+        <n-form-item label="显示名" path="displayName">
+          <n-input v-model:value="formModel.displayName" placeholder="真实姓名或岗位，审计要认人" />
+        </n-form-item>
 
-          <n-form-item label="显示名" path="displayName">
-            <n-input v-model:value="formModel.displayName" placeholder="真实姓名或岗位，审计要认人" />
-          </n-form-item>
+        <n-form-item label="角色（可多选，至少一个）" path="roleIds">
+          <n-select
+            v-model:value="formModel.roleIds"
+            :options="roleOptions"
+            :loading="rolesLoading"
+            multiple
+            placeholder="选择角色"
+          />
+        </n-form-item>
 
-          <n-form-item label="角色（可多选，至少一个）" path="roleIds">
-            <n-select
-              v-model:value="formModel.roleIds"
-              :options="roleOptions"
-              :loading="rolesLoading"
-              multiple
-              placeholder="选择角色"
-            />
-          </n-form-item>
-
-          <n-form-item label="启用" path="enabled">
-            <div class="switch-row">
-              <n-switch v-model:value="formModel.enabled" />
-              <span class="form-hint">
-                停用后该账号不能登录；后端必须<b>同时让它已签发的 token 失效</b>，否则等于没停。
-              </span>
-            </div>
-          </n-form-item>
-
-          <n-form-item v-if="editingId === null" label="初始密码" path="password">
-            <n-input
-              v-model:value="formModel.password"
-              type="password"
-              show-password-on="click"
-              placeholder="新建必须设置初始密码"
-            />
-          </n-form-item>
-
-          <n-form-item label="备注">
-            <n-input
-              v-model:value="formModel.remark"
-              type="textarea"
-              :autosize="{ minRows: 2, maxRows: 4 }"
-              placeholder="为什么建这个账号 / 什么时候该停用"
-            />
-          </n-form-item>
-        </n-form>
-
-        <div class="policy-line">
-          <n-icon :component="InformationCircleOutline" :color="accent" />
-          <div>
-            <template v-if="policy">
-              当前密码策略（来自 <code>getPasswordPolicy()</code>）：{{ policySummary }}。
-              <br />
-              {{ policyExtra }}。
-              <br />
-              <b>前端校验只是体验，真正的判定必须在后端</b> —— 前端规则可能过期，也不该成为安全边界。
-            </template>
-            <template v-else>
-              密码策略未加载（{{ policyError || '后端接口尚未实现' }}）：本次只做必填与格式校验。
-              在策略拿到之前，<b>无法判断</b>密码是否满足现场要求 ——
-              请不要据此认为密码已经合规，<b>真正的判定必须在后端</b>。
-            </template>
+        <n-form-item label="启用" path="enabled">
+          <div class="switch-row">
+            <n-switch v-model:value="formModel.enabled" />
+            <span class="form-hint">
+              停用后该账号不能登录；后端必须<b>同时让它已签发的 token 失效</b>，否则等于没停。
+            </span>
           </div>
+        </n-form-item>
+
+        <n-form-item v-if="editingId === null" label="初始密码" path="password">
+          <n-input
+            v-model:value="formModel.password"
+            type="password"
+            show-password-on="click"
+            placeholder="新建必须设置初始密码"
+          />
+        </n-form-item>
+
+        <n-form-item label="备注">
+          <n-input
+            v-model:value="formModel.remark"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            placeholder="为什么建这个账号 / 什么时候该停用"
+          />
+        </n-form-item>
+      </n-form>
+
+      <div class="policy-line">
+        <n-icon :component="InformationCircleOutline" :color="accent" />
+        <div>
+          <template v-if="policy">
+            当前密码策略（来自 <code>getPasswordPolicy()</code>）：{{ policySummary }}。
+            <br />
+            {{ policyExtra }}。
+            <br />
+            <b>前端校验只是体验，真正的判定必须在后端</b> —— 前端规则可能过期，也不该成为安全边界。
+          </template>
+          <template v-else>
+            密码策略未加载（{{ policyError || '后端接口尚未实现' }}）：本次只做必填与格式校验。
+            在策略拿到之前，<b>无法判断</b>密码是否满足现场要求 ——
+            请不要据此认为密码已经合规，<b>真正的判定必须在后端</b>。
+          </template>
         </div>
+      </div>
 
-        <template #footer>
-          <div class="drawer-footer">
-            <div class="spacer" />
-            <n-button size="small" @click="showForm = false">取消</n-button>
-            <n-button
-              size="small"
-              type="primary"
-              :loading="submitting"
-              :disabled="!canManage"
-              @click="submitUser"
-            >
-              {{ editingId === null ? '新建' : '保存' }}
-            </n-button>
-          </div>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+      <template #footer>
+        <div class="spacer" />
+        <n-button size="small" @click="showForm = false">取消</n-button>
+        <n-button
+          size="small"
+          type="primary"
+          :loading="submitting"
+          :disabled="!canManage"
+          @click="submitUser"
+        >
+          {{ editingId === null ? '新建' : '保存' }}
+        </n-button>
+      </template>
+    </AppDialog>
 
     <!-- 重置密码 -->
-    <n-modal
+    <AppDialog
       v-model:show="showReset"
-      preset="card"
-      style="width: 580px"
+      :width="580"
       :title="`重置密码 · ${resetTarget?.username ?? ''}`"
       :mask-closable="false"
+      :close-on-esc="false"
     >
       <n-alert type="warning" :bordered="false" size="small" style="margin-bottom: 14px">
         新密码<b>只在这一个请求里出现</b>，接口不得回显；后端应写审计（谁在什么时候重置了谁），
@@ -1359,21 +1356,19 @@ async function submitReset() {
       </div>
 
       <template #footer>
-        <div class="drawer-footer">
-          <div class="spacer" />
-          <n-button size="small" @click="showReset = false">取消</n-button>
-          <n-button
-            size="small"
-            type="primary"
-            :loading="resetSubmitting"
-            :disabled="!canManage"
-            @click="submitReset"
-          >
-            确认重置
-          </n-button>
-        </div>
+        <div class="spacer" />
+        <n-button size="small" @click="showReset = false">取消</n-button>
+        <n-button
+          size="small"
+          type="primary"
+          :loading="resetSubmitting"
+          :disabled="!canManage"
+          @click="submitReset"
+        >
+          确认重置
+        </n-button>
       </template>
-    </n-modal>
+    </AppDialog>
   </div>
 </template>
 
@@ -1386,6 +1381,7 @@ async function submitReset() {
   margin-bottom: 14px;
 }
 
+/* 页脚的对齐与分隔线由 AppDialog 统一提供，各页只管按钮分组。 */
 .spacer {
   flex: 1;
 }
@@ -1436,12 +1432,7 @@ async function submitReset() {
   display: inline-flex;
 }
 
-.drawer-footer {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
+/* 页脚的分隔线由 AppDialog 统一提供，这里只管按钮分组。 */
 .detail-note {
   display: flex;
   gap: 10px;

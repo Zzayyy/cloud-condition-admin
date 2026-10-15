@@ -8,8 +8,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -970,166 +968,164 @@ const traceHint = computed(() => {
     </n-card>
 
     <!-- 流详情 -->
-    <n-drawer v-model:show="showDetail" :width="860" placement="right">
-      <n-drawer-content :title="`流详情 · ${active?.key ?? ''}`" closable>
-        <template v-if="active">
-          <n-descriptions :column="3" label-placement="top" size="small" bordered>
-            <n-descriptions-item label="流名">
-              <span class="mono">{{ active.key }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="实例 / db">
-              <span class="mono">{{ active.instance }} / db{{ active.db }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="角色">
-              {{ ROLE_LABEL[(active.role ?? 'other') as StreamRole] }}
-            </n-descriptions-item>
-            <n-descriptions-item label="条目数">
-              <span class="num">{{ thousands(active.length) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="消费组">
-              {{ active.groups.length ? active.groups.map((g) => g.name).join(', ') : '无' }}
-            </n-descriptions-item>
-            <n-descriptions-item label="lag / pending">
-              <span class="num">
-                {{ thousands(active.groups[0]?.lag ?? 0) }} / {{ thousands(active.groups[0]?.pending ?? 0) }}
-              </span>
-            </n-descriptions-item>
-          </n-descriptions>
+    <AppDialog v-model:show="showDetail" :title="`流详情 · ${active?.key ?? ''}`" :width="860" mask-closable>
+      <template v-if="active">
+        <n-descriptions :column="3" label-placement="top" size="small" bordered>
+          <n-descriptions-item label="流名">
+            <span class="mono">{{ active.key }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="实例 / db">
+            <span class="mono">{{ active.instance }} / db{{ active.db }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="角色">
+            {{ ROLE_LABEL[(active.role ?? 'other') as StreamRole] }}
+          </n-descriptions-item>
+          <n-descriptions-item label="条目数">
+            <span class="num">{{ thousands(active.length) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="消费组">
+            {{ active.groups.length ? active.groups.map((g) => g.name).join(', ') : '无' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="lag / pending">
+            <span class="num">
+              {{ thousands(active.groups[0]?.lag ?? 0) }} / {{ thousands(active.groups[0]?.pending ?? 0) }}
+            </span>
+          </n-descriptions-item>
+        </n-descriptions>
 
-          <n-tabs v-model:value="detailTab" type="line" size="small" style="margin-top: 16px">
-            <n-tab-pane name="entries">
-              <template #tab>最近条目</template>
-              <n-alert v-if="entriesError" type="error" :bordered="false" style="margin-bottom: 12px">
-                条目加载失败：{{ entriesError }}
-              </n-alert>
+        <n-tabs v-model:value="detailTab" type="line" size="small" style="margin-top: 16px">
+          <n-tab-pane name="entries">
+            <template #tab>最近条目</template>
+            <n-alert v-if="entriesError" type="error" :bordered="false" style="margin-bottom: 12px">
+              条目加载失败：{{ entriesError }}
+            </n-alert>
+            <n-data-table
+              :columns="entryColumns"
+              :data="entries"
+              :loading="entriesLoading"
+              :bordered="false"
+              size="small"
+              :pagination="false"
+              :max-height="380"
+              :row-props="(row: RedisStreamEntry) => ({ style: 'cursor:pointer', onClick: () => openEntry(row) })"
+            />
+            <div class="text-muted" style="margin-top: 10px; font-size: 12.5px">
+              点击任意行可查看该条报文的完整 JSON。
+            </div>
+          </n-tab-pane>
+
+          <n-tab-pane name="raw">
+            <template #tab>报文原文</template>
+            <div v-if="selectedEntry">
+              <div class="json-head">
+                <n-icon :component="CodeSlashOutline" :color="accent" />
+                <span>
+                  条目 <code>{{ selectedEntry.id }}</code>
+                  的 <code>task</code> 字段（即实际业务报文）。
+                </span>
+              </div>
+              <n-code :code="prettyTask" language="json" show-line-numbers word-wrap />
+            </div>
+            <div v-else class="text-muted" style="padding: 16px 0">
+              请先在「最近条目」里点选一行。
+            </div>
+          </n-tab-pane>
+        </n-tabs>
+
+        <!-- 请求串联：先展示「该去哪两个流找」，再按 request_id 真回捞 -->
+        <div v-if="traceHint" class="detail-block">
+          <div class="detail-title">
+            <n-icon :component="GitNetworkOutline" :color="accent" />
+            一次请求的串联关系
+          </div>
+          <div class="trace-grid">
+            <div class="trace-row">
+              <span class="trace-k">request_id</span>
+              <span class="mono">{{ traceHint.requestId || '-' }}</span>
+            </div>
+            <div class="trace-row">
+              <span class="trace-k">下发流</span>
+              <span class="mono">{{ traceHint.replyReq || '-' }}</span>
+            </div>
+            <div class="trace-row">
+              <span class="trace-k">回执流</span>
+              <span class="mono">{{ traceHint.replyReply || '-' }}</span>
+            </div>
+          </div>
+
+          <!--
+            上面三行只是「从入口条目的字段推出该去哪两个流找」，
+            并**不会真的去查**。这里按 request_id 到各流回捞实际报文。
+          -->
+          <div class="trace-actions">
+            <n-button
+              size="small"
+              type="primary"
+              :loading="traceLoading"
+              :disabled="!traceHint.requestId || isMock"
+              @click="runTrace(traceHint.requestId)"
+            >
+              按 request_id 回捞实际报文
+            </n-button>
+            <span v-if="isMock" class="text-muted" style="font-size: 12px">
+              演示态没有可回捞的真实流数据
+            </span>
+          </div>
+
+          <n-alert v-if="traceError" type="error" :bordered="false" size="small" style="margin-top: 10px">
+            回捞失败：{{ traceError }}
+          </n-alert>
+
+          <template v-if="traceResult">
+            <n-alert
+              v-if="!traceResult.found"
+              type="warning"
+              :bordered="false"
+              size="small"
+              style="margin-top: 10px"
+            >
+              尾部窗口内没有找到 {{ traceResult.requestId }}。
+              ⚠️ 后端只在最近 {{ traceResult.windowSize }} 条里查找
+              （现场入口流有 1400 万条，全扫不可行）——
+              <b>「没找到」不等于「不存在」</b>。
+            </n-alert>
+
+            <template v-else>
+              <div class="text-muted" style="margin-top: 10px; font-size: 12.5px">
+                命中 {{ traceResult.hits.length }} 条（在 {{ traceResult.searched.length }} 个流的
+                最近 {{ traceResult.windowSize }} 条内查找
+                <template v-if="traceResult.truncatedWindow">
+                  ；⚠️ 部分流有截断，窗口外可能还有
+                </template>
+                ）
+              </div>
               <n-data-table
-                :columns="entryColumns"
-                :data="entries"
-                :loading="entriesLoading"
+                :columns="traceColumns"
+                :data="traceResult.hits"
                 :bordered="false"
                 size="small"
                 :pagination="false"
-                :max-height="380"
-                :row-props="(row: RedisStreamEntry) => ({ style: 'cursor:pointer', onClick: () => openEntry(row) })"
+                :max-height="260"
+                style="margin-top: 8px"
               />
-              <div class="text-muted" style="margin-top: 10px; font-size: 12.5px">
-                点击任意行可查看该条报文的完整 JSON。
-              </div>
-            </n-tab-pane>
-
-            <n-tab-pane name="raw">
-              <template #tab>报文原文</template>
-              <div v-if="selectedEntry">
-                <div class="json-head">
-                  <n-icon :component="CodeSlashOutline" :color="accent" />
-                  <span>
-                    条目 <code>{{ selectedEntry.id }}</code>
-                    的 <code>task</code> 字段（即实际业务报文）。
-                  </span>
-                </div>
-                <n-code :code="prettyTask" language="json" show-line-numbers word-wrap />
-              </div>
-              <div v-else class="text-muted" style="padding: 16px 0">
-                请先在「最近条目」里点选一行。
-              </div>
-            </n-tab-pane>
-          </n-tabs>
-
-          <!-- 请求串联：先展示「该去哪两个流找」，再按 request_id 真回捞 -->
-          <div v-if="traceHint" class="detail-block">
-            <div class="detail-title">
-              <n-icon :component="GitNetworkOutline" :color="accent" />
-              一次请求的串联关系
-            </div>
-            <div class="trace-grid">
-              <div class="trace-row">
-                <span class="trace-k">request_id</span>
-                <span class="mono">{{ traceHint.requestId || '-' }}</span>
-              </div>
-              <div class="trace-row">
-                <span class="trace-k">下发流</span>
-                <span class="mono">{{ traceHint.replyReq || '-' }}</span>
-              </div>
-              <div class="trace-row">
-                <span class="trace-k">回执流</span>
-                <span class="mono">{{ traceHint.replyReply || '-' }}</span>
-              </div>
-            </div>
-
-            <!--
-              上面三行只是「从入口条目的字段推出该去哪两个流找」，
-              并**不会真的去查**。这里按 request_id 到各流回捞实际报文。
-            -->
-            <div class="trace-actions">
-              <n-button
-                size="small"
-                type="primary"
-                :loading="traceLoading"
-                :disabled="!traceHint.requestId || isMock"
-                @click="runTrace(traceHint.requestId)"
-              >
-                按 request_id 回捞实际报文
-              </n-button>
-              <span v-if="isMock" class="text-muted" style="font-size: 12px">
-                演示态没有可回捞的真实流数据
-              </span>
-            </div>
-
-            <n-alert v-if="traceError" type="error" :bordered="false" size="small" style="margin-top: 10px">
-              回捞失败：{{ traceError }}
-            </n-alert>
-
-            <template v-if="traceResult">
-              <n-alert
-                v-if="!traceResult.found"
-                type="warning"
-                :bordered="false"
-                size="small"
-                style="margin-top: 10px"
-              >
-                尾部窗口内没有找到 {{ traceResult.requestId }}。
-                ⚠️ 后端只在最近 {{ traceResult.windowSize }} 条里查找
-                （现场入口流有 1400 万条，全扫不可行）——
-                <b>「没找到」不等于「不存在」</b>。
-              </n-alert>
-
-              <template v-else>
-                <div class="text-muted" style="margin-top: 10px; font-size: 12.5px">
-                  命中 {{ traceResult.hits.length }} 条（在 {{ traceResult.searched.length }} 个流的
-                  最近 {{ traceResult.windowSize }} 条内查找
-                  <template v-if="traceResult.truncatedWindow">
-                    ；⚠️ 部分流有截断，窗口外可能还有
-                  </template>
-                  ）
-                </div>
-                <n-data-table
-                  :columns="traceColumns"
-                  :data="traceResult.hits"
-                  :bordered="false"
-                  size="small"
-                  :pagination="false"
-                  :max-height="260"
-                  style="margin-top: 8px"
-                />
-              </template>
             </template>
-          </div>
+          </template>
+        </div>
 
-          <div class="detail-note">
-            <n-icon :component="InformationCircleOutline" :color="accent" />
-            <div>
-              现场实测：<b>137 db0 的 DataHub_req_stream 有 407 万条且没有消费组</b>，
-              136 db0 的 ST-0 有 595 pending。这两类信号在列表里都标了色。
-              数值为探查快照，接入后端后会实时刷新。
-            </div>
+        <div class="detail-note">
+          <n-icon :component="InformationCircleOutline" :color="accent" />
+          <div>
+            现场实测：<b>137 db0 的 DataHub_req_stream 有 407 万条且没有消费组</b>，
+            136 db0 的 ST-0 有 595 pending。这两类信号在列表里都标了色。
+            数值为探查快照，接入后端后会实时刷新。
           </div>
-        </template>
+        </div>
+      </template>
 
-        <template #footer>
-          <n-button size="small" @click="showDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+      <template #footer>
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 

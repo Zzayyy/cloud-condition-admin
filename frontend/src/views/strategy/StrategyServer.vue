@@ -7,8 +7,6 @@ import {
   NDataTable,
   NDescriptions,
   NDescriptionsItem,
-  NDrawer,
-  NDrawerContent,
   NGi,
   NGrid,
   NIcon,
@@ -553,66 +551,64 @@ const heartbeatAge = computed(() => {
     </n-card>
 
     <!-- 节点详情 -->
-    <n-drawer v-model:show="showDetail" :width="480" placement="right">
-      <n-drawer-content :title="`节点详情 · ${active?.ip ?? ''}`" closable>
-        <template v-if="active">
-          <n-descriptions :column="1" label-placement="left" size="small" bordered>
-            <n-descriptions-item label="节点 ID">
-              <span class="mono">{{ active.id }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="IP 地址">
-              <span class="mono">{{ active.ip }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="MAC">
-              <span class="mono">{{ active.mac }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="状态">
-              <n-tag
-                size="small"
-                round
-                :bordered="false"
-                :type="isServerOnline(active) ? 'success' : active.enable ? 'error' : 'default'"
-              >
-                {{ isServerOnline(active) ? '在线' : active.enable ? '离线' : '停用' }}
-              </n-tag>
-            </n-descriptions-item>
-            <n-descriptions-item label="承载条件单用户数">
-              {{ thousands(active.usecount) }} 个
-            </n-descriptions-item>
-            <n-descriptions-item label="上线时间">
-              {{ active['login-time'] || '-' }}
-            </n-descriptions-item>
-            <n-descriptions-item label="最后活跃">
-              {{ active['last-active-time'] }}
-              <span class="text-muted" style="margin-left: 6px">{{ relativeTime(active.lastActiveTimeLong) }}</span>
-            </n-descriptions-item>
-            <n-descriptions-item label="心跳间隔">
-              {{ heartbeatAge }} 秒前
-            </n-descriptions-item>
-          </n-descriptions>
+    <AppDialog v-model:show="showDetail" :title="`节点详情 · ${active?.ip ?? ''}`" :width="480" mask-closable>
+      <template v-if="active">
+        <n-descriptions :column="1" label-placement="left" size="small" bordered>
+          <n-descriptions-item label="节点 ID">
+            <span class="mono">{{ active.id }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="IP 地址">
+            <span class="mono">{{ active.ip }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="MAC">
+            <span class="mono">{{ active.mac }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="状态">
+            <n-tag
+              size="small"
+              round
+              :bordered="false"
+              :type="isServerOnline(active) ? 'success' : active.enable ? 'error' : 'default'"
+            >
+              {{ isServerOnline(active) ? '在线' : active.enable ? '离线' : '停用' }}
+            </n-tag>
+          </n-descriptions-item>
+          <n-descriptions-item label="承载条件单用户数">
+            {{ thousands(active.usecount) }} 个
+          </n-descriptions-item>
+          <n-descriptions-item label="上线时间">
+            {{ active['login-time'] || '-' }}
+          </n-descriptions-item>
+          <n-descriptions-item label="最后活跃">
+            {{ active['last-active-time'] }}
+            <span class="text-muted" style="margin-left: 6px">{{ relativeTime(active.lastActiveTimeLong) }}</span>
+          </n-descriptions-item>
+          <n-descriptions-item label="心跳间隔">
+            {{ heartbeatAge }} 秒前
+          </n-descriptions-item>
+        </n-descriptions>
 
-          <div class="detail-note">
-            <n-icon :component="PulseOutline" :color="accent" />
-            <div>
-              心跳阈值 {{ SERVER_OFFLINE_AFTER_SEC }} 秒。现场策略服务器每 5 秒发一次心跳
-              （<code>strategyserver_beat</code> 频道），超过阈值即判定离线。
-            </div>
+        <div class="detail-note">
+          <n-icon :component="PulseOutline" :color="accent" />
+          <div>
+            心跳阈值 {{ SERVER_OFFLINE_AFTER_SEC }} 秒。现场策略服务器每 5 秒发一次心跳
+            （<code>strategyserver_beat</code> 频道），超过阈值即判定离线。
           </div>
+        </div>
 
-          <div class="detail-note">
-            <n-icon :component="ServerOutline" :color="accent" />
-            <div>
-              数据对应 Redis 键 <code>strategy-srv</code> 中的该条记录；
-              条件单分配依据是 <code>usecount</code>。
-            </div>
+        <div class="detail-note">
+          <n-icon :component="ServerOutline" :color="accent" />
+          <div>
+            数据对应 Redis 键 <code>strategy-srv</code> 中的该条记录；
+            条件单分配依据是 <code>usecount</code>。
           </div>
-        </template>
+        </div>
+      </template>
 
-        <template #footer>
-          <n-button size="small" @click="showDetail = false">关闭</n-button>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
+      <template #footer>
+        <n-button size="small" @click="showDetail = false">关闭</n-button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 
