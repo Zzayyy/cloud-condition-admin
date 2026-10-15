@@ -87,6 +87,31 @@ const {
   { mock: (params: Record<string, unknown>) => withDelay(mockAccountApi.listLogStats(params)) },
 )
 
+/**
+ * 近 14 天日志量（趋势有自己的 useResource，含自己的 mock 分支）。
+ *
+ * ⚠️ **必须显式传时间范围**：后端 `selectDaily` 的 `from`/`to` 都是可选的，
+ * 不传就返回**全部历史**（现场实测 42 天，且会随年月增长）。
+ * 页面只画 14 天，不传的话每次都要白拉全量再丢掉大部分。
+ */
+const {
+  data: dailyData,
+  load: loadDaily,
+} = useResource(
+  (params: Record<string, unknown>) => accountApi.listLogDaily(params),
+  { mock: () => withDelay(mockDailyLogs()) },
+)
+
+/** 近 14 天窗口（含今天），格式 yyyy-MM-dd HH:mm:ss —— 与后端时间口径一致 */
+function dailyWindow() {
+  const p = (n: number) => String(n).padStart(2, '0')
+  const d = (dt: Date) =>
+    `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`
+  const today = new Date()
+  const from = new Date(today.getTime() - 13 * 86400_000)
+  return { from: `${d(from)} 00:00:00`, to: `${d(today)} 23:59:59` }
+}
+
 function logParams() {
   return {
     page: page.value,
@@ -101,6 +126,7 @@ function logParams() {
 function reload() {
   loadLogs(logParams())
   loadStats({ page: 1, pageSize: 50 })
+  loadDaily(dailyWindow())
 }
 
 onMounted(reload)
@@ -141,20 +167,38 @@ const summary = computed(() => {
   }
 })
 
-/** 近 14 天日志量（演示态用 mock；真实态暂无趋势接口，显示空态） */
+/** 近 14 天日志量（趋势有自己的 useResource，含自己的 mock 分支 —— 直接用 dailyData） */
 const dailyOption = computed(() => {
-  const daily = isMock.value ? mockDailyLogs() : []
+  /*
+   * ⚠️ 不要用列表资源的 `isMock` 来判断走哪边：那会犯 README 第 5 条记的时序坑
+   * （列表的 isMock 在 await 之前仍是 false，会把演示态误判成真实态）。
+   * 趋势自己那次 useResource 已经处理了降级。
+   *
+   * 后端只返回有数据的日期，这里按 14 天窗口补零 ——
+   * 不补的话折线会把两个相隔多日的点直接连起来，看起来像「一直有数据」。
+   */
+  const daily = dailyData.value ?? []
+  const byDay = new Map(daily.map((d) => [d.date, d.count]))
+  const filled: Array<{ date: string; count: number }> = []
+  const today = new Date()
+  for (let i = 13; i >= 0; i -= 1) {
+    const dt = new Date(today.getTime() - i * 86400_000)
+    const p = (n: number) => String(n).padStart(2, '0')
+    const day = `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`
+    filled.push({ date: day, count: byDay.get(day) ?? 0 })
+  }
+
   return {
     grid: { left: 8, right: 16, top: 16, bottom: 8, containLabel: true },
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: daily.map((d) => d.date.slice(5)), axisLabel: { fontSize: 11 } },
+    xAxis: { type: 'category', data: filled.map((d) => d.date.slice(5)), axisLabel: { fontSize: 11 } },
     yAxis: { type: 'value', minInterval: 1 },
     series: [
       {
         type: 'line',
         smooth: true,
         symbolSize: 6,
-        data: daily.map((d) => d.count),
+        data: filled.map((d) => d.count),
         itemStyle: { color: accent },
         lineStyle: { width: 2.5, color: accent },
         areaStyle: {
@@ -394,7 +438,10 @@ function openDetail(row: UserLog) {
               近 14 天日志量
             </span>
           </template>
-          <BaseChart :option="dailyOption" :height="230" empty-text="暂无数据" />
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">按 LogTime 聚合（T_UserLog）</span>
+          </template>
+          <BaseChart :option="dailyOption" :height="230" empty-text="近 14 天内没有登录日志" />
         </n-card>
       </n-gi>
       <n-gi>

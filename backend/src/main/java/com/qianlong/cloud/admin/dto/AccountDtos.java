@@ -124,6 +124,16 @@ public final class AccountDtos {
             String lastTime) {
     }
 
+    /**
+     * 按天登录日志量，对应前端 {@code DailyCountRow}。
+     *
+     * <p>字段名与 {@code ConditionalDtos.DailyCreatedRow} / {@code TradeDtos.DailyOrderRow}
+     * **刻意保持一致**（都是 {@code date} + {@code count}）—— 前端三个趋势图
+     * 共用一个 {@code DailyCountRow} 类型，形状不同的话每处都要单独适配。
+     */
+    public record UserLogDailyRow(String date, long count) {
+    }
+
     /* ================================ 查询参数 ================================ */
 
     /**

@@ -1,6 +1,7 @@
 package com.qianlong.cloud.admin.service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -15,6 +16,7 @@ import com.qianlong.cloud.admin.common.PageResult;
 import com.qianlong.cloud.admin.common.TimeParams;
 import com.qianlong.cloud.admin.dto.AccountDtos.AccountLogStatView;
 import com.qianlong.cloud.admin.dto.AccountDtos.LogQuery;
+import com.qianlong.cloud.admin.dto.AccountDtos.UserLogDailyRow;
 import com.qianlong.cloud.admin.dto.AccountDtos.UserLogView;
 import com.qianlong.cloud.admin.entity.UserLogEntity;
 import com.qianlong.cloud.admin.mapper.UserLogMapper;
@@ -124,10 +126,23 @@ public class AccountLogService {
         return PageResult.of(list, total, safePage, safeSize);
     }
 
-    /** 按天聚合（趋势图），无数据的日期由调用方按需补零 */
-    public List<UserLogMapper.DayCountRow> daily(String from, String to) {
-        return userLogMapper.selectDaily(
-                TimeParams.parse(from, "from"), TimeParams.parse(to, "to"));
+    /**
+     * 按天聚合（趋势图）。
+     *
+     * <p>⚠️ 早先这个方法返回的是 **mapper 的 {@code DayCountRow}** ——
+     * 那属于数据访问层的类型，直接当接口出参会把 SQL 列名（{@code day} / {@code cnt}）
+     * 泄漏成前端契约（而前端契约是 {@code date} / {@code count}）。
+     * 现在映射成 {@link UserLogDailyRow}，与条件单/委托两个趋势接口的形状对齐。
+     *
+     * <p>无数据的日期由调用方按需补零（前端趋势图自己补）。
+     */
+    public List<UserLogDailyRow> daily(String from, String to) {
+        List<UserLogDailyRow> out = new ArrayList<>();
+        for (UserLogMapper.DayCountRow row : userLogMapper.selectDaily(
+                TimeParams.parse(from, "from"), TimeParams.parse(to, "to"))) {
+            out.add(new UserLogDailyRow(row.day(), row.cnt() == null ? 0L : row.cnt()));
+        }
+        return out;
     }
 
     /**

@@ -16,6 +16,7 @@ import com.qianlong.cloud.admin.dto.AccountDtos.AccountQuery;
 import com.qianlong.cloud.admin.dto.AccountDtos.AccountRow;
 import com.qianlong.cloud.admin.dto.AccountDtos.LogQuery;
 import com.qianlong.cloud.admin.dto.AccountDtos.RedisAccountView;
+import com.qianlong.cloud.admin.dto.AccountDtos.UserLogDailyRow;
 import com.qianlong.cloud.admin.dto.AccountDtos.UserLogView;
 import com.qianlong.cloud.admin.service.AccountLogService;
 import com.qianlong.cloud.admin.service.AccountService;
@@ -128,5 +129,23 @@ public class AccountController {
                 keyword,
                 page == null ? 1 : page,
                 pageSize == null ? 20 : pageSize));
+    }
+
+    /**
+     * 按天登录日志量（趋势图）。
+     *
+     * <p>⚠️ 这条路由是**新加的**：`UserLogMapper.selectDaily` 与
+     * `AccountLogService.daily` 早就写好了，但一直没挂到 controller 上，
+     * 于是前端那个「近 14 天日志量」在真实态下永远是空图
+     * （页面注释写的是「真实态暂无趋势接口，显示空态」—— 当时确实没有）。
+     *
+     * <p>与另外两个趋势接口（条件单 / 委托）形状一致：{@code date} + {@code count}。
+     */
+    @SaCheckLogin
+    @GetMapping("/logs/daily")
+    public ApiResult<List<UserLogDailyRow>> logDaily(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        return ApiResult.ok(accountLogService.daily(from, to));
     }
 }

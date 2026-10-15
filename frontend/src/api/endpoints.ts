@@ -13,6 +13,7 @@ import type {
   AuditLog,
   Conditional,
   DashboardOverview,
+  DailyCountRow,
   DatahubEntryPage,
   DatahubNodePage,
   DatahubTrace,
@@ -93,6 +94,23 @@ export const strategyApi = {
   /** 删除条件单（对应 remove 协议） */
   removeConditional: (id: number) => api.delete<void>(`/strategy/conditionals/${id}`),
 
+  /**
+   * 按天新增条件单（趋势图）。
+   *
+   * 后端早已实现该接口，但前端此前一直没接 —— 页面在真实态下
+   * 硬编码返回空数组，于是「近 14 天新增条件单」永远是空图。
+   * 那在当时是对的（后端确实没有），但接口做出来之后没回头接上。
+   *
+   * `source` 与列表页的数据源一致（running / history / all），
+   * 切换数据源时趋势要跟着变，否则图表与列表说的不是同一批数据。
+   */
+  listConditionalDaily: (query?: PageQuery) =>
+    api.get<DailyCountRow[]>('/strategy/conditionals/stats/daily', query),
+
+  /** 条件单类型分布（全量口径） */
+  listConditionalTypes: () =>
+    api.get<NameValueRow[]>('/strategy/conditionals/stats/types'),
+
   /** 策略运行日志 */
   listLogs: (query?: PageQuery) => api.get<PageResult<StrategyLog>>('/strategy/logs', query),
 
@@ -138,6 +156,18 @@ export const tradeApi = {
     api.get<PageResult<RedisAccount>>('/trade/assignments', query),
 
   listOrders: (query?: PageQuery) => api.get<PageResult<OrderRecord>>('/trade/orders', query),
+
+  /**
+   * 按天下单量（趋势图）。
+   *
+   * 与条件单同理：后端早已实现，但前端此前没接，
+   * 于是「近 14 天委托量」在真实态下永远是空图。
+   *
+   * `table` 必须跟着当前 tab 走（T_Order / T_Order_his）——
+   * 切到「历史表」时看的是历史表的按天数据。
+   */
+  listOrderDaily: (query?: PageQuery) =>
+    api.get<DailyCountRow[]>('/trade/orders/stats/daily', query),
 
   listTrades: (query?: PageQuery) => api.get<PageResult<TradeRecord>>('/trade/trades', query),
 
@@ -222,6 +252,16 @@ export const accountApi = {
 
   /** 登录日志按账号聚合（用于「登录频次」视图） */
   listLogStats: (query?: PageQuery) => api.get<PageResult<AccountLogStat>>('/account/logs/stats', query),
+
+  /**
+   * 按天登录日志量（趋势图）。
+   *
+   * 后端 `UserLogMapper.selectDaily` 早已存在，但**没有对外路由** ——
+   * 所以这个接口是新加的（另两处趋势是「后端有、前端没接」，
+   * 这一处是「service 有、controller 缺」，性质不同）。
+   */
+  listLogDaily: (query?: PageQuery) =>
+    api.get<DailyCountRow[]>('/account/logs/daily', query),
 }
 
 /* -------------------------------- 数据存储 -------------------------------- */

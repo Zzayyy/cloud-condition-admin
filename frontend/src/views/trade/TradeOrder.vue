@@ -74,6 +74,38 @@ const { data, loading, error, isMock, load } = useResource(
   { mock: (params: Record<string, unknown>) => withDelay(mockTradeApi.listOrders(params)) },
 )
 
+/**
+ * 近 14 天委托量（趋势图）。
+ *
+ * ⚠️ 这里**曾经是个漏做的占位**：原先写的是
+ * `const daily = isMock.value ? mockDailyOrders() : []` —— 真实态下恒为空数组，
+ * 图表永远是空的。当时那样写没错（后端还没这个接口），
+ * 但接口做出来之后没回头接上。
+ *
+ * 现在走真实接口，并按**当前 tab**（主表/历史表）取数：
+ * 切到「历史表」时看的就是历史表的按天数据。
+ */
+const {
+  data: dailyData,
+  load: loadDaily,
+} = useResource(
+  (params: Record<string, unknown>) => tradeApi.listOrderDaily(params),
+  { mock: () => withDelay(mockDailyOrders()) },
+)
+
+/** 近 14 天窗口（含今天）—— 后端 from/to 可选，不传会返回全部历史 */
+function dailyWindow() {
+  const p = (n: number) => String(n).padStart(2, '0')
+  const d = (dt: Date) => `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`
+  const today = new Date()
+  const from = new Date(today.getTime() - 13 * 86400_000)
+  return { from: `${d(from)} 00:00:00`, to: `${d(today)} 23:59:59` }
+}
+
+function loadDailyTrend() {
+  loadDaily({ table: tab.value === 'active' ? 'T_Order' : 'T_Order_his', ...dailyWindow() })
+}
+
 function currentParams() {
   return {
     page: page.value,
@@ -82,13 +114,15 @@ function currentParams() {
     bsType: bsFilter.value ?? undefined,
     ocType: ocFilter.value ?? undefined,
     code: codeFilter.value.trim() || undefined,
-    // 主表/历史表区分：目前 mock 用 ID 奇偶无关，真实实现按表名分
+    // 主表/历史表区分：mock 用 ID 奇偶无关，真实实现按表名分
     table: tab.value === 'active' ? 'T_Order' : 'T_Order_his',
   }
 }
 
 function reload() {
   load(currentParams())
+  // 趋势与列表同源，一起刷新 —— 否则切 tab 后图表会滞后一次
+  loadDailyTrend()
 }
 
 onMounted(reload)
@@ -153,20 +187,37 @@ const bsChartOption = computed(() => {
 })
 
 const dailyChartOption = computed(() => {
-  // 趋势图需要跨天聚合，当前只有演示数据有；真实接口下应改由后端提供，
-  // 这里在非演示态返回空数组 → 图表显示「暂无数据」，绝不用假数据充数。
-  const daily = isMock.value ? mockDailyOrders() : []
+  /*
+   * 趋势有**自己的** useResource（含自己的 mock 分支），所以直接用 `dailyData` ——
+   * **不要**拿列表那个资源的 `isMock` 判断走哪边：那既重复处理，
+   * 又会犯 README 第 5 条记的时序坑（列表的 isMock 在 await 前仍是 false）。
+   *
+   * 后端只返回**有数据的日期**，这里按 14 天窗口补零 ——
+   * 不补的话，只有一条数据时折线会画成一个点（或把相隔多日的两点连成线），
+   * 看起来像「一直有数据」。
+   */
+  const daily = dailyData.value ?? []
+  const byDay = new Map(daily.map((d) => [d.date, d.count]))
+  const filled: Array<{ date: string; count: number }> = []
+  const today = new Date()
+  for (let i = 13; i >= 0; i -= 1) {
+    const dt = new Date(today.getTime() - i * 86400_000)
+    const p = (n: number) => String(n).padStart(2, '0')
+    const day = `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`
+    filled.push({ date: day, count: byDay.get(day) ?? 0 })
+  }
+
   return {
     grid: { left: 8, right: 16, top: 16, bottom: 8, containLabel: true },
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: daily.map((d) => d.date.slice(5)), axisLabel: { fontSize: 11 } },
+    xAxis: { type: 'category', data: filled.map((d) => d.date.slice(5)), axisLabel: { fontSize: 11 } },
     yAxis: { type: 'value', minInterval: 1 },
     series: [
       {
         type: 'line',
         smooth: true,
         symbolSize: 6,
-        data: daily.map((d) => d.count),
+        data: filled.map((d) => d.count),
         itemStyle: { color: accent },
         lineStyle: { width: 2.5, color: accent },
         areaStyle: {
@@ -429,7 +480,16 @@ const marketOrderType = computed(() => {
               近 14 天委托量
             </span>
           </template>
-          <BaseChart :option="dailyChartOption" :height="230" />
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">
+              按 OrderTime 聚合（{{ tab === 'active' ? 'T_Order' : 'T_Order_his' }}）
+            </span>
+          </template>
+          <BaseChart
+            :option="dailyChartOption"
+            :height="230"
+            empty-text="近 14 天内没有委托单"
+          />
         </n-card>
       </n-gi>
     </n-grid>

@@ -72,6 +72,43 @@ const { data, loading, error, isMock, load } = useResource(
   { mock: (params: Record<string, unknown>) => withDelay(mockStrategyApi.listConditionals(params)) },
 )
 
+/**
+ * 近 14 天新增条件单（趋势图）。
+ *
+ * ⚠️ 这里**曾经是个漏做的占位**：原先写的是
+ * `const daily = isMock.value ? mockDailyCreated() : []` ——
+ * 真实态下恒为空数组，于是图表永远是空的。
+ * 那个写法在当时是对的（后端确实还没有这个接口），
+ * 但接口做出来之后一直没回头接上，也没人发现。
+ *
+ * 现在改为走真实接口，并按**当前数据源**（运行中/历史/全部）取数 ——
+ * 不跟着 source 走的话，图表与列表说的就不是同一批数据了。
+ *
+ * ⚠️ 同时**显式传 14 天时间范围**：后端的 `from`/`to` 都是可选的，
+ * 不传就返回全部历史（按天聚合，可能很多天），页面只画 14 天，
+ * 白拉再丢掉没有必要。
+ */
+const {
+  data: dailyData,
+  load: loadDaily,
+} = useResource(
+  (params: Record<string, unknown>) => strategyApi.listConditionalDaily(params),
+  { mock: () => withDelay(mockDailyCreated()) },
+)
+
+/** 近 14 天窗口（含今天），与后端时间口径一致 */
+function dailyWindow() {
+  const p = (n: number) => String(n).padStart(2, '0')
+  const d = (dt: Date) => `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`
+  const today = new Date()
+  const from = new Date(today.getTime() - 13 * 86400_000)
+  return { from: `${d(from)} 00:00:00`, to: `${d(today)} 23:59:59` }
+}
+
+function loadDailyTrend() {
+  loadDaily({ source: source.value, ...dailyWindow() })
+}
+
 function currentParams() {
   return {
     page: page.value,
@@ -85,6 +122,8 @@ function currentParams() {
 
 function reload() {
   load(currentParams())
+  // 趋势与列表同源，一起刷新 —— 否则切数据源后图表会滞后一次
+  loadDailyTrend()
 }
 
 onMounted(reload)
@@ -157,15 +196,32 @@ const typeChartOption = computed(() => {
 })
 
 const dailyChartOption = computed(() => {
-  // 趋势需跨天聚合，只有演示数据具备；真实接口下改由后端提供，
-  // 非演示态返回空数组 → 图表显示「暂无数据」，不用假数据充数。
-  const daily = isMock.value ? mockDailyCreated() : []
+  /*
+   * 趋势有**自己的** useResource（含自己的 mock 分支），所以这里直接用
+   * `dailyData` 即可 —— **不要**再拿列表那个资源的 `isMock` 来判断走哪边：
+   * 那样既重复处理，又会犯 README 第 5 条记的时序坑
+   * （列表的 isMock 在 await 之前仍是 false，会误判成真实态）。
+   *
+   * 后端只返回**有数据的日期**，所以这里按 14 天窗口补零：
+   * 不补的话折线会把两个相隔多日的点直接连起来，看起来像「一直有数据」。
+   */
+  const daily = dailyData.value ?? []
+  const byDay = new Map(daily.map((d) => [d.date, d.count]))
+  const filled: Array<{ date: string; count: number }> = []
+  const today = new Date()
+  for (let i = 13; i >= 0; i -= 1) {
+    const dt = new Date(today.getTime() - i * 86400_000)
+    const p = (n: number) => String(n).padStart(2, '0')
+    const day = `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`
+    filled.push({ date: day, count: byDay.get(day) ?? 0 })
+  }
+
   return {
     grid: { left: 8, right: 16, top: 16, bottom: 8, containLabel: true },
     tooltip: { trigger: 'axis' },
     xAxis: {
       type: 'category',
-      data: daily.map((d) => d.date.slice(5)),
+      data: filled.map((d) => d.date.slice(5)),
       axisLabel: { fontSize: 11 },
     },
     yAxis: { type: 'value', minInterval: 1 },
@@ -174,7 +230,7 @@ const dailyChartOption = computed(() => {
         type: 'line',
         smooth: true,
         symbolSize: 6,
-        data: daily.map((d) => d.count),
+        data: filled.map((d) => d.count),
         itemStyle: { color: accent },
         lineStyle: { width: 2.5, color: accent },
         areaStyle: {
@@ -448,7 +504,17 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
               近 14 天新增条件单
             </span>
           </template>
-          <BaseChart :option="dailyChartOption" :height="230" />
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">
+              按 AddTime 聚合（当前数据源：
+              {{ source === 'running' ? '运行中' : source === 'history' ? '历史' : '全部' }}）
+            </span>
+          </template>
+          <BaseChart
+            :option="dailyChartOption"
+            :height="230"
+            empty-text="近 14 天内没有新增条件单"
+          />
         </n-card>
       </n-gi>
     </n-grid>

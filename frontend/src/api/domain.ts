@@ -980,6 +980,18 @@ export interface DashboardDailyRow {
   trade: number
 }
 
+/**
+ * 「按天计数」的通用形状（各模块的趋势图都用它）。
+ *
+ * 对应后端的 `DailyCreatedRow` / `DailyOrderRow` / `DailyLogRow` ——
+ * 那三个 record 的字段完全一样（`date` + `count`），所以前端也共用一个类型。
+ */
+export interface DailyCountRow {
+  /** YYYY-MM-DD */
+  date: string
+  count: number
+}
+
 /** 总览页一次性返回的全部内容 */
 export interface DashboardOverview {
   summary: DashboardSummary
