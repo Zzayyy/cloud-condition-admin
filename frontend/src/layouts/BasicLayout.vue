@@ -639,9 +639,42 @@ const pageStatus = computed(() => route.meta?.status as string | undefined)
   height: 100vh;
 }
 
+/*
+ * ⚠️ 这一条是「顶栏 + 页签栏固定」真正生效的关键，删了就退回滚动整页。
+ *
+ * `<n-layout class="main-col">` 会在内部**自己再套一层** `.n-layout-scroll-container`
+ * （naive-ui Layout 的 render 固定结构），并把 header / tabs-bar / content 全部装进那一层；
+ * 而 naive-ui 给这层写了 `overflow-x:hidden; height:100%`，浏览器据此把 `overflow-y`
+ * 算成 `auto` —— 于是**滚动发生在这层容器上**，`.main-col` 上的 `flex-direction:column`
+ * 完全够不到三个子元素，顶栏和页签栏就跟着一起被卷走了。
+ * （实测：滚动 816px 后 `.header` 的 top 从 0 变成 -816。）
+ *
+ * 修法：让这层容器不滚（同时必须补 `flex-direction:column`，否则它自身的
+ * `display:flex` 会把三个子元素横向排开），滚动交给下面的 `.content`。
+ * 这样 flex 的「头部固定、内容吃剩余高度」才真正成立。
+ *
+ * ⚠️ 必须用 `:deep()`，不能直接写 `.main-col > .n-layout-scroll-container`。
+ * 这层容器是 naive-ui 渲染的，**不带本组件的 `data-v-*` 作用域属性**
+ * （实测该元素只有 `class`，没有任何 `data-v-*`），而 scoped 会把作用域属性
+ * 追加到最后一个选择器片段上，直接写会编译成
+ * `.main-col > .n-layout-scroll-container[data-v-xxx]` 而**静默失效**。
+ * 这正是下面 .content 那类朴素选择器能生效、而外层必须下钻的原因。
+ */
+.main-col :deep(.n-layout-scroll-container) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/*
+ * 内容区是唯一的滚动容器。
+ * `min-height: 0` 必需：flex 子项默认 `min-height:auto` 不肯收缩到内容以下，
+ * 只写 `flex:1` 会被内容顶高，滚动条就不出现在这里。
+ */
 .content {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
   background: var(--bg-body);
 }
 
