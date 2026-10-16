@@ -426,7 +426,7 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
       style="margin-top: 16px"
     >
       <n-gi>
-        <n-card class="page-card" size="small" :bordered="false">
+        <n-card class="page-card chart-card" size="small" :bordered="false">
           <template #header>
             <span class="section-title">
               <n-icon :component="AnalyticsOutline" :color="accent" :size="17" />
@@ -442,7 +442,7 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
               注意这不是漏斗：一张条件单可拆成多笔委托，所以委托数可能多于条件单数。
             </n-tooltip>
           </template>
-          <BaseChart :option="funnelOption" :height="168" />
+          <BaseChart :option="funnelOption" height="100%" style="min-height: 168px" />
           <div class="fill-rate">
             <span class="fill-label">成交率</span>
             <span class="fill-value" :style="fillRate === 0 ? 'color:#8a94a6' : ''">{{ fillRate }}%</span>
@@ -468,14 +468,14 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
       </n-gi>
 
       <n-gi>
-        <n-card class="page-card" size="small" :bordered="false">
+        <n-card class="page-card chart-card" size="small" :bordered="false">
           <template #header>
             <span class="section-title">
               <n-icon :component="TrendingUpOutline" color="#2f9e5f" :size="17" />
               近 14 天跨表趋势
             </span>
           </template>
-          <BaseChart :option="trendOption" :height="190" />
+          <BaseChart :option="trendOption" height="100%" style="min-height: 190px" />
         </n-card>
       </n-gi>
     </n-grid>
@@ -489,7 +489,7 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
       style="margin-top: 16px"
     >
       <n-gi>
-        <n-card class="page-card" size="small" :bordered="false">
+        <n-card class="page-card chart-card" size="small" :bordered="false">
           <template #header>
             <span class="section-title">
               <n-icon :component="GitNetworkOutline" color="#d6455e" :size="17" />
@@ -504,7 +504,7 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
               </template>
             </span>
           </template>
-          <BaseChart :option="backlogOption" :height="190" />
+          <BaseChart :option="backlogOption" height="100%" style="min-height: 190px" />
         </n-card>
       </n-gi>
 
@@ -611,6 +611,59 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
 :deep(.stat-card) {
   height: 100%;
   box-sizing: border-box;
+}
+
+/*
+ * 栅格单元本身是等高的，但**卡片不撑满就会下沿对不齐**。
+ * 第一排的指标卡早有上面那条 `.stat-card { height:100% }`，第二、三排的卡片之前漏了，
+ * 于是同一排两张卡各按自己的内容高度：
+ *   第二排  左「业务量级与成交率」288.6 / 右「近 14 天跨表趋势」253.6（差 35px）
+ *   第三排  左「消息总线积压构成」253.6 / 右「云单账号在线情况」285.5（差 31.9px）
+ *
+ * ⚠️ 这里**不能写 `.n-gi > .n-card`**：naive-ui 的 `<n-gi>` 渲染出来是一个
+ * **没有任何类名的 div**（实测父级链是 `.n-card` → `div[class=""]` → `.n-grid`），
+ * 所以 `.n-gi` 选择器永远匹配不到，规则会静默失效。
+ * 用「栅格单元的直接子卡片」这个结构关系来选：`.n-grid > div > .n-card`。
+ *
+ * 同时注意不能写成 `:deep(.n-grid > div > .n-card)` —— `:deep(x)` 编译成
+ * `[data-v-xxx] x`，要求 x 是带该属性元素的**后代**，而 `.n-grid` 是 n-grid
+ * 渲染的、不带本组件属性，卡片却带着属性。写成 `.n-grid :deep(> div > .n-card)`
+ * 让作用域落在 `.n-grid` 上才对（编译为 `.n-grid[data-v-xxx] > div > .n-card`）。
+ */
+.n-grid :deep(> div > .n-card) {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+/*
+ * 只有图表的卡片，撑高后底部会留一块空白（趋势卡矮 35px、总线卡矮 32px）。
+ * 让图表去吃掉这部分剩余高度。
+ *
+ * 两个都踩过的坑，写在前面免得再犯：
+ *
+ * ① 内容区的类名是 **`.n-card-content`**（连字符），不是 `.n-card__content`
+ *    （BEM 的 `__` 形式）。写成 `__` 版会静默匹配不到。
+ *
+ * ② **不能把这些规则写成 `:deep(.n-card.chart-card > .n-card-content)`。**
+ *    `:deep(x)` 的编译结果是 `[data-v-xxx] x` —— 作用域属性被放到**最前面**，
+ *    要求 `x` 必须是带该属性元素的**后代**。而卡片自己就带着 `data-v-xxx`
+ *    （它是本组件的模板元素），所以 `[data-v-xxx] .n-card.chart-card …`
+ *    永远匹配不到，整套样式静默失效。
+ *    正确做法：`:` 只限定到「我自己的元素」，内部结构一律交给 `:deep(…)` 收尾，
+ *    例如 `.n-card.chart-card :deep(.n-card-content)`，
+ *    编译成 `.n-card.chart-card[data-v-xxx] .n-card-content` —— 这才对。
+ *
+ * 高度不能靠 `height:auto` 改：BaseChart 把 height 写成 `.chart-wrap` 的内联 style，
+ * 内联优先级高于样式表，所以模板里直接把 height 传 `"100%"`，
+ * 并用内联 `min-height` 兜住下限（等于原来的固定高度）。
+ */
+.n-card.chart-card :deep(.n-card-content) {
+  display: flex;
+  flex-direction: column;
+}
+
+.n-card.chart-card :deep(.n-card-content > .chart-wrap) {
+  flex: 1 1 auto;
 }
 
 /* ------------------------------ 节点明细 ------------------------------ */
