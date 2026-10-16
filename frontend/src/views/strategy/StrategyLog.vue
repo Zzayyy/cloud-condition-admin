@@ -34,7 +34,11 @@ import BaseChart from '@/components/BaseChart.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { strategyApi } from '@/api/endpoints'
-import { mockStrategyApi } from '@/api/mock/strategy'
+import {
+  mockLogStatusDistribution,
+  mockStrategyApi,
+  mockStrategyLogStats,
+} from '@/api/mock/strategy'
 import { withDelay } from '@/api/mock/_shared'
 import type { StrategyLog } from '@/api/domain'
 import { useResource } from '@/composables/useResource'
@@ -65,8 +69,47 @@ function currentParams() {
   }
 }
 
+/** 汇总用的参数：同筛选条件、不带分页 */
+function statsParams() {
+  return {
+    keyword: keyword.value.trim() || undefined,
+    status: statusFilter.value ?? undefined,
+    fromIp: fromIp.value.trim() || undefined,
+  }
+}
+
+/**
+ * 日志汇总（**全量口径**）。
+ *
+ * 原先是对当前页 `rows` 算成功/失败与成功率 —— 「成功率」这种标签
+ * 尤其不能按页算：一页里恰好几条失败，成功率就会剧烈跳动。
+ */
+const {
+  data: statsData,
+  load: loadStats,
+} = useResource(
+  (params: Record<string, unknown>) => strategyApi.logStats(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockStrategyLogStats(params)) },
+)
+
+/**
+ * 状态分布（**全量口径**）—— 由后端 GROUP BY 算。
+ *
+ * 原先是拿当前页明细自己分组，那只是这一页的分布。
+ * 现场 Status 整列为 NULL，所以只会有一行 status=null，显示成「（空）」。
+ */
+const {
+  data: statusDist,
+  load: loadStatusDist,
+} = useResource(
+  (params: Record<string, unknown>) => strategyApi.logStatusDistribution(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockLogStatusDistribution(params)) },
+)
+
 function reload() {
   load(currentParams())
+  loadStats(statsParams())
+  loadStatusDist(statsParams())
 }
 
 onMounted(reload)
@@ -134,26 +177,27 @@ function statusIcon(status: string | null) {
   return AlertCircleOutline
 }
 
+/**
+ * 卡片汇总 —— **全量口径**，来自后端 `/logs/stats/summary`。
+ *
+ * 成功率尤其不能按当前页算：一页里恰好几条失败，百分比就会剧烈跳动。
+ * `statusColumnEmpty` 让页面能区分「真的 0%」与「状态列没数据」。
+ */
 const summary = computed(() => {
-  const list = rows.value
-  const ok = list.filter((r) => statusType(r.Status) === 'success').length
-  const fail = list.filter((r) => statusType(r.Status) === 'error').length
+  const s = statsData.value
   return {
-    ok,
-    fail,
-    rate: list.length ? Math.round((ok / list.length) * 100) : 0,
-    sources: new Set(list.map((r) => r.FromAccount).filter(Boolean)).size,
+    ok: s?.okCount ?? 0,
+    fail: s?.failCount ?? 0,
+    rate: s?.successRate ?? 0,
+    sources: s?.sourceCount ?? 0,
   }
 })
 
-/** 状态分布柱状图（本页口径） */
+/** 状态分布柱状图（**全量口径**，数据来自后端） */
 const statusChartOption = computed(() => {
-  const counts = new Map<string, number>()
-  for (const r of rows.value) {
-    const key = r.Status ?? '未知'
-    counts.set(key, (counts.get(key) ?? 0) + 1)
-  }
-  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  const entries = (statusDist.value ?? []).map(
+    (r) => [r.status ?? '（空）', r.count] as [string, number],
+  )
   const colorOf: Record<string, string> = {
     触发成功: '#2f9e5f',
     已恢复: '#2f9e5f',
@@ -275,7 +319,7 @@ const relatedTimeline = computed(() => {
           suffix="条"
           :icon="CheckmarkCircleOutline"
           color="#2f9e5f"
-          hint="本页口径"
+          :hint="statusColumnEmpty ? '状态列现场为空，无法统计' : '触发成功 / 已恢复'"
         />
       </n-gi>
       <n-gi>
@@ -285,7 +329,7 @@ const relatedTimeline = computed(() => {
           suffix="条"
           :icon="AlertCircleOutline"
           color="#d6455e"
-          hint="需要重点关注"
+          :hint="statusColumnEmpty ? '状态列现场为空，无法统计' : '触发失败 / 校验失败 / 参数错误'"
         />
       </n-gi>
       <n-gi>
@@ -295,7 +339,7 @@ const relatedTimeline = computed(() => {
           suffix="%"
           :icon="DocumentTextOutline"
           :color="accent"
-          hint="本页口径，非全量"
+          :hint="statusColumnEmpty ? '状态列现场为空，不代表全部失败' : '成功 /（成功 + 失败）'"
         />
       </n-gi>
       <n-gi>

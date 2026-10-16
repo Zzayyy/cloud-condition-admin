@@ -33,8 +33,42 @@ public final class StrategyLogDtos {
             String FromAccount) {
     }
 
-    /** 按天日志量（趋势图用） */
+    /** 按天的日志量（趋势图用） */
     public record DailyLogRow(String date, long count) {
+    }
+
+    /**
+     * 按 Status 分组的计数（状态分布柱状图，**全量口径**）。
+     *
+     * <p>{@code status} 为 {@code null} 表示「这些行的 Status 是 NULL」——
+     * 现场整列如此，所以只会有一行 {@code status=null}。
+     * 前端显示成「（空）」比编一个「未知」更贴近事实。
+     */
+    public record StatusCountRow(String status, long count) {
+    }
+
+    /**
+     * 策略日志汇总（**全量口径**，卡片用）。
+     *
+     * <p>⚠️ 现场 {@code Status} 整列为 NULL，所以 {@code okCount} /
+     * {@code failCount} 现在都是 0、{@code successRate} 也是 0。
+     * 这是**事实**，前端应显示「状态列现场为空」而不是一个看起来像
+     * 「全都失败了」的 0%。因此这里额外带 {@code statusColumnEmpty}，
+     * 让页面能区分「真的是 0%」和「这一列没数据」。
+     */
+    public record StrategyLogStats(
+            /** 成功条数（触发成功 / 已恢复） */
+            long okCount,
+            /** 失败条数（触发失败 / 校验失败 / 参数错误） */
+            long failCount,
+            /** 成功率百分比（0-100 取整）；状态列为空时为 0 */
+            int successRate,
+            /** 来源账号去重数 */
+            long sourceCount,
+            /** 当前筛选下的总条数（应与列表 total 一致） */
+            long totalCount,
+            /** Status 列是否整列为空（为空时成功率无意义） */
+            boolean statusColumnEmpty) {
     }
 
     /** 按条件单聚合（「按策略单查看生命周期」） */

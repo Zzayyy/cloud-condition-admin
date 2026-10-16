@@ -992,6 +992,76 @@ export interface DailyCountRow {
   count: number
 }
 
+/* ------------------------- 全量汇总（卡片用，非本页口径） ------------------------- */
+
+/*
+ * 下面这几个 `*Stats` 是**后端全量口径**的汇总，取代原先「对当前页 rows
+ * 做 filter / reduce」的算法。
+ *
+ * 为什么必须由后端算：卡片标签写的是「运行中」「成交金额」这种像全量的说法，
+ * 而按当前页算出来的数字**翻一页就变**，且没有总数可对照 —— 会被读成总量。
+ * 每个 Stats 都带 `totalCount`，它应与列表接口的 `total` 相等；
+ * 两者不等就说明筛选条件在两边写岔了，联调时可直接据此发现。
+ */
+
+/** 条件单汇总（对应后端 ConditionalStats） */
+export interface ConditionalStats {
+  /** Mode = 1 */
+  runningCount: number
+  /** Status = 1 */
+  triggeredCount: number
+  /** Flag = 1 */
+  pausedCount: number
+  /** RunCount 求和 */
+  totalRunCount: number
+  /** 当前筛选下的总条数（应等于列表 total） */
+  totalCount: number
+}
+
+/** 委托单汇总（对应后端 OrderStats） */
+export interface OrderStats {
+  buyCount: number
+  sellCount: number
+  abnormalCount: number
+  /** OrderPrice × OrderVolumn 求和 */
+  totalAmount: number
+  totalCount: number
+}
+
+/** 成交汇总（对应后端 TradeStats） */
+export interface TradeStats {
+  totalCount: number
+  totalVolumn: number
+  totalAmount: number
+  /** 均价 = totalAmount / totalVolumn（由后端算，不是各页均价的平均） */
+  avgPrice: number
+}
+
+/** 按合约的成交量（对应后端 CodeCountRow） */
+export interface CodeCountRow {
+  code: string
+  count: number
+}
+
+/** 策略日志汇总（对应后端 StrategyLogStats） */
+export interface StrategyLogStats {
+  okCount: number
+  failCount: number
+  /** 0-100 取整；状态列为空时为 0 且无意义 */
+  successRate: number
+  sourceCount: number
+  totalCount: number
+  /** Status 列是否整列为空 —— 为空时成功率不代表「全都失败」 */
+  statusColumnEmpty: boolean
+}
+
+/** 按 Status 分组的计数（状态分布柱状图，全量口径） */
+export interface StatusCountRow {
+  /** null 表示这些行的 Status 是 NULL（现场整列如此） */
+  status: string | null
+  count: number
+}
+
 /** 总览页一次性返回的全部内容 */
 export interface DashboardOverview {
   summary: DashboardSummary
@@ -1002,7 +1072,6 @@ export interface DashboardOverview {
   /** 数据生成时间（页面据此显示「快照于 …」） */
   generatedAt: string
 }
-
 
 /* ---------------------------- 管理端：用户与权限 ---------------------------- */
 

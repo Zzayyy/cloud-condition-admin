@@ -11,13 +11,16 @@ import com.qianlong.cloud.admin.common.BizException;
 import com.qianlong.cloud.admin.common.DateTimes;
 import com.qianlong.cloud.admin.common.TimeParams;
 import com.qianlong.cloud.admin.dto.TradeDtos.BsCountRow;
+import com.qianlong.cloud.admin.dto.TradeDtos.CodeCountRow;
 import com.qianlong.cloud.admin.dto.TradeDtos.DailyOrderRow;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderPage;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderQuery;
+import com.qianlong.cloud.admin.dto.TradeDtos.OrderStats;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderView;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeListMeta;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradePage;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeQuery;
+import com.qianlong.cloud.admin.dto.TradeDtos.TradeStats;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeView;
 import com.qianlong.cloud.admin.entity.OrderEntity;
 import com.qianlong.cloud.admin.entity.TradeEntity;
@@ -131,6 +134,73 @@ public class OrderService {
             out.add(new DailyOrderRow(row.day(), row.cnt() == null ? 0L : row.cnt()));
         }
         return out;
+    }
+
+    /**
+     * 委托单汇总（全量口径，卡片用）。
+     *
+     * <p>按当前筛选条件统计全表 —— 卡片标签写的是「买入委托」这种像全量的说法，
+     * 给当前页的数字会被读成总量，而且翻页就变。
+     *
+     * <p>筛选条件与 {@code listOrders} 完全一致，所以 {@code totalCount}
+     * 应与列表 {@code total} 相等；不相等说明两处写岔了。
+     */
+    public OrderStats stats(OrderQuery query) {
+        TradeTable table = TradeTable.ofOrder(query.getTable());
+        OrderMapper.OrderStatsRow row = orderMapper.selectStats(
+                table.table(), trimToNull(query.getKeyword()),
+                query.getBsType(), query.getOcType(), trimToNull(query.getCode()));
+        if (row == null) {
+            return new OrderStats(0, 0, 0, 0, 0);
+        }
+        return new OrderStats(
+                nz(row.buyCount()), nz(row.sellCount()), nz(row.abnormalCount()),
+                row.totalAmount() == null ? 0d : row.totalAmount(),
+                nz(row.totalCount()));
+    }
+
+    private static long nz(Long v) {
+        return v == null ? 0L : v;
+    }
+
+    /* ================================ 成交 ================================ */
+
+    /**
+     * 成交汇总（全量口径，卡片用）。
+     *
+     * <p>成交金额 / 总量由数据库把 varchar 的 {@code Volumn} 转 DECIMAL 后求和，
+     * 均价用「总额 ÷ 总量」算 —— 这些都不该由前端拿当前页自己加。
+     */
+    public TradeStats tradeStats(TradeQuery query) {
+        TradeTable table = TradeTable.ofTrade(query.getTable());
+        String keyword = trimToNull(query.getKeyword());
+        String code = trimToNull(query.getCode());
+
+        TradeMapper.TradeStatsRow row = tradeMapper.selectStats(table.table(), keyword, code);
+        if (row == null) {
+            return new TradeStats(0, 0, 0, 0);
+        }
+        double volumn = row.totalVolumn() == null ? 0d : row.totalVolumn().doubleValue();
+        double amount = row.totalAmount() == null ? 0d : row.totalAmount().doubleValue();
+        double avg = volumn > 0 ? amount / volumn : 0d;
+        return new TradeStats(nz(row.totalCount()), volumn, amount, avg);
+    }
+
+    /**
+     * 按合约的成交量分布（全量口径，合约分布图用）。
+     *
+     * <p>同样不能在 前端按当前页分组 —— 那只是这一页的分布。
+     */
+    public List<CodeCountRow> codeDistribution(TradeQuery query, int limit) {
+        TradeTable table = TradeTable.ofTrade(query.getTable());
+        int safeLimit = Math.min(Math.max(1, limit), 50);
+        return tradeMapper.countByCode(
+                        table.table(), trimToNull(query.getKeyword()),
+                        trimToNull(query.getCode()), safeLimit).stream()
+                .map(r -> new CodeCountRow(
+                        r.code() == null ? "未知" : r.code(),
+                        r.cnt() == null ? 0d : r.cnt().doubleValue()))
+                .toList();
     }
 
     /* ================================ 成交 ================================ */

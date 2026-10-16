@@ -12,6 +12,7 @@ import com.qianlong.cloud.admin.common.ApiResult;
 import com.qianlong.cloud.admin.common.BizException;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.ConditionalPage;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.ConditionalQuery;
+import com.qianlong.cloud.admin.dto.ConditionalDtos.ConditionalStats;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.ConditionalView;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.DailyCreatedRow;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.TypeCountRow;
@@ -95,6 +96,18 @@ public class ConditionalController {
     @GetMapping("/stats/types")
     public ApiResult<List<TypeCountRow>> typeDistribution() {
         return ApiResult.ok(conditionalService.typeDistribution());
+    }
+
+    /**
+     * 条件单汇总（**全量口径**，卡片用）。
+     *
+     * <p>与列表同参数（source / keyword / type / mode），
+     * 所以 {@code totalCount} 应与列表的 {@code total} 相等。
+     */
+    @SaCheckLogin
+    @GetMapping("/stats/summary")
+    public ApiResult<ConditionalStats> stats(ConditionalQuery query) {
+        return ApiResult.ok(conditionalService.stats(query));
     }
 
     /**

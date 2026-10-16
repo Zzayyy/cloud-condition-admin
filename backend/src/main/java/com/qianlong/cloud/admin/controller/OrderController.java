@@ -12,12 +12,15 @@ import com.qianlong.cloud.admin.common.ApiResult;
 import com.qianlong.cloud.admin.common.PageResult;
 import com.qianlong.cloud.admin.dto.AccountDtos.RedisAccountView;
 import com.qianlong.cloud.admin.dto.TradeDtos.BsCountRow;
+import com.qianlong.cloud.admin.dto.TradeDtos.CodeCountRow;
 import com.qianlong.cloud.admin.dto.TradeDtos.DailyOrderRow;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderPage;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderQuery;
+import com.qianlong.cloud.admin.dto.TradeDtos.OrderStats;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderView;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradePage;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeQuery;
+import com.qianlong.cloud.admin.dto.TradeDtos.TradeStats;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeView;
 import com.qianlong.cloud.admin.dto.TradeServerDtos.AssignmentQuery;
 import com.qianlong.cloud.admin.dto.TradeServerDtos.TradeServerPage;
@@ -115,6 +118,19 @@ public class OrderController {
         return ApiResult.ok(orderService.dailyOrders(table, from, to));
     }
 
+    /**
+     * 委托单汇总（**全量口径**，卡片用）。
+     *
+     * <p>参数与 {@code /orders} 列表一致（keyword / bsType / ocType / code / table），
+     * 所以 {@code totalCount} 应与列表的 {@code total} 相等 ——
+     * 卡片数字与「共 N 条」对不上时可据此立刻定位。
+     */
+    @SaCheckLogin
+    @GetMapping("/orders/stats/summary")
+    public ApiResult<OrderStats> orderStats(OrderQuery query) {
+        return ApiResult.ok(orderService.stats(query));
+    }
+
     /* ================================ 成交回报 ================================ */
 
     /**
@@ -127,6 +143,31 @@ public class OrderController {
     @GetMapping("/trades")
     public ApiResult<TradePage> listTrades(TradeQuery query) {
         return ApiResult.ok(orderService.listTrades(query));
+    }
+
+    /**
+     * 成交汇总（**全量口径**，卡片用）。
+     *
+     * <p>成交金额 / 总量 / 均价都由数据库算准，前端不再按当前页自己加。
+     * 均价是「总额 ÷ 总量」，不是对每页均价的平均。
+     */
+    @SaCheckLogin
+    @GetMapping("/trades/stats/summary")
+    public ApiResult<TradeStats> tradeStats(TradeQuery query) {
+        return ApiResult.ok(orderService.tradeStats(query));
+    }
+
+    /**
+     * 按合约的成交量分布（**全量口径**，合约分布图用）。
+     *
+     * <p>{@code limit} 默认 8（与页面上「最多显示 8 个合约」一致）。
+     */
+    @SaCheckLogin
+    @GetMapping("/trades/stats/codes")
+    public ApiResult<List<CodeCountRow>> tradeCodes(
+            TradeQuery query,
+            @RequestParam(required = false, defaultValue = "8") Integer limit) {
+        return ApiResult.ok(orderService.codeDistribution(query, limit));
     }
 
     /* ============================== 委托服务器管理 ============================== */

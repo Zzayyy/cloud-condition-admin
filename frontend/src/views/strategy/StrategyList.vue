@@ -42,6 +42,7 @@ import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { strategyApi } from '@/api/endpoints'
 import {
+  mockConditionalStats,
   mockDailyCreated,
   mockStrategyApi,
   mockTypeDistribution,
@@ -117,10 +118,35 @@ function currentParams() {
   }
 }
 
+/**
+ * 卡片汇总用的参数：与 `currentParams()` **同筛选条件、但不带分页**。
+ *
+ * 汇总必须由后端按筛选条件统计全表。原先是对当前页 `rows` 做 filter，
+ * 于是「运行中 3 条」翻一页就变成别的数字 —— 而标签上写的是「运行中」，
+ * 会被读成全量，且没有总数可对照。
+ */
+function statsParams() {
+  return {
+    keyword: keyword.value.trim() || undefined,
+    type: typeFilter.value ?? undefined,
+    mode: modeFilter.value ?? undefined,
+    source: source.value,
+  }
+}
+
+const {
+  data: statsData,
+  load: loadStats,
+} = useResource(
+  (params: Record<string, unknown>) => strategyApi.conditionalStats(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockConditionalStats(params)) },
+)
+
 function reload() {
   load(currentParams())
-  // 趋势与列表同源，一起刷新 —— 否则切数据源后图表会滞后一次
+  // 趋势与汇总都与列表同源，一起刷新 —— 否则切数据源后会滞后一次
   loadDailyTrend()
+  loadStats(statsParams())
 }
 
 onMounted(reload)
@@ -153,13 +179,20 @@ const total = computed(() => data.value?.total ?? 0)
 
 /* ------------------------------ 汇总 ------------------------------ */
 
+/**
+ * 卡片汇总 —— **全量口径**，来自后端 `/stats/summary`。
+ *
+ * 这里曾经是对 `rows`（当前页）做 filter / reduce，导致「运行中」「已触发」
+ * 这类标签下的数字**翻页就变**。现在与列表同筛选条件、由数据库统计全表，
+ * 与列表的 `total` 同源（`totalCount` 应当相等）。
+ */
 const summary = computed(() => {
-  const list = rows.value
+  const s = statsData.value
   return {
-    running: list.filter((r) => r.Mode === 1).length,
-    triggered: list.filter((r) => r.Status === 1).length,
-    runCount: list.reduce((sum, r) => sum + (r.RunCount ?? 0), 0),
-    paused: list.filter((r) => r.Flag === 1).length,
+    running: s?.runningCount ?? 0,
+    triggered: s?.triggeredCount ?? 0,
+    runCount: s?.totalRunCount ?? 0,
+    paused: s?.pausedCount ?? 0,
   }
 })
 
@@ -445,7 +478,7 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
           suffix="条"
           :icon="PlayOutline"
           color="#2f9e5f"
-          hint="本页口径（Mode=1）"
+          hint="Mode=1"
         />
       </n-gi>
       <n-gi>
@@ -455,7 +488,7 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
           suffix="条"
           :icon="TrendingUpOutline"
           color="#dd7a15"
-          hint="本页口径（Status=1）"
+          hint="Status=1"
         />
       </n-gi>
       <n-gi>
@@ -465,7 +498,7 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
           suffix="条"
           :icon="PauseOutline"
           color="#d6455e"
-          hint="本页口径（Flag=1）"
+          hint="Flag=1"
         />
       </n-gi>
       <n-gi>
@@ -475,7 +508,7 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
           suffix="次"
           :icon="RefreshOutline"
           :color="accent"
-          hint="本页口径（RunCount 合计）"
+          hint="RunCount 合计"
         />
       </n-gi>
     </n-grid>

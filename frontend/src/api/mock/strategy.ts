@@ -8,7 +8,14 @@
  *
  * 后端接通后 useResource 会自动改走真实接口，本文件可以整个删掉。
  */
-import type { Conditional, StrategyLog, StrategyServer, StrategyServerPage } from '../domain'
+import type {
+  Conditional,
+  ConditionalStats,
+  StrategyLog,
+  StrategyLogStats,
+  StrategyServer,
+  StrategyServerPage,
+} from '../domain'
 import type { PageQuery, PageResult } from '../types'
 import {
   agoBy,
@@ -364,6 +371,92 @@ export function mockTypeDistribution(): Array<{ type: number; name: string; coun
     name: names[type],
     count: CONDITIONALS.filter((c) => c.Type === type).length,
   }))
+}
+
+/**
+ * 条件单汇总（演示态）。口径与后端 `ConditionalStats` 一致：
+ * 对**全量** CONDITIONALS 按筛选条件统计，而不是当前页。
+ */
+export function mockConditionalStats(query: PageQuery = {}): ConditionalStats {
+  let rows = CONDITIONALS
+
+  const kw = asString(query.keyword)
+  if (kw) {
+    const k = kw.toLowerCase()
+    rows = rows.filter(
+      (r) =>
+        (r.Account ?? '').toLowerCase().includes(k) ||
+        (r.UserAccount ?? '').toLowerCase().includes(k) ||
+        (r.Name ?? '').toLowerCase().includes(k) ||
+        (r.Description ?? '').toLowerCase().includes(k),
+    )
+  }
+  const type = asNumber(query.type)
+  if (type !== undefined) rows = rows.filter((r) => r.Type === type)
+  const mode = asNumber(query.mode)
+  if (mode !== undefined) rows = rows.filter((r) => r.Mode === mode)
+
+  return {
+    runningCount: rows.filter((r) => r.Mode === 1).length,
+    triggeredCount: rows.filter((r) => r.Status === 1).length,
+    pausedCount: rows.filter((r) => r.Flag === 1).length,
+    totalRunCount: rows.reduce((s, r) => s + (r.RunCount ?? 0), 0),
+    totalCount: rows.length,
+  }
+}
+
+/**
+ * 策略日志汇总（演示态）。口径与后端 `StrategyLogStats` 一致。
+ *
+ * ⚠️ 演示数据里 `Status` 是有值的（编的），而**现场整列为 NULL**。
+ * 所以演示态会显示一个正常的成功率，真实态会是 0% + 「状态列现场为空」——
+ * 两者不同是**正确的**：演示数据只是让你看到界面形态。
+ */
+export function mockStrategyLogStats(query: PageQuery = {}): StrategyLogStats {
+  let rows = LOGS
+
+  const kw = asString(query.keyword)
+  if (kw) {
+    const k = kw.toLowerCase()
+    rows = rows.filter(
+      (r) =>
+        String(r.Strategy ?? '').includes(k) ||
+        (r.Info ?? '').toLowerCase().includes(k) ||
+        (r.FromAccount ?? '').toLowerCase().includes(k),
+    )
+  }
+  const status = asString(query.status)
+  if (status) rows = rows.filter((r) => r.Status === status)
+
+  const ok = rows.filter((r) => r.Status === '触发成功' || r.Status === '已恢复').length
+  const fail = rows.filter(
+    (r) => r.Status === '触发失败' || r.Status === '校验失败' || r.Status === '参数错误',
+  ).length
+  return {
+    okCount: ok,
+    failCount: fail,
+    successRate: ok + fail > 0 ? Math.round((ok / (ok + fail)) * 100) : 0,
+    sourceCount: new Set(rows.map((r) => r.FromAccount).filter(Boolean)).size,
+    totalCount: rows.length,
+    // 演示数据里 Status 是有值的，所以不为空
+    statusColumnEmpty: false,
+  }
+}
+
+/** 状态分布（演示态，全量口径） */
+export function mockLogStatusDistribution(
+  query: PageQuery = {},
+): Array<{ status: string | null; count: number }> {
+  const counts = new Map<string, number>()
+  const status = asString(query.status)
+  for (const r of LOGS) {
+    if (status && r.Status !== status) continue
+    const key = r.Status ?? ''
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([k, count]) => ({ status: k === '' ? null : k, count }))
+    .sort((a, b) => b.count - a.count)
 }
 
 /** 供图表用：最近 14 天新增条件单数量 */

@@ -134,6 +134,63 @@ public interface ConditionalMapper {
                                   @Param("from") java.time.LocalDateTime from,
                                   @Param("to") java.time.LocalDateTime to);
 
+    /**
+     * 条件单汇总（全量口径，卡片用）。
+     *
+     * <p>页面上「运行中 / 已触发 / 暂停-失效 / 运行次数合计」原先是对当前页
+     * 做 filter / reduce，翻页就变。这里由数据库算准。
+     *
+     * <p>筛选条件与 {@code countPage} 一致（keyword / type / mode），
+     * 保证与列表「共 N 条」对得上。
+     *
+     * <p>字段口径（与前端 {@code CONDITIONAL_MODES} / {@code CONDITIONAL_FLAGS} 对齐）：
+     * <ul>
+     *   <li>{@code Mode = 1} → 运行中</li>
+     *   <li>{@code Status = 1} → 已触发</li>
+     *   <li>{@code Flag = 1} → 暂停 / 失效</li>
+     *   <li>{@code RunCount} 求和 → 运行次数合计（NULL 兜 0）</li>
+     * </ul>
+     */
+    @Select("""
+            <script>
+            SELECT
+              COALESCE(SUM(CASE WHEN Mode = 1 THEN 1 ELSE 0 END), 0) AS runningCount,
+              COALESCE(SUM(CASE WHEN Status = 1 THEN 1 ELSE 0 END), 0) AS triggeredCount,
+              COALESCE(SUM(CASE WHEN Flag = 1 THEN 1 ELSE 0 END), 0) AS pausedCount,
+              COALESCE(SUM(COALESCE(RunCount, 0)), 0) AS totalRunCount,
+              COUNT(*) AS totalCount
+            FROM
+            <choose>
+              <when test="table == 'T_Conditional'">T_Conditional</when>
+              <when test="table == 'T_Conditional_his'">T_Conditional_his</when>
+              <when test="table == 'V_Conditional'">V_Conditional</when>
+              <otherwise>(SELECT NULL AS Mode FROM DUAL WHERE 1=0) dummy</otherwise>
+            </choose>
+            <where>
+              <if test="keyword != null and keyword != ''">
+                AND (Account LIKE CONCAT('%', #{keyword}, '%')
+                  OR UserAccount LIKE CONCAT('%', #{keyword}, '%')
+                  OR Name LIKE CONCAT('%', #{keyword}, '%')
+                  OR Description LIKE CONCAT('%', #{keyword}, '%'))
+              </if>
+              <if test="type != null">AND Type = #{type}</if>
+              <if test="mode != null">AND Mode = #{mode}</if>
+            </where>
+            </script>
+            """)
+    ConditionalStatsRow selectStats(@Param("table") String table,
+                                    @Param("keyword") String keyword,
+                                    @Param("type") Integer type,
+                                    @Param("mode") Integer mode);
+
     record DayCountRow(String day, Long cnt) {
+    }
+
+    /** 条件单汇总原始行 */
+    record ConditionalStatsRow(Long runningCount,
+                               Long triggeredCount,
+                               Long pausedCount,
+                               Long totalRunCount,
+                               Long totalCount) {
     }
 }

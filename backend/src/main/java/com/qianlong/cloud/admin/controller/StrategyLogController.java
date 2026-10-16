@@ -13,8 +13,10 @@ import com.qianlong.cloud.admin.common.PageResult;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.DailyLogRow;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyLogPage;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyLogQuery;
+import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyLogStats;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyLogView;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyStatRow;
+import com.qianlong.cloud.admin.dto.StrategyLogDtos.StatusCountRow;
 import com.qianlong.cloud.admin.service.StrategyLogService;
 
 import cn.dev33.satoken.annotation.SaCheckLogin;
@@ -86,6 +88,22 @@ public class StrategyLogController {
         return ApiResult.ok(strategyLogService.dailyLogs(from, to));
     }
 
+    /**
+     * 策略日志汇总（**全量口径**，卡片用）。
+     *
+     * <p>与列表同参数（keyword / status / fromIp / from / to），
+     * 所以 {@code totalCount} 应与列表的 {@code total} 相等。
+     *
+     * <p>⚠️ 现场 {@code Status} 整列为 NULL，所以成功/失败都是 0；
+     * 返回里的 {@code statusColumnEmpty} 让前端能区分
+     * 「真的是 0%」与「这一列没数据」—— 二者含义完全不同。
+     */
+    @SaCheckLogin
+    @GetMapping("/stats/summary")
+    public ApiResult<StrategyLogStats> stats(StrategyLogQuery query) {
+        return ApiResult.ok(strategyLogService.stats(query));
+    }
+
     /** 按条件单聚合（「按策略单查看生命周期」） */
     @SaCheckLogin
     @GetMapping("/stats/by-strategy")
@@ -95,6 +113,18 @@ public class StrategyLogController {
             @RequestParam(required = false) Integer pageSize) {
         return ApiResult.ok(strategyLogService.strategyStats(
                 keyword, page == null ? 1 : page, pageSize == null ? 20 : pageSize));
+    }
+
+    /**
+     * 状态分布（**全量口径**，柱状图用）。
+     *
+     * <p>现场 {@code Status} 整列为 NULL，所以只会返回一行
+     * {@code status=null, count=全表条数} —— 前端显示成「（空）」。
+     */
+    @SaCheckLogin
+    @GetMapping("/stats/status-distribution")
+    public ApiResult<List<StatusCountRow>> statusDistribution(StrategyLogQuery query) {
+        return ApiResult.ok(strategyLogService.statusDistribution(query));
     }
 
     /**

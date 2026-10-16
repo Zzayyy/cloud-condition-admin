@@ -147,9 +147,67 @@ public interface OrderMapper {
                                   @Param("from") java.time.LocalDate from,
                                   @Param("to") java.time.LocalDate to);
 
+    /**
+     * 委托单汇总（全量口径，卡片用）。
+     *
+     * <p><b>为什么要单独做这个接口</b>：页面上那几张卡片（买入/卖出委托笔数、
+     * 委托金额）原先是对**当前页**的 {@code rows} 做 filter / reduce 算出来的，
+     * 翻一页数字就变一次，而标签上写的是「买入委托」这种像是全量的说法 ——
+     * 同一个标签在不同页给出不同数字，且没有总数可对照，会被读成总量。
+     * 这里由数据库一次算准。
+     *
+     * <p>筛选条件与 {@code countPage} **完全一致**（keyword / bsType / ocType / code），
+     * 这样卡片数字与列表「共 N 条」始终对得上；只多一个 {@code table} 用来选主表或历史表。
+     *
+     * <p>{@code SUM(OrderPrice * OrderVolumn)} 里 {@code OrderPrice} 可为 NULL，
+     * 用 {@code COALESCE} 兜成 0，否则整行结果为 NULL 而不是「部分有效」。
+     */
+    @Select("""
+            <script>
+            SELECT
+              COALESCE(SUM(CASE WHEN BSType = 1 THEN 1 ELSE 0 END), 0) AS buyCount,
+              COALESCE(SUM(CASE WHEN BSType = 2 THEN 1 ELSE 0 END), 0) AS sellCount,
+              COALESCE(SUM(CASE WHEN Reason IS NOT NULL AND Reason &lt;&gt; '' THEN 1 ELSE 0 END), 0) AS abnormalCount,
+              COALESCE(SUM(COALESCE(OrderPrice, 0) * COALESCE(OrderVolumn, 0)), 0) AS totalAmount,
+              COUNT(*) AS totalCount
+            FROM
+            <choose>
+              <when test="table == 'T_Order'">T_Order</when>
+              <when test="table == 'T_Order_his'">T_Order_his</when>
+              <otherwise>(SELECT NULL AS BSType FROM DUAL WHERE 1=0) dummy</otherwise>
+            </choose>
+            <where>
+              <if test="keyword != null and keyword != ''">
+                AND (Account LIKE CONCAT('%', #{keyword}, '%')
+                  OR Code LIKE CONCAT('%', #{keyword}, '%')
+                  OR CodeName LIKE CONCAT('%', #{keyword}, '%')
+                  OR OrderNo LIKE CONCAT('%', #{keyword}, '%')
+                  OR UserAccount LIKE CONCAT('%', #{keyword}, '%')
+                  OR CAST(StrategyID AS CHAR) LIKE CONCAT('%', #{keyword}, '%'))
+              </if>
+              <if test="bsType != null">AND BSType = #{bsType}</if>
+              <if test="ocType != null">AND OCType = #{ocType}</if>
+              <if test="code != null and code != ''">AND Code LIKE CONCAT('%', #{code}, '%')</if>
+            </where>
+            </script>
+            """)
+    OrderStatsRow selectStats(@Param("table") String table,
+                              @Param("keyword") String keyword,
+                              @Param("bsType") Integer bsType,
+                              @Param("ocType") Integer ocType,
+                              @Param("code") String code);
+
     record BsCountRow(Integer bsType, Long cnt) {
     }
 
     record DayCountRow(String day, Long cnt) {
+    }
+
+    /** 委托单汇总的原始行（字段名与 SQL 别名一致） */
+    record OrderStatsRow(Long buyCount,
+                         Long sellCount,
+                         Long abnormalCount,
+                         Double totalAmount,
+                         Long totalCount) {
     }
 }

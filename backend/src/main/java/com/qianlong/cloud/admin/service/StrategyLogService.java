@@ -15,8 +15,10 @@ import com.qianlong.cloud.admin.dto.StrategyLogDtos.DailyLogRow;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyLogMeta;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyLogPage;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyLogQuery;
+import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyLogStats;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyLogView;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyStatRow;
+import com.qianlong.cloud.admin.dto.StrategyLogDtos.StatusCountRow;
 import com.qianlong.cloud.admin.entity.StrategyLogEntity;
 import com.qianlong.cloud.admin.mapper.StrategyLogMapper;
 
@@ -144,6 +146,51 @@ public class StrategyLogService {
         return strategyLogMapper.selectTimeline(strategy, TIMELINE_LIMIT).stream()
                 .map(StrategyLogService::toView)
                 .toList();
+    }
+
+    /**
+     * 策略日志汇总（全量口径，卡片用）。
+     *
+     * <p>按当前筛选条件统计全表，而不是当前页。
+     *
+     * <p><b>⚠️ {@code Status} 现场整列为 NULL</b>，所以成功/失败都是 0、
+     * 成功率也是 0。这里额外带上 {@code statusColumnEmpty}，
+     * 让前端能显示「状态列现场为空」而不是一个像「全都失败」的 0%。
+     * 这一点很关键：0% 与「这一列没数据」在页面上长得一样，
+     * 而它们的含义完全相反。
+     */
+    public StrategyLogStats stats(StrategyLogQuery query) {
+        LocalDate from = parseDate(query.getFrom(), "from");
+        LocalDate to = parseDate(query.getTo(), "to");
+        StrategyLogMapper.StrategyLogStatsRow row = strategyLogMapper.selectStats(
+                trimToNull(query.getKeyword()), trimToNull(query.getStatus()),
+                trimToNull(query.getFromIp()), from, to);
+        long ok = row == null || row.okCount() == null ? 0L : row.okCount();
+        long fail = row == null || row.failCount() == null ? 0L : row.failCount();
+        long sources = row == null || row.sourceCount() == null ? 0L : row.sourceCount();
+        long total = row == null || row.totalCount() == null ? 0L : row.totalCount();
+
+        boolean statusEmpty = strategyLogMapper.selectDistinctStatuses().isEmpty();
+        int rate = (ok + fail) > 0 ? (int) Math.round(ok * 100.0 / (ok + fail)) : 0;
+        return new StrategyLogStats(ok, fail, rate, sources, total, statusEmpty);
+    }
+
+    /**
+     * 按 Status 分组的状态分布（**全量口径**，柱状图用）。
+     *
+     * <p>前端不再拿当前页明细自己分组 —— 那只是这一页的分布。
+     * 现场 Status 整列为 NULL，所以结果里只有一行 {@code status=null}。
+     */
+    public List<StatusCountRow> statusDistribution(StrategyLogQuery query) {
+        LocalDate from = parseDate(query.getFrom(), "from");
+        LocalDate to = parseDate(query.getTo(), "to");
+        List<StatusCountRow> out = new ArrayList<>();
+        for (StrategyLogMapper.StatusCountRow row : strategyLogMapper.selectStatusDistribution(
+                trimToNull(query.getKeyword()), trimToNull(query.getStatus()),
+                trimToNull(query.getFromIp()), from, to)) {
+            out.add(new StatusCountRow(row.status(), row.cnt() == null ? 0L : row.cnt()));
+        }
+        return out;
     }
 
     /* ================================ 工具 ================================ */

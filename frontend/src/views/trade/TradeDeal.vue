@@ -32,7 +32,7 @@ import BaseChart from '@/components/BaseChart.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { tradeApi } from '@/api/endpoints'
-import { mockTradeApi } from '@/api/mock/trade'
+import { mockTradeApi, mockTradeCodes, mockTradeStats } from '@/api/mock/trade'
 import { withDelay } from '@/api/mock/_shared'
 import type { OrderRecord, TradeRecord } from '@/api/domain'
 import { useResource } from '@/composables/useResource'
@@ -67,8 +67,41 @@ function currentParams() {
   }
 }
 
+/** 汇总/图表用的参数：同筛选条件、不带分页 */
+function statsParams() {
+  return {
+    keyword: keyword.value.trim() || undefined,
+    code: codeFilter.value.trim() || undefined,
+    table: tab.value === 'active' ? 'T_Trade' : 'T_Trade_his',
+  }
+}
+
+/**
+ * 成交汇总（**全量口径**）与按合约分布（**全量口径**）。
+ *
+ * 两者都必须由后端按筛选条件算全表：原先是对当前页 reduce / 分组，
+ * 「成交金额」翻一页就变、「各合约成交量分布」也只是这一页的分布。
+ */
+const {
+  data: statsData,
+  load: loadStats,
+} = useResource(
+  (params: Record<string, unknown>) => tradeApi.tradeStats(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockTradeStats(params)) },
+)
+
+const {
+  data: codeRows,
+  load: loadCodes,
+} = useResource(
+  (params: Record<string, unknown>) => tradeApi.tradeCodes({ ...params, limit: 8 }),
+  { mock: (params: Record<string, unknown>) => withDelay(mockTradeCodes(params, 8)) },
+)
+
 function reload() {
   load(currentParams())
+  loadStats(statsParams())
+  loadCodes(statsParams())
 }
 
 onMounted(reload)
@@ -90,28 +123,29 @@ const total = computed(() => data.value?.total ?? 0)
 
 /* ------------------------------ 汇总 ------------------------------ */
 
+/**
+ * 卡片汇总 —— **全量口径**，来自后端 `/trades/stats/summary`。
+ *
+ * 原先是对当前页 `rows` 做 reduce：「成交金额」翻一页就变，
+ * 「成交均价」更是只反映这一页的加权均价，与真实均价可能差很远。
+ */
 const summary = computed(() => {
-  const list = rows.value
-  const amount = list.reduce((s, r) => s + (r.Price ?? 0) * Number(r.Volumn ?? 0), 0)
-  const volumn = list.reduce((s, r) => s + Number(r.Volumn ?? 0), 0)
-  const orders = new Set(list.map((r) => r.OrderNo)).size
-  return { amount, volumn, orders, count: list.length }
-})
-
-/** 成交均价（按当前页口径） */
-const avgPrice = computed(() => {
-  const v = summary.value.volumn
-  return v > 0 ? summary.value.amount / v : 0
-})
-
-/** 各合约成交量分布 */
-const codeChartOption = computed(() => {
-  const map = new Map<string, number>()
-  for (const r of rows.value) {
-    const key = r.Code ?? '未知'
-    map.set(key, (map.get(key) ?? 0) + Number(r.Volumn ?? 0))
+  const s = statsData.value
+  return {
+    amount: s?.totalAmount ?? 0,
+    volumn: s?.totalVolumn ?? 0,
+    count: s?.totalCount ?? 0,
+    // 当前页涉及多少个委托（这个只是页内信息，不当作全量指标展示）
+    orders: new Set(rows.value.map((r) => r.OrderNo)).size,
   }
-  const entries = [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+})
+
+/** 成交均价（**全量口径**：总额 ÷ 总量，由后端算） */
+const avgPrice = computed(() => statsData.value?.avgPrice ?? 0)
+
+/** 各合约成交量分布（**全量口径**，由后端 GROUP BY 算） */
+const codeChartOption = computed(() => {
+  const data = (codeRows.value ?? []).map((r) => ({ name: r.code, value: r.count }))
   return {
     tooltip: { trigger: 'item', formatter: '{b}<br/>成交量 {c}（{d}%）' },
     legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11 } },
@@ -122,7 +156,7 @@ const codeChartOption = computed(() => {
         center: ['50%', '42%'],
         label: { show: false },
         itemStyle: { borderWidth: 2, borderColor: 'transparent', borderRadius: 4 },
-        data: entries.map(([name, value]) => ({ name, value })),
+        data,
         color: ['#0d9c9c', '#3b6ff5', '#7c5cf0', '#dd7a15', '#d6455e', '#2f9e5f', '#d94f8a', '#5b6b8c'],
       },
     ],
@@ -287,10 +321,10 @@ const prettyOrderParam = computed(() => formatJson(relatedOrder.value?.OrderPara
 
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>
-        <StatCard label="成交笔数" :value="summary.count" suffix="笔" :icon="CashOutline" color="#2f9e5f" hint="本页口径" />
+        <StatCard label="成交笔数" :value="summary.count" suffix="笔" :icon="CashOutline" color="#2f9e5f" hint="筛选后全量" />
       </n-gi>
       <n-gi>
-        <StatCard label="成交总量" :value="thousands(summary.volumn)" suffix="股" :icon="WalletOutline" :color="accent" hint="本页口径" />
+        <StatCard label="成交总量" :value="thousands(summary.volumn)" suffix="股" :icon="WalletOutline" :color="accent" hint="筛选后全量" />
       </n-gi>
       <n-gi>
         <StatCard
@@ -299,7 +333,7 @@ const prettyOrderParam = computed(() => formatJson(relatedOrder.value?.OrderPara
           suffix="元"
           :icon="TrendingUpOutline"
           color="#dd7a15"
-          hint="本页口径（价×量）"
+          hint="价×量 求和"
         />
       </n-gi>
       <n-gi>
@@ -321,7 +355,7 @@ const prettyOrderParam = computed(() => formatJson(relatedOrder.value?.OrderPara
         </span>
       </template>
       <template #header-extra>
-        <span class="text-muted" style="font-size: 12px">按当前页 {{ rows.length }} 笔统计，最多显示 8 个合约</span>
+        <span class="text-muted" style="font-size: 12px">按筛选后全量统计，最多显示 8 个合约</span>
       </template>
       <BaseChart :option="codeChartOption" :height="280" empty-text="暂无成交数据" />
     </n-card>

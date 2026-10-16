@@ -74,6 +74,51 @@ public final class TradeDtos {
     }
 
     /**
+     * 委托单汇总（**全量口径**，卡片用）。
+     *
+     * <p>原先卡片是对当前页 {@code list} 做 filter / reduce 算的：
+     * 第 1 页「买入委托 3 笔」、翻到第 2 页变成「2 笔」，而标签上写的是
+     * 「买入委托」，会被读成全量。这里按当前筛选条件统计全表。
+     *
+     * <p>{@code totalCount} 应与列表 {@code total} 一致。
+     */
+    public record OrderStats(
+            /** BSType = 1 的笔数 */
+            long buyCount,
+            /** BSType = 2 的笔数 */
+            long sellCount,
+            /** Reason 非空的笔数（异常） */
+            long abnormalCount,
+            /** OrderPrice × OrderVolumn 求和 */
+            double totalAmount,
+            /** 当前筛选下的总笔数（应与列表 total 一致） */
+            long totalCount) {
+    }
+
+    /**
+     * 成交汇总（**全量口径**，卡片用）。
+     *
+     * <p>⚠️ {@code totalVolumn} / {@code totalAmount} 是后端把 varchar 的
+     * {@code Volumn} 转 DECIMAL 后求和的**权威值**；前端不要再拿当前页自己加。
+     * {@code avgPrice} 由后端用「总额 / 总量」算，**不是**对每页求均价的平均
+     * （后者在页大小不同、或每笔量差异大时会明显失真）。
+     */
+    public record TradeStats(
+            /** 成交笔数 */
+            long totalCount,
+            /** 成交总量 */
+            double totalVolumn,
+            /** 成交金额 */
+            double totalAmount,
+            /** 成交均价 = totalAmount / totalVolumn（总量为 0 时为 0） */
+            double avgPrice) {
+    }
+
+    /** 按合约的成交量（全量口径，合约分布图用） */
+    public record CodeCountRow(String code, double count) {
+    }
+
+    /**
      * 列表附加信息（非前端契约字段，前端会忽略）。
      *
      * <p>让排查一眼可见「这次查的是哪张表、命中多少行」——

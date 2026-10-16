@@ -12,8 +12,10 @@ import type {
   AuditDailyRow,
   AuditLog,
   Conditional,
+  CodeCountRow,
   DashboardOverview,
   DailyCountRow,
+  ConditionalStats,
   DatahubEntryPage,
   DatahubNodePage,
   DatahubTrace,
@@ -25,6 +27,7 @@ import type {
   NameValueRow,
   OrderRecord,
   PasswordPolicy,
+  OrderStats,
   RedisAccount,
   RedisInstance,
   RedisInstanceInfo,
@@ -34,11 +37,14 @@ import type {
   RedisStreamEntry,
   RedisStreamInfo,
   StrategyLog,
+  StrategyLogStats,
+  StatusCountRow,
   StrategyServer,
   StrategyServerPage,
   TimeSeriesPoint,
   TradeRecord,
   TraderServer,
+  TradeStats,
   TraderServerPage,
   TimeSeriesView,
   UserLog,
@@ -111,6 +117,15 @@ export const strategyApi = {
   listConditionalTypes: () =>
     api.get<NameValueRow[]>('/strategy/conditionals/stats/types'),
 
+  /**
+   * 条件单汇总（**全量口径**，卡片用）。
+   *
+   * 参数与 `listConditionals` 一致（source / keyword / type / mode），
+   * 所以 `totalCount` 应与列表的 `total` 相等。
+   */
+  conditionalStats: (query?: PageQuery) =>
+    api.get<ConditionalStats>('/strategy/conditionals/stats/summary', query),
+
   /** 策略运行日志 */
   listLogs: (query?: PageQuery) => api.get<PageResult<StrategyLog>>('/strategy/logs', query),
 
@@ -125,6 +140,25 @@ export const strategyApi = {
    * 现在后端如实返回空数组 → 页面应显示「该列现场为空」而不是假选项。
    */
   listLogStatuses: () => api.get<string[]>('/strategy/logs/statuses'),
+
+  /**
+   * 策略日志汇总（**全量口径**，卡片用）。
+   *
+   * 参数与 `listLogs` 一致，`totalCount` 应等于列表 `total`。
+   * `statusColumnEmpty` 让页面能区分「真的 0% 成功率」与「状态列没数据」——
+   * 后者在页面上长得一样，但含义完全相反。
+   */
+  logStats: (query?: PageQuery) =>
+    api.get<StrategyLogStats>('/strategy/logs/stats/summary', query),
+
+  /**
+   * 状态分布（**全量口径**，柱状图用）。
+   *
+   * 现场 `Status` 整列为 NULL，所以只会返回一行 `status=null`。
+   * 前端显示成「（空）」而不是编一个「未知」。
+   */
+  logStatusDistribution: (query?: PageQuery) =>
+    api.get<StatusCountRow[]>('/strategy/logs/stats/status-distribution', query),
 
   /** 某条件单的完整日志轨迹（时间线，按时间升序） */
   listLogTimeline: (strategy: number) =>
@@ -158,6 +192,13 @@ export const tradeApi = {
   listOrders: (query?: PageQuery) => api.get<PageResult<OrderRecord>>('/trade/orders', query),
 
   /**
+   * 委托单汇总（**全量口径**，卡片用）。
+   *
+   * 参数与 `listOrders` 一致，`totalCount` 应等于列表 `total`。
+   */
+  orderStats: (query?: PageQuery) => api.get<OrderStats>('/trade/orders/stats/summary', query),
+
+  /**
    * 按天下单量（趋势图）。
    *
    * 与条件单同理：后端早已实现，但前端此前没接，
@@ -170,6 +211,22 @@ export const tradeApi = {
     api.get<DailyCountRow[]>('/trade/orders/stats/daily', query),
 
   listTrades: (query?: PageQuery) => api.get<PageResult<TradeRecord>>('/trade/trades', query),
+
+  /**
+   * 成交汇总（**全量口径**，卡片用）。
+   *
+   * 成交金额 / 总量 / 均价由后端算（varchar 的 Volumn 转 DECIMAL 后求和），
+   * 前端不再按当前页自己加 —— 那样翻页数字会变，且均价会失真。
+   */
+  tradeStats: (query?: PageQuery) => api.get<TradeStats>('/trade/trades/stats/summary', query),
+
+  /**
+   * 按合约的成交量分布（**全量口径**，合约分布图用）。
+   *
+   * `limit` 默认 8，与页面上「最多显示 8 个合约」一致。
+   */
+  tradeCodes: (query?: PageQuery) =>
+    api.get<CodeCountRow[]>('/trade/trades/stats/codes', query),
 
   /** 某委托号下的成交明细（委托 → 成交 下钻） */
   listTradesByOrder: (orderNo: string) =>

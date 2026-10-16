@@ -192,9 +192,103 @@ public interface StrategyLogMapper extends BaseMapper<StrategyLogEntity> {
     List<StrategyLogEntity> selectTimeline(@Param("strategy") Long strategy,
                                            @Param("limit") int limit);
 
+    /**
+     * 策略日志汇总（全量口径，卡片用）。
+     *
+     * <p>原先「触发成功 / 触发失败 / 成功率 / 来源账号数」是对当前页算的，
+     * 翻页就变。这里由数据库算准。
+     *
+     * <p><b>⚠️ 现场 {@code Status} 整列为 NULL</b>，所以成功/失败计数
+     * 现在都是 0 —— 这是事实，不是查询写错。前端应据此显示
+     * 「该列现场为空」而不是一个假的 0% 成功率。
+     * 判成功/失败用的取值与前端 {@code statusType()} 一致：
+     * 成功 = 触发成功 / 已恢复；失败 = 触发失败 / 校验失败 / 参数错误。
+     *
+     * <p>筛选条件与 {@code countPage} 一致，保证与列表总数对得上。
+     */
+    @Select("""
+            <script>
+            SELECT
+              COALESCE(SUM(CASE WHEN Status IN ('触发成功','已恢复') THEN 1 ELSE 0 END), 0) AS okCount,
+              COALESCE(SUM(CASE WHEN Status IN ('触发失败','校验失败','参数错误') THEN 1 ELSE 0 END), 0) AS failCount,
+              COUNT(DISTINCT FromAccount) AS sourceCount,
+              COUNT(*) AS totalCount
+            FROM T_StrategyLog
+            <where>
+              <if test="keyword != null and keyword != ''">
+                AND (CAST(Strategy AS CHAR) LIKE CONCAT('%', #{keyword}, '%')
+                  OR Info LIKE CONCAT('%', #{keyword}, '%')
+                  OR FromAccount LIKE CONCAT('%', #{keyword}, '%'))
+              </if>
+              <if test="status != null and status != ''">
+                AND Status = #{status}
+              </if>
+              <if test="fromIp != null and fromIp != ''">
+                AND FromIP LIKE CONCAT('%', #{fromIp}, '%')
+              </if>
+              <if test="from != null">AND OccurTIme &gt;= #{from}</if>
+              <if test="to != null">AND OccurTIme &lt;= #{to}</if>
+            </where>
+            </script>
+            """)
+    StrategyLogStatsRow selectStats(@Param("keyword") String keyword,
+                                    @Param("status") String status,
+                                    @Param("fromIp") String fromIp,
+                                    @Param("from") LocalDate from,
+                                    @Param("to") LocalDate to);
+
     record DayCountRow(LocalDate day, Long cnt) {
     }
 
     record StrategyStatRow(Long strategy, Long cnt, LocalDate firstDay, LocalDate lastDay) {
+    }
+
+    /**
+     * 按 {@code Status} 分组统计（状态分布柱状图，**全量口径**）。
+     *
+     * <p>原先前端拿当前页明细自己分组 —— 那只是「这一页的状态分布」，翻页就变。
+     *
+     * <p>现场 {@code Status} 整列为 NULL，所以现在只返回一行
+     * {@code status=null, cnt=全表条数}。前端把 null 显示成「未知」是诚实的，
+     * 同时 {@code statusColumnEmpty} 会提示「该列现场为空」。
+     */
+    @Select("""
+            <script>
+            SELECT Status AS status, COUNT(*) AS cnt
+              FROM T_StrategyLog
+            <where>
+              <if test="keyword != null and keyword != ''">
+                AND (CAST(Strategy AS CHAR) LIKE CONCAT('%', #{keyword}, '%')
+                  OR Info LIKE CONCAT('%', #{keyword}, '%')
+                  OR FromAccount LIKE CONCAT('%', #{keyword}, '%'))
+              </if>
+              <if test="status != null and status != ''">
+                AND Status = #{status}
+              </if>
+              <if test="fromIp != null and fromIp != ''">
+                AND FromIP LIKE CONCAT('%', #{fromIp}, '%')
+              </if>
+              <if test="from != null">AND OccurTIme &gt;= #{from}</if>
+              <if test="to != null">AND OccurTIme &lt;= #{to}</if>
+            </where>
+             GROUP BY Status
+             ORDER BY cnt DESC
+            </script>
+            """)
+    List<StatusCountRow> selectStatusDistribution(@Param("keyword") String keyword,
+                                                  @Param("status") String status,
+                                                  @Param("fromIp") String fromIp,
+                                                  @Param("from") LocalDate from,
+                                                  @Param("to") LocalDate to);
+
+    /** 按 Status 分组的计数（status 可能为 null，表示该列此行为空） */
+    record StatusCountRow(String status, Long cnt) {
+    }
+
+    /** 策略日志汇总原始行 */
+    record StrategyLogStatsRow(Long okCount,
+                               Long failCount,
+                               Long sourceCount,
+                               Long totalCount) {
     }
 }

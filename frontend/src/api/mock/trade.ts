@@ -13,7 +13,16 @@
  *
  * **数值是编的，不是真实业务数据。**
  */
-import type { OrderRecord, RedisAccount, TradeRecord, TraderServer, TraderServerPage } from '../domain'
+import type {
+  CodeCountRow,
+  OrderRecord,
+  OrderStats,
+  RedisAccount,
+  TradeRecord,
+  TradeStats,
+  TraderServer,
+  TraderServerPage,
+} from '../domain'
 import type { PageQuery, PageResult } from '../types'
 import {
   agoBy,
@@ -479,7 +488,89 @@ export const mockTradeApi = {
 
 /* ------------------------------ 图表数据 ------------------------------ */
 
-/** 买卖方向分布（本页口径） */
+/**
+ * 委托单汇总（演示态）。口径与后端 `OrderStats` 一致：
+ * 对**全量** ORDERS 按筛选条件统计，而不是当前页。
+ */
+export function mockOrderStats(query: PageQuery = {}): OrderStats {
+  const kw = asString(query.keyword)
+  const bsType = asNumber(query.bsType)
+  const ocType = asNumber(query.ocType)
+  const code = asString(query.code)
+
+  const rows = ORDERS.filter((r) => {
+    if (kw) {
+      const k = kw.toLowerCase()
+      const hit =
+        (r.Account ?? '').toLowerCase().includes(k) ||
+        (r.Code ?? '').toLowerCase().includes(k) ||
+        (r.CodeName ?? '').toLowerCase().includes(k) ||
+        (r.OrderNo ?? '').toLowerCase().includes(k) ||
+        (r.UserAccount ?? '').toLowerCase().includes(k)
+      if (!hit) return false
+    }
+    if (bsType !== undefined && r.BSType !== bsType) return false
+    if (ocType !== undefined && r.OCType !== ocType) return false
+    if (code && !(r.Code ?? '').includes(code)) return false
+    return true
+  })
+
+  return {
+    buyCount: rows.filter((r) => r.BSType === 1).length,
+    sellCount: rows.filter((r) => r.BSType === 2).length,
+    abnormalCount: rows.filter((r) => r.Reason).length,
+    totalAmount: rows.reduce((s, r) => s + (r.OrderPrice ?? 0) * (r.OrderVolumn ?? 0), 0),
+    totalCount: rows.length,
+  }
+}
+
+/**
+ * 成交汇总（演示态）。口径与后端 `TradeStats` 一致。
+ *
+ * ⚠️ 均价用「总额 ÷ 总量」，不是各页均价的平均 —— 后者会失真。
+ */
+export function mockTradeStats(query: PageQuery = {}): TradeStats {
+  const kw = asString(query.keyword)
+  const code = asString(query.code)
+
+  const rows = TRADES.filter((r) => {
+    if (kw) {
+      const k = kw.toLowerCase()
+      const hit =
+        (r.Account ?? '').toLowerCase().includes(k) ||
+        (r.Code ?? '').toLowerCase().includes(k) ||
+        (r.OrderNo ?? '').toLowerCase().includes(k) ||
+        (r.TradeNO ?? '').toLowerCase().includes(k)
+      if (!hit) return false
+    }
+    if (code && !(r.Code ?? '').includes(code)) return false
+    return true
+  })
+
+  const volumn = rows.reduce((s, r) => s + Number(r.Volumn ?? 0), 0)
+  const amount = rows.reduce((s, r) => s + (r.Price ?? 0) * Number(r.Volumn ?? 0), 0)
+  return {
+    totalCount: rows.length,
+    totalVolumn: volumn,
+    totalAmount: amount,
+    avgPrice: volumn > 0 ? amount / volumn : 0,
+  }
+}
+
+/** 按合约的成交量分布（演示态，全量口径） */
+export function mockTradeCodes(query: PageQuery = {}, limit = 8): CodeCountRow[] {
+  const map = new Map<string, number>()
+  for (const r of TRADES) {
+    const key = r.Code ?? '未知'
+    map.set(key, (map.get(key) ?? 0) + Number(r.Volumn ?? 0))
+  }
+  return [...map.entries()]
+    .map(([code, count]) => ({ code, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit)
+}
+
+/** 买卖方向分布（全量口径，后端 /orders/stats/bs 对应） */
 export function mockBsDistribution(rows: OrderRecord[]): Array<{ name: string; value: number }> {
   return [
     { name: '买', value: rows.filter((r) => r.BSType === 1).length },

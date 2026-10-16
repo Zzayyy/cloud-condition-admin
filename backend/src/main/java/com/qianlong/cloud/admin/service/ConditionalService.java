@@ -12,6 +12,7 @@ import com.qianlong.cloud.admin.common.TimeParams;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.ConditionalListMeta;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.ConditionalPage;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.ConditionalQuery;
+import com.qianlong.cloud.admin.dto.ConditionalDtos.ConditionalStats;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.ConditionalView;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.DailyCreatedRow;
 import com.qianlong.cloud.admin.dto.ConditionalDtos.TypeCountRow;
@@ -142,6 +143,31 @@ public class ConditionalService {
         List<TypeCountRow> out = new ArrayList<>();
         counts.forEach((type, cnt) -> out.add(new TypeCountRow(type, typeLabel(type), cnt)));
         return out;
+    }
+
+    /**
+     * 条件单汇总（全量口径，卡片用）。
+     *
+     * <p>按当前**筛选条件**统计全表，而不是统计当前页 —— 卡片上「运行中」「已触发」
+     * 这类标签没有「本页」二字，给页内数字会被读成全量，且翻页就变。
+     *
+     * <p>{@code source} 与列表同一个枚举，保证卡片与列表看的是同一张表。
+     */
+    public ConditionalStats stats(ConditionalQuery query) {
+        ConditionalSource source = ConditionalSource.of(query.getSource());
+        String keyword = trimToNull(query.getKeyword());
+        ConditionalMapper.ConditionalStatsRow row = conditionalMapper.selectStats(
+                source.table(), keyword, query.getType(), query.getMode());
+        if (row == null) {
+            return new ConditionalStats(0, 0, 0, 0, 0);
+        }
+        return new ConditionalStats(
+                nz(row.runningCount()), nz(row.triggeredCount()),
+                nz(row.pausedCount()), nz(row.totalRunCount()), nz(row.totalCount()));
+    }
+
+    private static long nz(Long v) {
+        return v == null ? 0L : v;
     }
 
     /**

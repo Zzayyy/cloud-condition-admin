@@ -58,6 +58,29 @@ import java.util.List;
     }
 
     /**
+     * 条件单汇总（**全量口径**，卡片用）。
+     *
+     * <p>为什么要有它：卡片原先是对当前页 {@code list} 做 filter 算的，
+     * 翻一页数字就变一次，而标签写的是「运行中」这种像全量的说法。
+     * 这个接口按当前**筛选条件**统计全表，与列表 total 同源。
+     *
+     * <p>{@code totalCount} 与列表 {@code total} 应当相等 ——
+     * 不相等就说明两处筛选条件写岔了，联调时可直接据此发现。
+     */
+    public record ConditionalStats(
+            /** Mode = 1 的条数 */
+            long runningCount,
+            /** Status = 1 的条数 */
+            long triggeredCount,
+            /** Flag = 1 的条数 */
+            long pausedCount,
+            /** RunCount 求和 */
+            long totalRunCount,
+            /** 当前筛选下的总条数（应与列表 total 一致） */
+            long totalCount) {
+    }
+
+    /**
      * 列表附加信息（非前端契约字段，前端会忽略）。
      *
      * <p>用途是让排查一眼可见「这次查的是哪张表、命中多少行」——

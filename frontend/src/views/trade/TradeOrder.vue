@@ -43,6 +43,7 @@ import {
   ORDER_STATUS_NOTE,
   mockBsDistribution,
   mockDailyOrders,
+  mockOrderStats,
   mockTradeApi,
 } from '@/api/mock/trade'
 import { withDelay } from '@/api/mock/_shared'
@@ -116,10 +117,35 @@ function currentParams() {
   }
 }
 
+/**
+ * 卡片汇总用的参数：与 `currentParams()` 同筛选条件、但不带分页。
+ *
+ * 汇总由后端按筛选条件统计全表 —— 原先是对当前页 `rows` 做 filter，
+ * 于是「买入委托 3 笔」翻页就变，而标签写的是「买入委托」，会被读成全量。
+ */
+function statsParams() {
+  return {
+    keyword: keyword.value.trim() || undefined,
+    bsType: bsFilter.value ?? undefined,
+    ocType: ocFilter.value ?? undefined,
+    code: codeFilter.value.trim() || undefined,
+    table: tab.value === 'active' ? 'T_Order' : 'T_Order_his',
+  }
+}
+
+const {
+  data: statsData,
+  load: loadStats,
+} = useResource(
+  (params: Record<string, unknown>) => tradeApi.orderStats(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockOrderStats(params)) },
+)
+
 function reload() {
   load(currentParams())
-  // 趋势与列表同源，一起刷新 —— 否则切 tab 后图表会滞后一次
+  // 趋势与汇总都与列表同源，一起刷新 —— 否则切 tab 后会滞后一次
   loadDailyTrend()
+  loadStats(statsParams())
 }
 
 onMounted(reload)
@@ -146,23 +172,26 @@ const total = computed(() => data.value?.total ?? 0)
 
 /* ------------------------------ 汇总 ------------------------------ */
 
+/**
+ * 卡片汇总 —— **全量口径**，来自后端 `/orders/stats/summary`。
+ *
+ * 原先是对当前页 `rows` 做 filter / reduce，导致「买入委托」这类标签下的
+ * 数字翻页就变。现在按筛选条件统计全表，`totalCount` 与列表 `total` 同源。
+ */
 const summary = computed(() => {
-  const list = rows.value
-  const buy = list.filter((r) => r.BSType === 1)
-  const sell = list.filter((r) => r.BSType === 2)
-  const amount = list.reduce((s, r) => s + (r.OrderPrice ?? 0) * (r.OrderVolumn ?? 0), 0)
+  const s = statsData.value
   return {
-    buy: buy.length,
-    sell: sell.length,
-    amount,
-    abnormal: list.filter((r) => r.Reason).length,
+    buy: s?.buyCount ?? 0,
+    sell: s?.sellCount ?? 0,
+    amount: s?.totalAmount ?? 0,
+    abnormal: s?.abnormalCount ?? 0,
   }
 })
 
 const bsChartOption = computed(() => {
-  // 买卖分布可由当前页数据算出，真实接口下同样成立（不走 mock）
-  const buy = rows.value.filter((r) => r.BSType === 1).length
-  const sell = rows.value.filter((r) => r.BSType === 2).length
+  // 与卡片同源：全量口径，不是当前页分组（否则图与卡片会互相矛盾）
+  const buy = summary.value.buy
+  const sell = summary.value.sell
   return {
     tooltip: { trigger: 'item', formatter: '{b}<br/>{c} 笔（{d}%）' },
     legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 12 } },
@@ -430,10 +459,10 @@ const marketOrderType = computed(() => {
 
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>
-        <StatCard label="买入委托" :value="summary.buy" suffix="笔" :icon="TrendingUpOutline" color="#d6455e" hint="本页口径（BSType=1）" />
+        <StatCard label="买入委托" :value="summary.buy" suffix="笔" :icon="TrendingUpOutline" color="#d6455e" hint="BSType=1" />
       </n-gi>
       <n-gi>
-        <StatCard label="卖出委托" :value="summary.sell" suffix="笔" :icon="TrendingUpOutline" color="#2f9e5f" hint="本页口径（BSType=2）" />
+        <StatCard label="卖出委托" :value="summary.sell" suffix="笔" :icon="TrendingUpOutline" color="#2f9e5f" hint="BSType=2" />
       </n-gi>
       <n-gi>
         <StatCard
@@ -442,7 +471,7 @@ const marketOrderType = computed(() => {
           suffix="元"
           :icon="CashOutline"
           :color="accent"
-          hint="本页口径（价×量）"
+          hint="价×量 求和"
         />
       </n-gi>
       <n-gi>
