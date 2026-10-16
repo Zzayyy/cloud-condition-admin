@@ -13,6 +13,7 @@ import com.qianlong.cloud.admin.dto.AdminPrincipal;
 import com.qianlong.cloud.admin.common.ApiResult;
 import com.qianlong.cloud.admin.common.PageResult;
 import com.qianlong.cloud.admin.dto.SystemDtos.AdminUserPayload;
+import com.qianlong.cloud.admin.dto.SystemDtos.AdminUserStats;
 import com.qianlong.cloud.admin.dto.SystemDtos.AdminUserView;
 import com.qianlong.cloud.admin.dto.SystemDtos.EnabledPayload;
 import com.qianlong.cloud.admin.dto.SystemDtos.ResetPasswordPayload;
@@ -57,6 +58,21 @@ public class AdminUserController {
     @GetMapping("/{id}")
     public ApiResult<AdminUserView> detail(@PathVariable Integer id) {
         return ApiResult.ok(userService.getUser(id));
+    }
+
+    /**
+     * 管理账号汇总（**全量口径**，卡片用）。
+     *
+     * <p>与 {@code GET /system/users} 列表同筛选条件，
+     * {@code totalCount} 应等于列表 {@code total}。
+     *
+     * <p>路由注意：映射到 {@code /stats/summary}（两段），
+     * 与 {@code /{id}}（一段）不冲突，不会被当成 id 解析。
+     */
+    @SaCheckLogin
+    @GetMapping("/stats/summary")
+    public ApiResult<AdminUserStats> stats(UserQuery query) {
+        return ApiResult.ok(userService.stats(query));
     }
 
     /** 新建账号 */

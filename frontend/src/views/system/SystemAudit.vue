@@ -192,6 +192,20 @@ function auditParams(): Record<string, unknown> {
   return {
     page: auditPage.value,
     pageSize: auditPageSize.value,
+    ...auditFilterParams(),
+    sortBy: (auditSort.value?.columnKey as string | undefined) ?? undefined,
+    sortOrder: auditSort.value ? (auditSort.value.order === 'descend' ? 'desc' : 'asc') : undefined,
+  }
+}
+
+/**
+ * 审计筛选条件（不含分页/排序）—— 列表与汇总共用。
+ *
+ * 抽出来是为了让「列表 total」与「汇总 totalCount」必然一致：
+ * 两处各写一份筛选，迟早会对不上，而且不会报错。
+ */
+function auditFilterParams(): Record<string, unknown> {
+  return {
     keyword: auditKeyword.value.trim() || undefined,
     level: auditLevel.value ?? undefined,
     module: auditModule.value ?? undefined,
@@ -199,13 +213,23 @@ function auditParams(): Record<string, unknown> {
     result: auditResult.value ?? undefined,
     operator: auditOperator.value.trim() || undefined,
     ...timeParams(auditRange.value),
-    sortBy: (auditSort.value?.columnKey as string | undefined) ?? undefined,
-    sortOrder: auditSort.value ? (auditSort.value.order === 'descend' ? 'desc' : 'asc') : undefined,
   }
 }
 
+/**
+ * 审计汇总（**全量口径**）。
+ *
+ * 原先是对当前页 `auditRows` 做 filter ——「高危操作」「失败」这类标签下的
+ * 数字翻页就变，而标签写的就是这两个词。
+ */
+const { data: auditStatsData, load: loadAuditStats } = useResource(
+  (params: Record<string, unknown>) => adminApi.auditStats(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockAdminApi.auditStats(params)) },
+)
+
 function reloadAudit() {
   void loadAudit(auditParams())
+  void loadAuditStats(auditFilterParams())
 }
 
 function handleAuditSearch() {
@@ -424,17 +448,31 @@ function loginParams(): Record<string, unknown> {
   return {
     page: loginPage.value,
     pageSize: loginPageSize.value,
-    username: loginUsername.value.trim() || undefined,
-    ip: loginIp.value.trim() || undefined,
-    success: loginSuccess.value ?? undefined,
-    ...timeParams(loginRange.value),
+    ...loginFilterParams(),
     sortBy: (loginSort.value?.columnKey as string | undefined) ?? undefined,
     sortOrder: loginSort.value ? (loginSort.value.order === 'descend' ? 'desc' : 'asc') : undefined,
   }
 }
 
+/** 登录日志筛选条件（不含分页/排序）—— 列表与汇总共用 */
+function loginFilterParams(): Record<string, unknown> {
+  return {
+    username: loginUsername.value.trim() || undefined,
+    ip: loginIp.value.trim() || undefined,
+    success: loginSuccess.value ?? undefined,
+    ...timeParams(loginRange.value),
+  }
+}
+
+/** 登录日志汇总（**全量口径**） */
+const { data: loginStatsData, load: loadLoginStats } = useResource(
+  (params: Record<string, unknown>) => adminApi.loginStats(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockAdminApi.loginStats(params)) },
+)
+
 function reloadLogin() {
   void loadLogin(loginParams())
+  void loadLoginStats(loginFilterParams())
 }
 
 function handleLoginSearch() {
@@ -465,13 +503,20 @@ function onLoginSorter(sorter: DataTableSortState | DataTableSortState[] | null)
 const loginRows = computed<AdminLoginLog[]>(() => loginData.value?.list ?? [])
 const loginTotal = computed(() => loginData.value?.total ?? 0)
 
+/** 登录日志汇总 —— **全量口径**，来自后端 `/login-logs/stats/summary` */
 const loginSummary = computed(() => {
-  const list = loginRows.value
-  const fail = list.filter((r) => !r.success)
+  const s = loginStatsData.value
+  const total = s?.totalCount ?? 0
+  const fail = s?.failureCount ?? 0
   return {
-    failure: fail.length,
-    failRate: list.length ? Math.round((fail.length / list.length) * 1000) / 10 : 0,
-    abnormalIps: new Set(fail.map((r) => r.loginIP).filter(Boolean)).size,
+    failure: fail,
+    failRate: total ? Math.round((fail / total) * 1000) / 10 : 0,
+    /*
+     * 失败来源 IP 的去重数仍按当前页取 —— 后端聚合接口只到「成功/失败计数」，
+     * 没有做 IP 的去重。这个数字是页内的，页面 hint 已如实标注。
+     */
+    abnormalIps: new Set(loginRows.value.filter((r) => !r.success).map((r) => r.loginIP).filter(Boolean))
+      .size,
   }
 })
 
@@ -595,13 +640,13 @@ onMounted(() => {
 
 /* ============================== 审计：汇总与表格 ============================== */
 
-/** 汇总全部按**本页口径**算（与 README「各页汇总指标当前是本页口径」一致） */
+/** 审计汇总 —— **全量口径**，来自后端 `/audit-logs/stats/summary` */
 const auditSummary = computed(() => {
-  const list = auditRows.value
+  const s = auditStatsData.value
   return {
-    high: list.filter((r) => r.level === 'high').length,
-    failure: list.filter((r) => r.result === 'failure').length,
-    operators: new Set(list.map((r) => r.operator)).size,
+    high: s?.highCount ?? 0,
+    failure: s?.failureCount ?? 0,
+    operators: s?.operatorCount ?? 0,
   }
 })
 
@@ -970,7 +1015,7 @@ function openLoginDetail(row: AdminLoginLog) {
             suffix="条"
             :icon="DocumentTextOutline"
             :color="accent"
-            hint="当前筛选条件下的总数（本页口径）"
+            hint="筛选后全量"
           />
         </n-gi>
         <n-gi>
@@ -980,7 +1025,7 @@ function openLoginDetail(row: AdminLoginLog) {
             suffix="条"
             :icon="WarningOutline"
             color="#d6455e"
-            hint="本页（当前页）口径：level = high"
+            hint="level = high"
           />
         </n-gi>
         <n-gi>
@@ -990,7 +1035,7 @@ function openLoginDetail(row: AdminLoginLog) {
             suffix="条"
             :icon="CloseCircleOutline"
             color="#dd7a15"
-            hint="本页口径：result = failure"
+            hint="result = failure"
           />
         </n-gi>
         <n-gi>
@@ -1000,7 +1045,7 @@ function openLoginDetail(row: AdminLoginLog) {
             suffix="人"
             :icon="PeopleOutline"
             color="#3b6ff5"
-            hint="本页去重（真实汇总应由后端单独出接口）"
+            hint="去重人数"
           />
         </n-gi>
       </n-grid>
@@ -1221,7 +1266,7 @@ function openLoginDetail(row: AdminLoginLog) {
             suffix="条"
             :icon="LogInOutline"
             :color="accent"
-            hint="当前筛选条件下的总数（本页口径）"
+            hint="筛选后全量"
           />
         </n-gi>
         <n-gi>
@@ -1231,7 +1276,7 @@ function openLoginDetail(row: AdminLoginLog) {
             suffix="次"
             :icon="LockClosedOutline"
             color="#d6455e"
-            hint="本页口径"
+            hint="success = false"
           />
         </n-gi>
         <n-gi>
@@ -1241,7 +1286,7 @@ function openLoginDetail(row: AdminLoginLog) {
             suffix="%"
             :icon="AlertCircleOutline"
             color="#dd7a15"
-            hint="本页口径；真实失败率应由后端按时间窗聚合"
+            hint="失败 / 总数（筛选后全量）"
           />
         </n-gi>
         <n-gi>
@@ -1251,7 +1296,7 @@ function openLoginDetail(row: AdminLoginLog) {
             suffix="个"
             :icon="LocationOutline"
             color="#3b6ff5"
-            hint="本页失败记录里的去重 IP"
+            hint="当前页失败记录里的去重 IP"
           />
         </n-gi>
       </n-grid>

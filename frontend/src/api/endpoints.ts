@@ -3,14 +3,17 @@ import type { PageQuery, PageResult } from './types'
 import type {
   AccountLogStat,
   AccountRow,
+  AccountStats,
   AdminLoginLog,
   AdminRole,
   AdminRolePayload,
   AdminUser,
   AdminUserPayload,
+  AdminUserStats,
   AuditActionOption,
   AuditDailyRow,
   AuditLog,
+  AuditStats,
   Conditional,
   CodeCountRow,
   DashboardOverview,
@@ -21,6 +24,7 @@ import type {
   DatahubTrace,
   LoginDailyRow,
   LoginResult,
+  LoginStats,
   MysqlTable,
   MysqlTableSchema,
   MonitorMetricOption,
@@ -34,6 +38,7 @@ import type {
   RedisKeyDetail,
   RedisKeyInfo,
   RedisPubSubChannel,
+  RedisScanResult,
   RedisStreamEntry,
   RedisStreamInfo,
   StrategyLog,
@@ -301,6 +306,15 @@ export const accountApi = {
   /** 单个账号详情（含 MySQL 与 Redis 两侧） */
   getAccount: (account: string) => api.get<AccountRow>(`/account/accounts/${account}`),
 
+  /**
+   * 账号汇总（**全量口径**，卡片用）。
+   *
+   * 与 `listAccounts` 同筛选条件，`totalCount` 应等于列表 `total`。
+   * 口径：账号列表本身是 MySQL 与 Redis 合并的结果，所以「全量」= 合并并集经筛选后的全部行。
+   */
+  accountStats: (query?: PageQuery) =>
+    api.get<AccountStats>('/account/accounts/stats/summary', query),
+
   /** 账号在 Redis 中的实时状态（acc-* 键） */
   getRedisAccount: (account: string) => api.get<RedisAccount>(`/account/redis/${account}`),
 
@@ -337,7 +351,7 @@ export const storageApi = {
    * 所以接口签名里没有「取全部」的选项。
    */
   scanKeys: (instanceId: string, db: number, query?: PageQuery) =>
-    api.get<PageResult<RedisKeyInfo>>('/storage/redis/keys', { instanceId, db, ...query }),
+    api.get<RedisScanResult>('/storage/redis/keys', { instanceId, db, ...query }),
 
   /** 单个键的内容（按类型返回不同结构） */
   getKey: (instanceId: string, db: number, key: string) =>
@@ -425,6 +439,14 @@ export const adminApi = {
 
   listUsers: (query?: PageQuery) => api.get<PageResult<AdminUser>>('/system/users', query),
 
+  /**
+   * 管理账号汇总（**全量口径**，卡片用）。
+   *
+   * 与 `listUsers` 同筛选条件，`totalCount` 应等于列表 `total`。
+   */
+  userStats: (query?: PageQuery) =>
+    api.get<AdminUserStats>('/system/users/stats/summary', query),
+
   createUser: (payload: AdminUserPayload) => api.post<AdminUser>('/system/users', payload),
 
   updateUser: (id: number, payload: AdminUserPayload) =>
@@ -470,6 +492,14 @@ export const adminApi = {
 
   listAuditLogs: (query?: PageQuery) => api.get<PageResult<AuditLog>>('/system/audit-logs', query),
 
+  /**
+   * 审计汇总（**全量口径**，卡片用）。
+   *
+   * 与 `listAuditLogs` 同筛选条件，`totalCount` 应等于列表 `total`。
+   */
+  auditStats: (query?: PageQuery) =>
+    api.get<AuditStats>('/system/audit-logs/stats/summary', query),
+
   /** 审计动作字典（供筛选下拉；也可前端从 permissions.ts 推导，两边都允许） */
   listAuditActions: () => api.get<AuditActionOption[]>('/system/audit-logs/actions'),
 
@@ -488,6 +518,14 @@ export const adminApi = {
 
   listLoginLogs: (query?: PageQuery) =>
     api.get<PageResult<AdminLoginLog>>('/system/login-logs', query),
+
+  /**
+   * 管理端登录日志汇总（**全量口径**，卡片用）。
+   *
+   * ⚠️ 「结果」筛选是布尔（`success`），与审计的 `result: 'success'|'failure'` 不同套。
+   */
+  loginStats: (query?: PageQuery) =>
+    api.get<LoginStats>('/system/login-logs/stats/summary', query),
 
   /** 登录成功/失败按天聚合 */
   getLoginDaily: (query?: Pick<PageQuery, 'from' | 'to'>) =>

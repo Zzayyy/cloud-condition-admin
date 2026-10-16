@@ -146,8 +146,33 @@ function reload() {
   return loadUsers(currentParams())
 }
 
+/** 汇总用的参数：同筛选条件、不带分页 */
+function statsParams() {
+  return {
+    keyword: keyword.value.trim() || undefined,
+    roleId: roleFilter.value ?? undefined,
+    status: statusFilter.value === 'all' ? undefined : statusFilter.value,
+  }
+}
+
+/**
+ * 管理账号汇总（**全量口径**）。
+ *
+ * 原先是对当前页 `rows` 做 filter ——「启用 / 停用 / 锁定」这类标签下的
+ * 数字翻页就变，而标签写的就是这几个词，会被读成全量。
+ */
+const { data: statsData, load: loadStats } = useResource(
+  (params: Record<string, unknown>) => adminApi.userStats(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockAdminApi.userStats(params)) },
+)
+
 function reloadAll() {
-  return Promise.all([loadUsers(currentParams()), loadRoles(undefined), loadPolicy(undefined)])
+  return Promise.all([
+    loadUsers(currentParams()),
+    loadRoles(undefined),
+    loadPolicy(undefined),
+    loadStats(statsParams()),
+  ])
 }
 
 onMounted(() => {
@@ -212,18 +237,18 @@ const partialMockNote = computed(() => {
 /* ------------------------------ 汇总 ------------------------------ */
 
 const summary = computed(() => {
-  const list = rows.value
+  const s = statsData.value
   return {
-    total: total.value,
-    enabled: list.filter((r) => r.enabled).length,
-    disabled: list.filter((r) => !r.enabled).length,
-    locked: list.filter((r) => r.locked).length,
+    total: s?.totalCount ?? total.value,
+    enabled: s?.enabledCount ?? 0,
+    disabled: s?.disabledCount ?? 0,
+    locked: s?.lockedCount ?? 0,
   }
 })
 
 const lockHintForStat = computed(() => {
   const p = policy.value
-  const scope = `本页口径（当前页 ${rows.value.length} 个里的 locked = true）`
+  const scope = '筛选后全量'
   if (!p) return `${scope}；密码策略未加载，阈值未知`
   return p.maxFailedAttempts > 0
     ? `${scope}；阈值：连续失败 ${p.maxFailedAttempts} 次 / 锁定 ${p.lockMinutes} 分钟`
@@ -963,7 +988,7 @@ async function submitReset() {
           suffix="个"
           :icon="CheckmarkCircleOutline"
           color="#2f9e5f"
-          :hint="`本页口径（当前页 ${rows.length} 个里的 enabled = true）`"
+          hint="enabled = true"
         />
       </n-gi>
       <n-gi>
@@ -973,7 +998,7 @@ async function submitReset() {
           suffix="个"
           :icon="BanOutline"
           color="#d6455e"
-          :hint="`本页口径（当前页 ${rows.length} 个里的 enabled = false）`"
+          hint="enabled = false"
         />
       </n-gi>
       <n-gi>

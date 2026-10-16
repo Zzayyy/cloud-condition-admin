@@ -224,6 +224,40 @@ public final class SystemDtos {
     public record NameValueRow(String name, long value) {
     }
 
+    /**
+     * 管理账号汇总（**全量口径**，卡片用）。
+     *
+     * <p>与列表同筛选条件，所以 {@code totalCount} 应等于列表 {@code total}。
+     */
+    public record AdminUserStats(
+            long totalCount,
+            long enabledCount,
+            long disabledCount,
+            long lockedCount) {
+    }
+
+    /**
+     * 操作审计汇总（**全量口径**，卡片用）。
+     *
+     * <p>与列表同筛选条件，{@code totalCount} 应等于列表 {@code total}。
+     */
+    public record AuditStats(
+            /** level = 'high' 的条数 */
+            long highCount,
+            /** result = 'failure' 的条数 */
+            long failureCount,
+            /** 去重后的操作人数 */
+            long operatorCount,
+            long totalCount) {
+    }
+
+    /** 管理端登录日志汇总（**全量口径**，卡片用） */
+    public record LoginStats(
+            long successCount,
+            long failureCount,
+            long totalCount) {
+    }
+
     /** 审计导出结果，对应前端 {@code exportAuditLogs} 的返回 */
     public record AuditExportResult(String url, String filename, long total) {
     }

@@ -297,22 +297,18 @@ const summary = computed(() => {
  *
  * ⚠️ 原来这里无条件调 `mockStorageApi.typeDistribution(...)` ——
  * **真实态也在用假数据画饼图**，而且不报错、看不出来。
- * 现改为按**当前页真实键列表**统计；真实态不再触碰 mock
- * （前端 README 第 4 条：图表也不许拿 mock 充数）。
+ * 后来改成按**当前页真实键列表**统计 —— 那又走到另一个极端：
+ * 一页只有 15 个键，样本太小，饼图基本没有参考价值。
  *
- * 口径说明：这是「本页口径」（当前页的键），不是全库分布 ——
- * 后端 SCAN 有硬上限，全库分布无法在单次请求里准确给出。
- * 页面标题已写明「本页口径」。
+ * 现在用后端在扫描时**顺手算好**的 `typeCounts`：它覆盖本次 SCAN 到的
+ * 全部键（上限 2000），而不是当前页，且不需要任何额外请求。
+ *
+ * ⚠️ 口径边界（必须如实说明）：受后端 SCAN_HARD_LIMIT 限制，
+ * 这是「扫描到的键」的分布，**不是全库分布** —— 现场 137 db0 有 1400 万条条目，
+ * 全库分布无法在单次请求里准确给出。`truncated` 为真时页面会提示。
  */
 const typeChartOption = computed(() => {
-  const counts = new Map<string, number>()
-  for (const k of keys.value) {
-    const t = k.type ?? 'unknown'
-    counts.set(t, (counts.get(t) ?? 0) + 1)
-  }
-  const dist = [...counts.entries()]
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value)
+  const dist = (keyData.value?.typeCounts ?? []).map((r) => ({ name: r.type, value: r.count }))
   return {
     tooltip: { trigger: 'item', formatter: '{b}<br/>{c} 个键（{d}%）' },
     legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 12 } },
@@ -650,7 +646,17 @@ function deleteKey(row: RedisKeyInfo) {
             </span>
           </template>
           <template #header-extra>
-            <span class="text-muted" style="font-size: 12px">{{ instanceId }} / db{{ db }}</span>
+            <span class="text-muted" style="font-size: 12px">
+              {{ instanceId }} / db{{ db }}
+              <!--
+                口径必须写清楚：这是「本次 SCAN 到的键」的分布，不是全库。
+                被上限截断时更要说明，否则会被读成「这个 db 就这么多键」。
+              -->
+              <template v-if="keyData?.truncated">
+                · <b style="color: var(--warning)">仅前 {{ keyData.scanLimit }} 个键（已截断）</b>
+              </template>
+              <template v-else> · 已扫描全部 {{ keyData?.dbSize ?? 0 }} 个键</template>
+            </span>
           </template>
           <BaseChart :option="typeChartOption" :height="230" empty-text="暂无键" />
         </n-card>

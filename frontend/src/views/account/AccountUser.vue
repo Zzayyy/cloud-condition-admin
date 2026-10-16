@@ -84,6 +84,13 @@ function currentParams() {
   return {
     page: page.value,
     pageSize: pageSize.value,
+    ...statsParams(),
+  }
+}
+
+/** 筛选条件（不含分页）—— 列表与汇总共用，保证两者口径一致 */
+function statsParams() {
+  return {
     keyword: keyword.value.trim() || undefined,
     accounttype: accountTypeFilter.value ?? undefined,
     accatt: accAttFilter.value ?? undefined,
@@ -92,8 +99,20 @@ function currentParams() {
   }
 }
 
+/**
+ * 账号汇总（**全量口径**，来自后端 `/accounts/stats/summary`）。
+ *
+ * 原先是对当前页 `rows` 做 filter：「已签署」「在线」这类标签下的数字
+ * 翻页就变。现在按筛选条件统计合并后的全量。
+ */
+const { data: statsData, load: loadStats } = useResource(
+  (params: Record<string, unknown>) => accountApi.accountStats(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockAccountApi.accountStats(params)) },
+)
+
 function reload() {
   load(currentParams())
+  loadStats(statsParams())
 }
 
 onMounted(reload)
@@ -121,14 +140,15 @@ const total = computed(() => data.value?.total ?? 0)
 
 /* ------------------------------ 汇总 ------------------------------ */
 
+/** 汇总 —— **全量口径**，来自后端 `/accounts/stats/summary` */
 const summary = computed(() => {
-  const list = rows.value
+  const s = statsData.value
   return {
-    total: total.value,
-    signed: list.filter((r) => r.signed).length,
-    online: list.filter((r) => r.onlineflag === 1).length,
+    total: s?.totalCount ?? total.value,
+    signed: s?.signedCount ?? 0,
+    online: s?.onlineCount ?? 0,
     /** 只有 Redis、MySQL 里没有的（现场很常见） */
-    redisOnly: list.filter((r) => r.hasRedis && !r.userId).length,
+    redisOnly: s?.redisOnlyCount ?? 0,
   }
 })
 
@@ -406,7 +426,7 @@ const shareholderColumns: DataTableColumns<Shareholder> = [
           suffix="个"
           :icon="CheckmarkCircleOutline"
           color="#2f9e5f"
-          hint="本页口径（RegProtocol / regprotocal）"
+          hint="RegProtocol / regprotocal"
         />
       </n-gi>
       <n-gi>

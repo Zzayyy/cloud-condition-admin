@@ -19,12 +19,15 @@ import type {
   AdminLoginLog,
   AdminRole,
   AdminUser,
+  AdminUserStats,
   AuditActionOption,
   AuditDailyRow,
   AuditLevel,
   AuditLog,
+  AuditStats,
   LoginDailyRow,
   LoginResult,
+  LoginStats,
   NameValueRow,
   PasswordPolicy,
 } from '../domain'
@@ -470,6 +473,37 @@ export const mockAdminApi = {
       ],
     )
   },
+  /**
+   * 管理账号汇总（演示态）。口径与后端 `AdminUserStats` 一致：
+   * 对**全量** USERS 按筛选条件统计，而不是当前页。
+   */
+  userStats(query: PageQuery = {}): AdminUserStats {
+    const kw = asString(query.keyword)
+    const roleId = asNumber(query.roleId)
+    const status = asString(query.status)
+    const rows = USERS.filter((r) => {
+      if (kw) {
+        const k = kw.toLowerCase()
+        const hit =
+          r.username.toLowerCase().includes(k) ||
+          (r.displayName ?? '').toLowerCase().includes(k) ||
+          (r.remark ?? '').toLowerCase().includes(k)
+        if (!hit) return false
+      }
+      if (roleId !== undefined && !r.roleIds.includes(roleId)) return false
+      if (status === 'enabled' && !r.enabled) return false
+      if (status === 'disabled' && r.enabled) return false
+      if (status === 'locked' && !r.locked) return false
+      return true
+    })
+    return {
+      totalCount: rows.length,
+      enabledCount: rows.filter((r) => r.enabled).length,
+      disabledCount: rows.filter((r) => !r.enabled).length,
+      lockedCount: rows.filter((r) => r.locked).length,
+    }
+  },
+
   /** 演示态不需要后端：直接返回成功，让页面走到「已提交」分支 */
   createUser(payload: { username: string }): AdminUser {
     const id = nextUserId++
@@ -579,6 +613,30 @@ export const mockAdminApi = {
   },
 
   /* ---------------------------- 审计与登录日志 ---------------------------- */
+
+  /**
+   * 审计汇总（演示态）。口径与后端 `AuditStats` 一致：
+   * 对**全量** AUDIT_LOGS 按筛选条件统计，而不是当前页。
+   */
+  auditStats(query: PageQuery = {}): AuditStats {
+    const rows = filterAuditLogs(query)
+    return {
+      highCount: rows.filter((r) => r.level === 'high').length,
+      failureCount: rows.filter((r) => r.result === 'failure').length,
+      operatorCount: new Set(rows.map((r) => r.operator)).size,
+      totalCount: rows.length,
+    }
+  },
+
+  /** 管理端登录日志汇总（演示态）。口径与后端 `LoginStats` 一致。 */
+  loginStats(query: PageQuery = {}): LoginStats {
+    const rows = filterLoginLogs(query)
+    return {
+      successCount: rows.filter((r) => r.success).length,
+      failureCount: rows.filter((r) => !r.success).length,
+      totalCount: rows.length,
+    }
+  },
 
   listAuditLogs(query: PageQuery = {}): PageResult<AuditLog> {
     return paginate(
@@ -776,6 +834,63 @@ export const mockAdminApi = {
 }
 
 /* ------------------------------ 图表数据 ------------------------------ */
+
+/*
+ * 下面两个筛选函数供「列表」与「汇总」共用。
+ *
+ * ⚠️ 抽出来是**必须**的：汇总若自己再写一遍筛选条件，
+ * 迟早出现「列表 12 条、汇总 15 条」这种对不上的情况，
+ * 而且这种错不会报错，只能靠人盯数字发现。
+ * 两份筛选的实现必须与对应的 list* 方法逐条一致（含 asBool / inRange 这些坑）。
+ */
+
+/** 审计日志筛选（与 `listAuditLogs` 的筛选项一致） */
+function filterAuditLogs(query: PageQuery = {}): AuditLog[] {
+  const kw = asString(query.keyword)
+  return AUDIT_LOGS.filter((row) => {
+    if (kw) {
+      const hit =
+        (row.target ?? '').includes(kw) ||
+        (row.operator ?? '').includes(kw) ||
+        row.actionLabel.includes(kw) ||
+        row.action.includes(kw)
+      if (!hit) return false
+    }
+    const level = asString(query.level)
+    if (level && row.level !== level) return false
+    const module = asString(query.module)
+    if (module && row.module !== module) return false
+    const action = asString(query.action)
+    if (action && row.action !== action) return false
+    const operator = asString(query.operator)
+    if (operator && !(row.operator ?? '').includes(operator)) return false
+    const result = asString(query.result)
+    if (result && row.result !== result) return false
+    return inRange(row.createdAt, query)
+  })
+}
+
+/** 管理端登录日志筛选（与 `listLoginLogs` 的筛选项一致） */
+function filterLoginLogs(query: PageQuery = {}): AdminLoginLog[] {
+  const kw = asString(query.keyword)
+  return LOGIN_LOGS.filter((row) => {
+    if (kw) {
+      const hit =
+        row.username.toLowerCase().includes(kw.toLowerCase()) ||
+        (row.loginIP ?? '').includes(kw) ||
+        (row.loginOS ?? '').includes(kw)
+      if (!hit) return false
+    }
+    const username = asString(query.username)
+    if (username && !row.username.includes(username)) return false
+    // 与列表一致：必须用 asBool（审计侧是 'success'/'failure'，登录侧是布尔）
+    const s = asBool(query.success)
+    if (s !== undefined && row.success !== s) return false
+    const ip = asString(query.ip)
+    if (ip && !(row.loginIP ?? '').includes(ip)) return false
+    return inRange(row.loginTime, query)
+  })
+}
 
 /** 最近 14 个自然日（含今天），`YYYY-MM-DD` */
 function defaultDayRange(): string[] {

@@ -17,9 +17,11 @@ import com.qianlong.cloud.admin.dto.SystemDtos.AuditDailyRow;
 import com.qianlong.cloud.admin.dto.SystemDtos.AuditExportResult;
 import com.qianlong.cloud.admin.dto.SystemDtos.AuditLogView;
 import com.qianlong.cloud.admin.dto.SystemDtos.AuditQuery;
+import com.qianlong.cloud.admin.dto.SystemDtos.AuditStats;
 import com.qianlong.cloud.admin.dto.SystemDtos.LoginDailyRow;
 import com.qianlong.cloud.admin.dto.SystemDtos.LoginLogQuery;
 import com.qianlong.cloud.admin.dto.SystemDtos.LoginLogView;
+import com.qianlong.cloud.admin.dto.SystemDtos.LoginStats;
 import com.qianlong.cloud.admin.dto.SystemDtos.NameValueRow;
 import com.qianlong.cloud.admin.dto.SystemDtos.RangeQuery;
 import com.qianlong.cloud.admin.service.AuditQueryService;
@@ -88,6 +90,28 @@ public class AuditController {
     @GetMapping("/audit-logs/by-action")
     public ApiResult<List<NameValueRow>> auditByAction(RangeQuery query) {
         return ApiResult.ok(auditQueryService.auditByAction(query));
+    }
+
+    /**
+     * 审计汇总（**全量口径**，卡片用）。
+     *
+     * <p>与 {@code /audit-logs} 列表同筛选条件，{@code totalCount} 应等于列表 {@code total}。
+     */
+    @SaCheckLogin
+    @GetMapping("/audit-logs/stats/summary")
+    public ApiResult<AuditStats> auditStats(AuditQuery query) {
+        return ApiResult.ok(auditQueryService.auditStats(query));
+    }
+
+    /**
+     * 管理端登录日志汇总（**全量口径**，卡片用）。
+     *
+     * <p>与 {@code /login-logs} 列表同筛选条件。
+     */
+    @SaCheckLogin
+    @GetMapping("/login-logs/stats/summary")
+    public ApiResult<LoginStats> loginStats(LoginLogQuery query) {
+        return ApiResult.ok(auditQueryService.loginStats(query));
     }
 
     /* ============================== 管理端登录日志 ============================== */

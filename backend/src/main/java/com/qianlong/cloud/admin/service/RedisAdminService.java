@@ -14,6 +14,7 @@ import com.qianlong.cloud.admin.dto.RedisAdminDtos.RedisKeyDetailView;
 import com.qianlong.cloud.admin.dto.RedisAdminDtos.RedisKeyInfoView;
 import com.qianlong.cloud.admin.dto.RedisAdminDtos.RedisPubSubChannelView;
 import com.qianlong.cloud.admin.dto.RedisAdminDtos.ScanResult;
+import com.qianlong.cloud.admin.dto.RedisAdminDtos.TypeCountRow;
 
 import io.lettuce.core.KeyScanCursor;
 import io.lettuce.core.Limit;
@@ -270,6 +271,23 @@ public class RedisAdminService {
         int from = Math.min((safePage - 1) * safePageSize, enriched.size());
         int to = Math.min(from + safePageSize, enriched.size());
 
+        /*
+         * 类型分布：基于**本次扫描到的全部键**（enriched，已含 type 筛选后的结果），
+         * 而不是当前页 —— 这里顺手算，不需要任何额外 Redis 往返。
+         *
+         * 注意口径：受 SCAN_HARD_LIMIT 限制，这是「扫描到的键」的分布，
+         * 不是全库分布（全库要把整个 db 读一遍，现场 137 db0 有 1400 万条条目，不可能）。
+         * truncated=true 时页面必须据此说明。
+         */
+        Map<String, Long> typeMap = new java.util.LinkedHashMap<>();
+        for (RedisKeyInfoView row : enriched) {
+            typeMap.merge(row.type() == null ? "unknown" : row.type(), 1L, Long::sum);
+        }
+        List<TypeCountRow> typeCounts = typeMap.entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .map(e -> new TypeCountRow(e.getKey(), e.getValue()))
+                .toList();
+
         return new ScanResult(
                 List.copyOf(enriched.subList(from, to)),
                 total,
@@ -279,7 +297,8 @@ public class RedisAdminService {
                 db,
                 dbSize,
                 truncated,
-                SCAN_HARD_LIMIT);
+                SCAN_HARD_LIMIT,
+                typeCounts);
     }
 
     /**

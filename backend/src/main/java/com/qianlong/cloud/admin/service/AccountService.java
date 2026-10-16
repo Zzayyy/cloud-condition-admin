@@ -83,38 +83,10 @@ public class AccountService {
      * 查用户账号（合并 + 筛选 + 分页 + 排序）。
      */
     public MergedAccounts listAccounts(AccountQuery query) {
-        Map<String, RedisAccountValue> redisMap = redisRepository.findAll();
-        List<UserAccountEntity> mysqlRows = userAccountMapper.selectAllForMerge();
-
-        // ---- 归并：以两侧并集为准 ----
-        Map<String, AccountRow> merged = new LinkedHashMap<>();
-
-        // 先放 MySQL 侧
-        for (UserAccountEntity row : mysqlRows) {
-            String account = row.getAccount();
-            if (!StringUtils.hasText(account)) {
-                continue;
-            }
-            merged.put(account, fromMysql(row));
-        }
-        // 再放 Redis 侧：已存在的按口径 2「以 Redis 为准」覆盖，其余新增
-        for (Map.Entry<String, RedisAccountValue> entry : redisMap.entrySet()) {
-            String account = accountFromKey(entry.getKey());
-            if (!StringUtils.hasText(account)) {
-                continue;
-            }
-            AccountRow redisRow = fromRedis(entry.getValue());
-            AccountRow existing = merged.get(account);
-            merged.put(account, existing == null ? redisRow : mergePreferRedis(existing, redisRow));
-        }
-
-        // ---- 筛选 ----
-        List<AccountRow> filtered = new ArrayList<>();
-        for (AccountRow row : merged.values()) {
-            if (matches(row, query)) {
-                filtered.add(row);
-            }
-        }
+        // 合并 + 筛选走共用实现，保证与 stats() 的口径完全一致。
+        // 顺带把 meta 一起带回来，避免这里再查一次 Redis（每次都是真实往返）。
+        AccountStatsSource src = mergedFiltered(query);
+        List<AccountRow> filtered = src.rows();
 
         // ---- 排序 ----
         sort(filtered, query.getSortBy(), query.getSortOrder());
@@ -130,8 +102,8 @@ public class AccountService {
         AccountListMeta meta = new AccountListMeta(
                 redisRepository.availableInstanceNames(),
                 List.copyOf(redisRepository.unavailableInstances().keySet()),
-                mysqlRows.size(),
-                redisMap.size());
+                src.mysqlRows(),
+                src.redisKeys());
 
         if (unavailable > 0) {
             log.warn("有 {} 个 Redis 实例不可用，本次账号列表的 hasRedis 可能偏低", unavailable);
@@ -151,6 +123,87 @@ public class AccountService {
         }
         AccountRow redisRow = fromRedis(redis);
         return mysql == null ? redisRow : mergePreferRedis(fromMysql(mysql), redisRow);
+    }
+
+    /**
+     * 账号汇总（**全量口径**，卡片用）。
+     *
+     * <p>口径说明：账号列表本身就是「MySQL 与 Redis 两侧合并」的结果
+     * （见 {@link #listAccounts}），所以这里的「全量」= 合并并集经筛选后的全部行，
+     * 与列表的 {@code total} 同源 —— 不是全库表行数，那两边的含义不同。
+     *
+     * <p>原先前端是对当前页做 filter：「已签署」「在线」这类数字翻页就变。
+     */
+    public AccountStats stats(AccountQuery query) {
+        AccountStatsSource src = mergedFiltered(query);
+        List<AccountRow> all = src.rows();
+        long signed = all.stream().filter(AccountRow::signed).count();
+        long online = all.stream().filter(r -> r.onlineflag() != null && r.onlineflag() == 1).count();
+        // 只有 Redis、MySQL 里没有的（现场很常见）
+        long redisOnly = all.stream().filter(r -> r.hasRedis() && r.userId() == null).count();
+        // 「签署与股东号」页用：至少一个股东号的账号数、股东号总数
+        long withShareholders = all.stream()
+                .filter(r -> r.shareHolders() != null && !r.shareHolders().isEmpty()).count();
+        long totalShares = all.stream()
+                .filter(r -> r.shareHolders() != null)
+                .mapToLong(r -> r.shareHolders().size()).sum();
+        return new AccountStats(all.size(), signed, online, redisOnly, withShareholders, totalShares);
+    }
+
+    /** 账号汇总结果（全量口径） */
+    public record AccountStats(
+            long totalCount,
+            long signedCount,
+            long onlineCount,
+            long redisOnlyCount,
+            long withShareholdersCount,
+            long totalShares) {
+    }
+
+    /**
+     * 「合并 + 筛选」的结果，附带 meta 需要的两个计数。
+     *
+     * <p>把计数一起返回，是为了让 {@link #listAccounts} 不必为了填 meta
+     * 再查一次 MySQL 与 Redis —— 那两次都是真实往返，白花的。
+     */
+    private record AccountStatsSource(List<AccountRow> rows, int mysqlRows, int redisKeys) {
+    }
+
+    /**
+     * 把「合并 + 筛选」抽出来，供 {@link #listAccounts} 与 {@link #stats} 共用。
+     *
+     * <p>抽出来是为了不让两处走偏：汇总若自己再写一遍合并与筛选，
+     * 迟早出现「列表 14 条、汇总 15 条」这种对不上的情况。
+     */
+    private AccountStatsSource mergedFiltered(AccountQuery query) {
+        Map<String, RedisAccountValue> redisMap = redisRepository.findAll();
+        List<UserAccountEntity> mysqlRows = userAccountMapper.selectAllForMerge();
+
+        Map<String, AccountRow> merged = new LinkedHashMap<>();
+        for (UserAccountEntity row : mysqlRows) {
+            String account = row.getAccount();
+            if (!StringUtils.hasText(account)) {
+                continue;
+            }
+            merged.put(account, fromMysql(row));
+        }
+        for (Map.Entry<String, RedisAccountValue> entry : redisMap.entrySet()) {
+            String account = accountFromKey(entry.getKey());
+            if (!StringUtils.hasText(account)) {
+                continue;
+            }
+            AccountRow redisRow = fromRedis(entry.getValue());
+            AccountRow existing = merged.get(account);
+            merged.put(account, existing == null ? redisRow : mergePreferRedis(existing, redisRow));
+        }
+
+        List<AccountRow> filtered = new ArrayList<>();
+        for (AccountRow row : merged.values()) {
+            if (matches(row, query)) {
+                filtered.add(row);
+            }
+        }
+        return new AccountStatsSource(filtered, mysqlRows.size(), redisMap.size());
     }
 
     /** Redis 侧原始内容（页面「Redis 实时态」tab 要展示原始 JSON） */

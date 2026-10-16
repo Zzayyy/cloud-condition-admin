@@ -1062,6 +1062,74 @@ export interface StatusCountRow {
   count: number
 }
 
+/** 管理账号汇总（全量口径，对应后端 AdminUserStats） */
+export interface AdminUserStats {
+  totalCount: number
+  enabledCount: number
+  disabledCount: number
+  lockedCount: number
+}
+
+/** 操作审计汇总（全量口径，对应后端 AuditStats） */
+export interface AuditStats {
+  /** level = 'high' */
+  highCount: number
+  /** result = 'failure' */
+  failureCount: number
+  /** 去重后的操作人数 */
+  operatorCount: number
+  totalCount: number
+}
+
+/** 管理端登录日志汇总（全量口径，对应后端 LoginStats） */
+export interface LoginStats {
+  successCount: number
+  failureCount: number
+  totalCount: number
+}
+
+/**
+ * 账号汇总（全量口径，对应后端 AccountService.AccountStats）。
+ *
+ * 口径：账号列表是「MySQL T_User 与 Redis acc-* 合并」的结果，
+ * 所以这里的全量 = 合并并集经筛选后的全部行，与列表 `total` 同源。
+ */
+export interface AccountStats {
+  totalCount: number
+  signedCount: number
+  onlineCount: number
+  redisOnlyCount: number
+  withShareholdersCount: number
+  totalShares: number
+}
+
+/** 键类型 → 数量（对应后端 TypeCountRow） */
+export interface RedisTypeCountRow {
+  type: string
+  count: number
+}
+
+/**
+ * Redis 键扫描结果。
+ *
+ * 比通用 `PageResult` 多带几个字段（后端 `ScanResult` 会一并返回，前端此前忽略了）：
+ *  - `dbSize`：该 db 的**真实键数**（DBSIZE），与 `total`（过滤后条数）不是一回事；
+ *  - `truncated` / `scanLimit`：是否因服务端上限只扫了一部分；
+ *  - `typeCounts`：类型分布，**基于本次扫描到的键**（受上限约束），不是全库。
+ */
+export interface RedisScanResult {
+  list: RedisKeyInfo[]
+  total: number
+  page: number
+  pageSize: number
+  instance: string
+  db: number
+  dbSize: number
+  truncated: boolean
+  scanLimit: number
+  typeCounts: RedisTypeCountRow[]
+}
+
 /** 总览页一次性返回的全部内容 */
 export interface DashboardOverview {
   summary: DashboardSummary

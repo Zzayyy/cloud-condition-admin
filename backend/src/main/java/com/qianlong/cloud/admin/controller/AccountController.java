@@ -78,6 +78,20 @@ public class AccountController {
         return ApiResult.ok(row);
     }
 
+    /**
+     * 账号汇总（**全量口径**，卡片用）。
+     *
+     * <p>与 {@code /accounts} 列表同筛选条件，`totalCount` 应等于列表 `total`。
+     *
+     * <p>口径：账号列表本身是「MySQL T_User 与 Redis acc-* 合并」的结果，
+     * 所以这里的全量 = 合并并集经筛选后的全部行，与列表 total 同源。
+     */
+    @SaCheckLogin
+    @GetMapping("/accounts/stats/summary")
+    public ApiResult<AccountService.AccountStats> accountStats(AccountQuery query) {
+        return ApiResult.ok(accountService.stats(query));
+    }
+
     /** 账号在 Redis 中的实时态（acc-* 原始 JSON） */
     @SaCheckLogin
     @GetMapping("/redis/{account}")

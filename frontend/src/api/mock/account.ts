@@ -21,7 +21,7 @@
  *
  * 数值是编的，但结构、取值范围、以及上面的坑都是真的。
  */
-import type { AccountLogStat, AccountRow, Shareholder, UserLog } from '../domain'
+import type { AccountLogStat, AccountRow, AccountStats, Shareholder, UserLog } from '../domain'
 import type { PageQuery, PageResult } from '../types'
 import { asNumber, asString, fmt, intBetween, paginate, pick, seededRandom, type Rand } from './_shared'
 
@@ -195,7 +195,52 @@ const LOG_STATS = buildLogStats()
 
 /* ----------------------------- 对外接口 ----------------------------- */
 
+/**
+ * 账号筛选 —— 供 `listAccounts` 与 `accountStats` 共用。
+ *
+ * 抽出来是必须的：汇总若自己再写一遍筛选，两边迟早对不上且不报错。
+ * 实现与 `listAccounts` 的筛选项逐条一致。
+ */
+function filterAccounts(query: PageQuery = {}): AccountRow[] {
+  const kw = asString(query.keyword)
+  return ACCOUNTS.filter((row) => {
+    if (kw) {
+      const hit =
+        row.account.includes(kw) ||
+        row.useraccount.includes(kw) ||
+        (row.name ?? '').includes(kw) ||
+        (row.tradeAccount ?? '').includes(kw)
+      if (!hit) return false
+    }
+    const t = asNumber(query.accounttype)
+    if (t !== undefined && row.accounttype !== t) return false
+    const att = asNumber(query.accatt)
+    if (att !== undefined && row.accatt !== att) return false
+    if (typeof query.signed === 'boolean' && row.signed !== query.signed) return false
+    if (typeof query.online === 'boolean' && (row.onlineflag === 1) !== query.online) return false
+    const branch = asString(query.branchNo)
+    if (branch && !(row.branchNo ?? '').includes(branch)) return false
+    return true
+  })
+}
+
 export const mockAccountApi = {
+  /**
+   * 账号汇总（演示态）。口径与后端 `AccountStats` 一致：
+   * 对**全量** ACCOUNTS 按筛选条件统计，而不是当前页。
+   */
+  accountStats(query: PageQuery = {}): AccountStats {
+    const rows = filterAccounts(query)
+    return {
+      totalCount: rows.length,
+      signedCount: rows.filter((r) => r.signed).length,
+      onlineCount: rows.filter((r) => r.onlineflag === 1).length,
+      redisOnlyCount: rows.filter((r) => r.hasRedis && !r.userId).length,
+      withShareholdersCount: rows.filter((r) => r.shareHolders.length > 0).length,
+      totalShares: rows.reduce((s, r) => s + r.shareHolders.length, 0),
+    }
+  },
+
   listAccounts(query: PageQuery = {}): PageResult<AccountRow> {
     return paginate(
       ACCOUNTS,

@@ -80,13 +80,32 @@ function currentParams() {
   return {
     page: page.value,
     pageSize: pageSize.value,
+    ...statsParams(),
+  }
+}
+
+/** 筛选条件（不含分页）—— 列表与汇总共用 */
+function statsParams() {
+  return {
     keyword: keyword.value.trim() || undefined,
     signed: signedFilter.value === 'all' ? undefined : signedFilter.value === 'yes',
   }
 }
 
+/**
+ * 账号汇总（**全量口径**）—— 本页复用账号的 stats 接口。
+ *
+ * 原先是对当前页 `rows` 做 filter / reduce：「已签署」「股东号合计」
+ * 这类数字翻页就变。
+ */
+const { data: statsData, load: loadStats } = useResource(
+  (params: Record<string, unknown>) => accountApi.accountStats(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockAccountApi.accountStats(params)) },
+)
+
 function reload() {
   load(currentParams())
+  loadStats(statsParams())
 }
 
 onMounted(reload)
@@ -116,16 +135,16 @@ const total = computed(() => data.value?.total ?? 0)
 
 /* ------------------------------ 汇总 ------------------------------ */
 
+/** 汇总 —— **全量口径**，来自后端 `/accounts/stats/summary` */
 const summary = computed(() => {
-  const list = rows.value
-  const signed = list.filter((r) => r.signed)
-  const withSh = list.filter((r) => r.shareHolders.length > 0)
-  const totalShares = list.reduce((s, r) => s + r.shareHolders.length, 0)
+  const s = statsData.value
+  const total = s?.totalCount ?? 0
+  const signed = s?.signedCount ?? 0
   return {
-    signed: signed.length,
-    unsigned: list.length - signed.length,
-    withShareholders: withSh.length,
-    totalShares,
+    signed,
+    unsigned: total - signed,
+    withShareholders: s?.withShareholdersCount ?? 0,
+    totalShares: s?.totalShares ?? 0,
   }
 })
 
@@ -387,7 +406,7 @@ const protocolColumns: DataTableColumns<(typeof PROTOCOL_ROWS)[number]> = [
 
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>
-        <StatCard label="已签署" :value="summary.signed" suffix="个" :icon="CheckmarkCircleOutline" color="#2f9e5f" hint="本页口径" />
+        <StatCard label="已签署" :value="summary.signed" suffix="个" :icon="CheckmarkCircleOutline" color="#2f9e5f" hint="RegProtocol 非空" />
       </n-gi>
       <n-gi>
         <StatCard
@@ -416,7 +435,7 @@ const protocolColumns: DataTableColumns<(typeof PROTOCOL_ROWS)[number]> = [
           suffix="个"
           :icon="SwapHorizontalOutline"
           :color="accent"
-          hint="本页口径合计"
+          hint="shareHolders 合计"
         />
       </n-gi>
     </n-grid>

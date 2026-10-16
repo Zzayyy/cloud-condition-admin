@@ -27,6 +27,7 @@ import type {
   RedisKeyDetail,
   RedisKeyDomain,
   RedisKeyInfo,
+  RedisScanResult,
   RedisValueType,
 } from '../domain'
 import type { PageQuery, PageResult } from '../types'
@@ -592,7 +593,14 @@ export const mockStorageApi = {
     return REDIS_INFOS[instanceId] ?? REDIS_INFOS['136']
   },
 
-  scanKeys(instanceId: string, db: number, query: PageQuery = {}): PageResult<RedisKeyInfo> {
+  /**
+   * 扫描键（演示态）。
+   *
+   * 返回结构与真实接口 `RedisScanResult` **一致**（含 `typeCounts` /
+   * `truncated` / `scanLimit`）—— 演示态若少这几项，页面会走进一条与真实态
+   * 不同的分支（类型分布退回页内统计、截断提示永不出现），等于没验证到真实路径。
+   */
+  scanKeys(instanceId: string, db: number, query: PageQuery = {}): RedisScanResult {
     // 按列表项自己的 instance/db 过滤，不是「存在任意一条同名键」
     let list: RedisKeyInfo[] = KEY_ROWS.filter((k) => k.instance === instanceId && k.db === db)
 
@@ -607,12 +615,32 @@ export const mockStorageApi = {
       list = list.filter((k) => (k.pttl >= 0) === hasTtl)
     }
 
-    return paginate(
+    // 类型分布取「本次扫描到的全部键」（= 上面已筛选的 list），与后端口径一致：
+    // 不是全库分布，也不是当前页
+    const typeMap = new Map<string, number>()
+    for (const k of list) typeMap.set(k.type ?? 'unknown', (typeMap.get(k.type ?? 'unknown') ?? 0) + 1)
+    const typeCounts = [...typeMap.entries()]
+      .map(([t, count]) => ({ type: t, count }))
+      .sort((a, b) => b.count - a.count)
+
+    const page = paginate(
       list,
       query,
       (row, kw) => row.key.toLowerCase().includes(kw.toLowerCase()),
       { key: (r) => r.key, length: (r) => r.length ?? 0, pttl: (r) => r.pttl },
     )
+
+    // 演示数据量小，永远不算截断（真实态 137 db0 会 truncated=true）
+    const dbSize = KEY_ROWS.filter((k) => k.instance === instanceId && k.db === db).length
+    return {
+      ...page,
+      instance: `${instanceId}/db${db}`,
+      db,
+      dbSize,
+      truncated: false,
+      scanLimit: 2000,
+      typeCounts,
+    }
   },
 
   getKey(instanceId: string, db: number, key: string): RedisKeyDetail | null {

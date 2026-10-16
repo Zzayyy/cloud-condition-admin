@@ -23,6 +23,7 @@ import com.qianlong.cloud.admin.common.DateTimes;
 import com.qianlong.cloud.admin.common.ErrorCode;
 import com.qianlong.cloud.admin.common.PageResult;
 import com.qianlong.cloud.admin.dto.SystemDtos.AdminUserPayload;
+import com.qianlong.cloud.admin.dto.SystemDtos.AdminUserStats;
 import com.qianlong.cloud.admin.dto.SystemDtos.AdminUserView;
 import com.qianlong.cloud.admin.dto.SystemDtos.PasswordPolicyDto;
 import com.qianlong.cloud.admin.dto.SystemDtos.UserQuery;
@@ -63,13 +64,38 @@ public class AdminUserService {
 
     /* ============================== 查询 ============================== */
 
-    /** 分页查询管理账号（关键字 / 角色 / 状态三个筛选，与前端一致） */
-    public PageResult<AdminUserView> listUsers(UserQuery query) {
+    /**
+     * 管理账号汇总（**全量口径**，卡片用）。
+     *
+     * <p>与 {@code listUsers} 用**同一套筛选条件**（keyword / status / roleId），
+     * 所以 {@code totalCount} 应与列表 {@code total} 相等。
+     *
+     * <p>为什么必须由后端算：卡片原先是对当前页做 filter，
+     * 于是「启用 / 停用 / 锁定」的数字翻页就变；而标签上写的就是这几个词，
+     * 会被读成全量。
+     *
+     * <p>实现上复用同一个 wrapper 构造逻辑（{@link #listWrappers}），
+     * 避免「列表改了筛选、汇总忘了改」这种两处不一致。
+     */
+    public AdminUserStats stats(UserQuery query) {
+        long total = userMapper.selectCount(buildFilter(query));
+        long enabled = userMapper.selectCount(buildFilter(query).eq(AdminUserEntity::getEnabled, true));
+        long disabled = userMapper.selectCount(buildFilter(query).eq(AdminUserEntity::getEnabled, false));
+        long locked = userMapper.selectCount(buildFilter(query).eq(AdminUserEntity::getLocked, true));
+        return new AdminUserStats(total, enabled, disabled, locked);
+    }
+
+    /**
+     * 把 {@code listUsers} 的筛选条件抽出来，供列表与汇总共用。
+     *
+     * <p>抽出来是**为了不让两处走偏**：汇总若自己再写一遍筛选，
+     * 迟早会出现「列表 12 条、汇总 15 条」这种对不上的情况。
+     */
+    private LambdaQueryWrapper<AdminUserEntity> buildFilter(UserQuery query) {
         LambdaQueryWrapper<AdminUserEntity> wrapper = Wrappers.lambdaQuery();
 
         String keyword = trimToNull(query.getKeyword());
         if (keyword != null) {
-            // 前端提示是「搜索登录名 / 显示名 / 备注」，三处都要覆盖，否则搜不到还以为没数据
             wrapper.and(w -> w.like(AdminUserEntity::getUsername, keyword)
                     .or().like(AdminUserEntity::getDisplayName, keyword)
                     .or().like(AdminUserEntity::getRemark, keyword));
@@ -88,13 +114,21 @@ public class AdminUserService {
 
         Integer roleId = query.getRoleId();
         if (roleId != null) {
-            // 按角色过滤必须走关系表子查询，否则「该角色是否有账号」无法在单表上表达
             List<Integer> userIds = userIdsOfRole(roleId);
+            // 该角色没有账号时，用「不可能匹配」的条件表达空集，
+            // 直接 in(空集合) 会让 SQL 变成 IN () 而报语法错
             if (userIds.isEmpty()) {
-                return PageResult.empty(query.pageOrDefault(), query.pageSizeOrDefault());
+                wrapper.eq(AdminUserEntity::getId, -1);
+            } else {
+                wrapper.in(AdminUserEntity::getId, userIds);
             }
-            wrapper.in(AdminUserEntity::getId, userIds);
         }
+        return wrapper;
+    }
+
+    /** 分页查询管理账号（关键字 / 角色 / 状态三个筛选，与前端一致） */
+    public PageResult<AdminUserView> listUsers(UserQuery query) {
+        LambdaQueryWrapper<AdminUserEntity> wrapper = buildFilter(query);
 
         applySort(wrapper, query.getSortBy(), query.getSortOrder());
 

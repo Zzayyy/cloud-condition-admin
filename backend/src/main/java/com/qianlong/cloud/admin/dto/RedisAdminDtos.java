@@ -99,7 +99,24 @@ public final class RedisAdminDtos {
              */
             boolean truncated,
             /** 服务端单次扫描上限（被截断时告诉用户上限是多少） */
-            int scanLimit) {
+            int scanLimit,
+            /**
+             * 类型分布（**基于本次扫描到的键**，不是全库）。
+             *
+             * <p>为什么是「扫描到的」而不是「全库」：全库分布要把整个 db 的键都
+             * 读一遍，而现场 137 db0 有 1400 万条条目，那是不可能的。
+             * 这里复用 {@code doScan} 已经算好的 {@code TYPE} 结果，
+             * 不需要任何额外 Redis 往返 —— 比让前端拿当前页自己数准得多
+             * （当前页只有 20 个键，样本太小）。
+             *
+             * <p>被 {@code truncated} 截断时，这个分布只是前 N 个键的分布；
+             * 页面必须如实说明，不能当成全库分布展示。
+             */
+            List<TypeCountRow> typeCounts) {
+    }
+
+    /** 键类型 → 数量 */
+    public record TypeCountRow(String type, long count) {
     }
 
     /**

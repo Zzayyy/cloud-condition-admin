@@ -21,9 +21,11 @@ import com.qianlong.cloud.admin.common.TimeParams;
 import com.qianlong.cloud.admin.dto.SystemDtos.AuditDailyRow;
 import com.qianlong.cloud.admin.dto.SystemDtos.AuditLogView;
 import com.qianlong.cloud.admin.dto.SystemDtos.AuditQuery;
+import com.qianlong.cloud.admin.dto.SystemDtos.AuditStats;
 import com.qianlong.cloud.admin.dto.SystemDtos.LoginDailyRow;
 import com.qianlong.cloud.admin.dto.SystemDtos.LoginLogQuery;
 import com.qianlong.cloud.admin.dto.SystemDtos.LoginLogView;
+import com.qianlong.cloud.admin.dto.SystemDtos.LoginStats;
 import com.qianlong.cloud.admin.dto.SystemDtos.NameValueRow;
 import com.qianlong.cloud.admin.dto.SystemDtos.RangeQuery;
 import com.qianlong.cloud.admin.entity.AdminAuditEntity;
@@ -174,6 +176,47 @@ public class AuditQueryService {
             throw BizException.badRequest("不支持按 " + field + " 排序");
         }
         wrapper.orderByDesc(AdminLoginLogEntity::getId);
+    }
+
+    /* ============================== 汇总（全量口径） ============================== */
+
+    /**
+     * 审计汇总（**全量口径**，卡片用）。
+     *
+     * <p>与 {@code listAuditLogs} 同筛选条件（keyword / level / module / action /
+     * result / operator / 时间），所以 {@code totalCount} 应等于列表 {@code total}。
+     *
+     * <p>原先前端是对当前页明细做 filter ——「高危操作」这类标签下的数字翻页就变。
+     */
+    public AuditStats auditStats(AuditQuery query) {
+        LocalDateTime from = TimeParams.parse(query.getFrom(), "from");
+        LocalDateTime to = TimeParams.parse(query.getTo(), "to");
+        AdminAuditMapper.AuditStatsRow row = auditMapper.selectStats(
+                trimToNull(query.getKeyword()), trimToNull(query.getLevel()),
+                trimToNull(query.getModule()), trimToNull(query.getAction()),
+                trimToNull(query.getResult()), trimToNull(query.getOperator()), from, to);
+        if (row == null) {
+            return new AuditStats(0, 0, 0, 0);
+        }
+        return new AuditStats(nz(row.highCount()), nz(row.failureCount()),
+                nz(row.operatorCount()), nz(row.totalCount()));
+    }
+
+    /** 管理端登录日志汇总（**全量口径**，卡片用） */
+    public LoginStats loginStats(LoginLogQuery query) {
+        LocalDateTime from = TimeParams.parse(query.getFrom(), "from");
+        LocalDateTime to = TimeParams.parse(query.getTo(), "to");
+        AdminLoginLogMapper.LoginStatsRow row = loginLogMapper.selectStats(
+                trimToNull(query.getKeyword()), trimToNull(query.getUsername()),
+                trimToNull(query.getIp()), query.getSuccess(), from, to);
+        if (row == null) {
+            return new LoginStats(0, 0, 0);
+        }
+        return new LoginStats(nz(row.successCount()), nz(row.failureCount()), nz(row.totalCount()));
+    }
+
+    private static long nz(Long v) {
+        return v == null ? 0L : v;
     }
 
     /* ============================== 聚合 ============================== */

@@ -45,9 +45,53 @@ public interface AdminLoginLogMapper extends BaseMapper<AdminLoginLogEntity> {
                                       @Param("to") java.time.LocalDateTime to,
                                       @Param("limit") int limit);
 
+    /**
+     * 登录日志汇总（**全量口径**，卡片用）。
+     *
+     * <p>与列表同筛选条件。原来是对当前页明细统计，翻页就变。
+     *
+     * <p>⚠️ 「结果」筛选是布尔：前端传的是 {@code true}/{@code false}
+     * （不是审计那套 {@code success}/{@code failure}）。
+     * 这里用 {@code Boolean} 接收并由 MyBatis 的 {@code <if test="success != null">} 判断 ——
+     * 不能用 {@code success != ''}，布尔和空串比较会出问题。
+     */
+    @Select("""
+            <script>
+            SELECT
+              COALESCE(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END), 0) AS successCount,
+              COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0) AS failureCount,
+              COUNT(*) AS totalCount
+            FROM T_AdminLoginLog
+            <where>
+              <if test="keyword != null and keyword != ''">
+                AND (username LIKE CONCAT('%', #{keyword}, '%')
+                  OR loginIP LIKE CONCAT('%', #{keyword}, '%')
+                  OR loginOS LIKE CONCAT('%', #{keyword}, '%'))
+              </if>
+              <if test="username != null and username != ''">
+                AND username LIKE CONCAT('%', #{username}, '%')
+              </if>
+              <if test="ip != null and ip != ''">AND loginIP LIKE CONCAT('%', #{ip}, '%')</if>
+              <if test="success != null">AND success = #{success}</if>
+              <if test="from != null">AND loginTime &gt;= #{from}</if>
+              <if test="to != null">AND loginTime &lt;= #{to}</if>
+            </where>
+            </script>
+            """)
+    LoginStatsRow selectStats(@Param("keyword") String keyword,
+                              @Param("username") String username,
+                              @Param("ip") String ip,
+                              @Param("success") Boolean success,
+                              @Param("from") java.time.LocalDateTime from,
+                              @Param("to") java.time.LocalDateTime to);
+
     record DayCountRow(String day, Long successCount, Long failureCount) {
     }
 
     record NameCountRow(String name, Long value) {
+    }
+
+    /** 登录日志汇总原始行 */
+    record LoginStatsRow(Long successCount, Long failureCount, Long totalCount) {
     }
 }
