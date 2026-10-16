@@ -92,7 +92,6 @@ export const menuTree: MenuNode[] = [
       // 总览已实现（DashboardView 有完整内容），此前误标 placeholder →
       // 顶栏会在总览页挂「页面待开发」标签，与 README 的 ✅ 自相矛盾。
       status: 'ready',
-      desc: '系统整体运行态势：在线节点、条件单规模、消息吞吐与异常汇总。',
     },
   },
   {
@@ -112,7 +111,7 @@ export const menuTree: MenuNode[] = [
           title: '委托服务器',
           icon: SwapHorizontalOutline,
           status: 'ready',
-          desc: '委托服务器节点清单与在线状态，以及账号到委托服务器的分配关系。**只读，不提供启停。**',
+          desc: '委托服务器节点清单与在线状态，以及账号到委托服务器的分配关系。只读，不提供启停。',
           refs: [
             {
               label: 'Pub/Sub 频道',
@@ -164,7 +163,7 @@ export const menuTree: MenuNode[] = [
           title: '策略服务器',
           icon: LayersOutline,
           status: 'ready',
-          desc: '策略平台集群的节点清单、上线/心跳/下线状态与承载的条件单用户数。⚠️ 现场该服务当前未开放：注册表不刷新、心跳也收不到，「离线」是必然结果。**只读，不提供启停。**',
+          desc: '策略平台集群的节点清单、上线/心跳/下线状态与承载的条件单用户数。⚠️ 现场该服务当前未开放：注册表不刷新、心跳也收不到，「离线」是必然结果。只读，不提供启停。',
           refs: [
             { label: 'Pub/Sub 频道', value: 'strategyserver_online / _beat / _offline（现场带 _1 后缀那一套；本模块**不订阅**）' },
             { label: 'Redis JSON 键', value: 'strategy-srv（数组：id / ip / mac / usecount / enable / login-time / last-active-time）；136 db0 与 db1 各一份且内容不同' },
@@ -227,7 +226,6 @@ export const menuTree: MenuNode[] = [
           title: '条件单管理',
           icon: ListOutline,
           status: 'ready',
-          desc: '全量云条件单的查询、明细查看与人工干预（启停/删除）。',
           refs: [
             { label: 'MySQL 表', value: 'T_Conditional（运行中） / T_Conditional_his（历史） / V_Conditional（两者并集视图）' },
             { label: 'Redis JSON 键', value: 'strategy-<账号>_<账号类型>_<渠道>，内含 Strategy 数组' },
@@ -244,7 +242,6 @@ export const menuTree: MenuNode[] = [
           title: '委托单管理',
           icon: ClipboardOutline,
           status: 'ready',
-          desc: '条件单触发后产生的委托记录。',
           refs: [
             { label: 'MySQL 表', value: 'T_Order（委托下单表） / T_Order_his（历史）' },
             { label: '关键字段', value: 'StrategyID 策略编号、Code 合约、BSType 买卖、OCType 开平、OrderStatue 委托状态、OrderNo 后台委托号' },
@@ -261,7 +258,6 @@ export const menuTree: MenuNode[] = [
           title: '成交回报管理',
           icon: CashOutline,
           status: 'ready',
-          desc: '委托对应的成交明细。',
           refs: [
             { label: 'MySQL 表', value: 'T_Trade（成交数据） / T_Trade_his（历史）' },
             { label: '关键字段', value: 'StrategyID、OrderNo 委托号、TradeNO 成交号、Code 合约、Price 成交价、TradeTime' },
@@ -277,7 +273,6 @@ export const menuTree: MenuNode[] = [
           title: '策略日志管理',
           icon: DocumentTextOutline,
           status: 'ready',
-          desc: '条件单的运行与触发轨迹。',
           refs: [
             { label: 'MySQL 表', value: 'T_StrategyLog（策略单日志）' },
             { label: '关键字段', value: 'Strategy 策略编号、Status 状态、Info、OccurTIme、FromIP / FromMac / FromAccount' },
@@ -300,7 +295,6 @@ export const menuTree: MenuNode[] = [
           title: '用户账号',
           icon: PersonOutline,
           status: 'ready',
-          desc: '云条件单用户资料与账号维度信息。',
           refs: [
             { label: 'MySQL 表', value: 'T_User（账号、AccType、MainType、Passwd、TradeAccount、ShareHolders、BranchNo）' },
             { label: 'Redis JSON 键', value: 'acc-<账号>_<账号类型>_<渠道>（onlineflag、syncflag、strategyserverid、traderserver）' },
@@ -316,7 +310,6 @@ export const menuTree: MenuNode[] = [
           title: '签署与股东号',
           icon: CreateOutline,
           status: 'ready',
-          desc: '云条件单协议签署状态与股东号（市场）配置。',
           refs: [
             { label: '相关协议', value: 'acc_sign 账号签署 / acc_query 账号查询 / acc_update 更新 / logout 登出' },
             { label: '关键字段', value: 'RegProtocol 签署的协议、Shareholders[]（SAccount 股东号 + ExchangeNum 市场）' },
@@ -333,7 +326,6 @@ export const menuTree: MenuNode[] = [
           title: '登录日志',
           icon: TimeOutline,
           status: 'ready',
-          desc: '用户登录/登出轨迹与来源设备。',
           refs: [{ label: 'MySQL 表', value: 'T_UserLog（Account、LogTime、LogIP、LogMAC、LogOS、Info）' }],
           todos: ['登录日志检索', '按 IP/MAC 聚合异常登录', '时间范围与账号过滤'],
         },
@@ -395,7 +387,6 @@ export const menuTree: MenuNode[] = [
           title: '管理用户与权限',
           icon: PersonAddOutline,
           status: 'ready',
-          desc: '后台管理账号：登录名、角色分配、启停、锁定解除与密码重置。',
           refs: [
             { label: '说明', value: '与 T_User（云单业务用户）无关，是后台管理端自己的账号体系' },
             { label: '建议表', value: 'T_AdminUser（username / displayName / roleIds / enabled / locked / failedAttempts / mustChangePassword / lastLoginTime / lastLoginIP）' },

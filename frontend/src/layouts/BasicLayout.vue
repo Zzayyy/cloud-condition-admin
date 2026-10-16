@@ -293,10 +293,12 @@ async function handleUserSelect(key: string) {
 const pageTitle = computed(() => route.meta?.title as string | undefined)
 const pageDesc = computed(() => route.meta?.desc as string | undefined)
 const pageStatus = computed(() => route.meta?.status as string | undefined)
-const parentTitle = computed(() => {
-  const chain = breadcrumb.value
-  return chain.length > 1 ? chain[chain.length - 2].meta.title : undefined
-})
+/*
+ * 这里曾有 `parentTitle`（取面包屑链倒数第二段的标题，在页面标题上方渲染成
+ * 「服务器管理 / 委托服务器」）。已删除，原因：
+ * 顶栏的面包屑已经把同一条路径完整显示了一次，标题区再画一遍属于纯重复。
+ * 现在标题区只保留「页面标题」与「页面说明」两件事。
+ */
 </script>
 
 <template>
@@ -437,10 +439,7 @@ const parentTitle = computed(() => {
           <div v-if="pageDesc || pageTitle" class="page-head" :style="{ '--accent': accent }">
             <div class="page-head-bar" />
             <div class="page-head-text">
-              <div class="page-head-top">
-                <span v-if="parentTitle" class="page-parent">{{ parentTitle }}</span>
-                <h2 class="page-title">{{ pageTitle }}</h2>
-              </div>
+              <h2 class="page-title">{{ pageTitle }}</h2>
               <p v-if="pageDesc" class="page-desc">{{ pageDesc }}</p>
             </div>
           </div>
@@ -669,22 +668,8 @@ const parentTitle = computed(() => {
   min-width: 0;
 }
 
-.page-head-top {
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
-}
-
-.page-parent {
-  font-size: 12.5px;
-  color: var(--text-muted);
-}
-
-.page-parent::after {
-  content: '/';
-  margin-left: 9px;
-  opacity: 0.5;
-}
+/* 标题上方原来还有一行 `父级 / 标题` 的浅灰路径，与顶栏面包屑重复，已移除。
+   原 `.page-parent` / `.page-parent::after` / `.page-head-top` 三条样式随之删除。 */
 
 .page-title {
   margin: 0;
