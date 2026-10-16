@@ -565,9 +565,11 @@ const pageStatus = computed(() => route.meta?.status as string | undefined)
   display: flex;
   flex: none;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   max-width: 200px;
-  padding: 5px 10px;
+  /* 右内边距比左侧小 2px：关闭按钮自带 20px 盒，
+     盒子边缘到页签边框的视觉留白已经足够，不必再叠一层 10px。 */
+  padding: 5px 8px 5px 10px;
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
@@ -615,11 +617,27 @@ const pageStatus = computed(() => route.meta?.status as string | undefined)
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--tab-accent, var(--brand)) 20%, transparent);
 }
 
+/*
+ * 关闭按钮原来只有 13×13 的可点区域（图标多大、可点区就多大，没有 padding），
+ * 必须精确点在那个小叉上，而且 opacity 0.5 让它很淡、更像装饰而不是按钮。
+ * 现在给它 20×20 的固定盒 + 居中，图标略放大到 14px；
+ * 页签右侧内边距同步从 10px 收到 8px、gap 7→6，保证整颗页签宽度基本不变。
+ * （WCAG 2.2 的最低目标尺寸是 24×24，20px 已是这块紧凑布局里能给到的上限，
+ *   再大页签会明显变胖。）
+ */
 .tab-close {
   flex: none;
-  font-size: 13px;
-  border-radius: 4px;
-  opacity: 0.5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+  border-radius: 5px;
+  opacity: 0.55;
+  transition:
+    opacity 0.16s ease,
+    background-color 0.16s ease;
 }
 
 .tab-close:hover {
