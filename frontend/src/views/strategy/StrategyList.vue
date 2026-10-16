@@ -481,7 +481,14 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
     </n-grid>
 
     <!-- 图表 -->
-    <n-grid cols="1 m:2" :x-gap="16" responsive="screen" item-responsive style="margin-top: 16px">
+    <n-grid
+      cols="1 m:2"
+      :x-gap="16"
+      :y-gap="16"
+      responsive="screen"
+      item-responsive
+      style="margin-top: 16px; margin-bottom: 16px"
+    >
       <n-gi>
         <n-card class="page-card" size="small" :bordered="false">
           <template #header>
