@@ -582,7 +582,7 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
           suffix="个"
           :icon="ServerOutline"
           :color="accent"
-          hint="一行 = 一台实例；中台在 Redis 侧没有节点清单键，故不等于「中台个数」"
+          hint="一行 = 一台 Redis 实例，不是「中台个数」"
         />
       </n-gi>
       <n-gi>
@@ -592,7 +592,7 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
           suffix="个"
           :icon="CheckmarkCircleOutline"
           color="#2f9e5f"
-          :hint="`该实例上近期收到过 datahub_beat 心跳（阈值 ${nodeMeta?.offlineAfterSec ?? 30} 秒）`"
+          :hint="`近期收到过心跳（阈值 ${nodeMeta?.offlineAfterSec ?? 30} 秒）`"
         />
       </n-gi>
       <n-gi>
@@ -602,7 +602,7 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
           suffix="个"
           :icon="AlertCircleOutline"
           color="#d6455e"
-          hint="前一个=确认无心跳；后一个=我们观测不到（不是离线）"
+          hint="前者无心跳；后者观测不到（≠离线）"
         />
       </n-gi>
       <n-gi>
@@ -612,7 +612,7 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
           suffix="条"
           :icon="LayersOutline"
           color="#dd7a15"
-          hint="XLEN 口径（≠ 键数）；入口流积压严重，详见「消息总线」"
+          hint="XLEN 口径（≠ 键数）"
         />
       </n-gi>
     </n-grid>
@@ -927,6 +927,23 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
 </template>
 
 <style scoped>
+/*
+ * 四张指标卡等高。
+ *
+ * 它们的 hint 文字长短不一（1~3 行不等），内容高度天然不同：
+ * 实测 149/149/132/132，视觉上参差不齐。
+ * 靠「把文字都压到一样长」治标不治本 —— 一旦某条 hint 因数据变化折行数改变，
+ * 又会对不齐。所以让栅格单元等高、卡片撑满：
+ * 高度由最高的一张决定，其余底部对齐（hint 居上，多余空白留在卡片内）。
+ *
+ * 注意 `:deep()` 的写法：`<n-gi>` 渲染出来是**无类名的 div**，
+ * 不能用 `.n-gi` 选择（详见总览页同类注释）。
+ */
+.n-grid :deep(> div > .stat-card) {
+  height: 100%;
+  box-sizing: border-box;
+}
+
 .num {
   font-variant-numeric: tabular-nums;
 }
