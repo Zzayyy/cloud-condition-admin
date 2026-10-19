@@ -470,13 +470,18 @@ const columns = computed<DataTableColumns<AdminUser>>(() => [
   {
     title: '显示名',
     key: 'displayName',
-    width: 110,
+    width: 96,
     render: (row) => orDash(row.displayName),
   },
   {
     title: '角色',
     key: 'roleIds',
-    width: 172,
+    /*
+     * 172 → 120。实测最长内容是单个 tag「只读观察者」（约 96px），
+     * 而一个账号通常 1 个角色、偶有 2 个（`role-cell` 是 wrap 布局，多角色会换行而不是撑宽）。
+     * 原宽度有 76px 是纯浪费。
+     */
+    width: 120,
     render: (row) => {
       if (!row.roleIds.length) {
         return tip('这个账号没有分配任何角色：即使能登录，也不会看到任何页面', () =>
@@ -503,7 +508,7 @@ const columns = computed<DataTableColumns<AdminUser>>(() => [
   {
     title: '状态',
     key: 'enabled',
-    width: 88,
+    width: 80,
     render: (row) =>
       h(
         NTag,
@@ -514,7 +519,12 @@ const columns = computed<DataTableColumns<AdminUser>>(() => [
   {
     title: '锁定',
     key: 'locked',
-    width: 162,
+    /*
+     * 162 → 96。实测最长内容是「失败 0/5」纯文本，仅 54.5px；
+     * 锁定态额外显示「已锁定」tag + 失败次数，靠 .lock-cell 的 flex-wrap 折行。
+     * 原宽度有 100px 以上是纯浪费。
+     */
+    width: 96,
     render: (row) =>
       tip(failedInfo(row), () => {
         // 锁定行也要把失败次数显示出来（不能只写「已锁定」，那是丢信息）
@@ -542,7 +552,7 @@ const columns = computed<DataTableColumns<AdminUser>>(() => [
   {
     title: '需改密',
     key: 'mustChangePassword',
-    width: 92,
+    width: 84,
     render: (row) =>
       h(
         NTag,
@@ -556,26 +566,42 @@ const columns = computed<DataTableColumns<AdminUser>>(() => [
       ),
   },
   {
+    /*
+     * 原先「时间 + IP」挤在一个单元格里（两行），现已拆成两列。
+     * 实测时间文本 118.2px，150 足够（含单元格内边距）。
+     */
     title: '最后登录',
     key: 'lastLoginTime',
-    width: 190,
-    render: (row) =>
-      h('div', { class: 'login-cell' }, [
-        h('span', {}, shortDateTime(row.lastLoginTime)),
-        h('span', { class: 'mono text-muted' }, `IP ${orDash(row.lastLoginIP)}`),
-      ]),
+    width: 130,
+    render: (row) => shortDateTime(row.lastLoginTime),
+  },
+  {
+    /*
+     * 独立成列（原先是时间下方的灰色附注，不能选中、不好复制）。
+     * 实测纯 IP 文本约 88px，110 留了余量；用 .mono + user-select: text 让它可框选复制。
+     */
+    title: 'IP',
+    key: 'lastLoginIP',
+    width: 96,
+    render: (row) => h('span', { class: 'mono ip-cell' }, orDash(row.lastLoginIP)),
   },
   {
     title: '登录次数',
     key: 'loginCount',
-    width: 96,
+    width: 72,
     align: 'right',
     render: (row) => h('span', { class: 'num' }, thousands(row.loginCount)),
   },
   {
     title: '操作',
     key: 'actions',
-    width: 258,
+    /*
+     * 5 个按钮一行需要约 242px（编辑 56 + 停用 56 + 3 个图标各 26 + 间距），
+     * 故给 262px 留出余量。
+     * ⚠️ 之前压到 200 时 5 个按钮折成了两行、把行高撑高 ——
+     * 只按按钮宽度之和（194）留 6px 余量是不够的，间距没算进去。
+     */
+    width: 262,
     fixed: 'right',
     render: (row) =>
       h('div', { class: 'row-actions' }, [
@@ -1081,7 +1107,7 @@ async function submitReset() {
         :single-line="false"
         size="small"
         :row-key="(row: AdminUser) => String(row.id)"
-        :scroll-x="1340"
+        :scroll-x="1186"
         :pagination="{
           page: page,
           pageSize: pageSize,
@@ -1432,18 +1458,25 @@ async function submitReset() {
   gap: 4px;
 }
 
+/*
+ * 锁定列收窄到 96px 后，「已锁定」tag + 「失败 N 次」在锁定行放不下，
+ * 必须允许换行（原来没有 flex-wrap，会硬挤在一行把文字压扁）。
+ */
 .lock-cell {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  gap: 2px 5px;
   font-size: 12px;
 }
 
-.login-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+/*
+ * IP 独立成列后，可框选复制 —— 运维拿到 IP 通常是要粘到别处查，
+ * 纯展示性的灰字反而让这个动作变得别扭。
+ */
+.ip-cell {
   font-size: 12.5px;
+  user-select: text;
 }
 
 .row-actions {
