@@ -570,6 +570,43 @@ export function mockTradeCodes(query: PageQuery = {}, limit = 8): CodeCountRow[]
     .slice(0, limit)
 }
 
+/**
+ * 近 14 天成交趋势（演示态，全量口径）。
+ *
+ * 口径与后端 `/trades/stats/daily` 一致：按 TradeTime 的日期分组，
+ * 每组给「笔数」与「成交金额」。
+ */
+export function mockTradeDaily(query: PageQuery = {}): TradeDailyRow[] {
+  const kw = asString(query.keyword)
+  const code = asString(query.code)
+  const rows = TRADES.filter((r) => {
+    if (kw) {
+      const k = kw.toLowerCase()
+      const hit =
+        (r.Account ?? '').toLowerCase().includes(k) ||
+        (r.Code ?? '').toLowerCase().includes(k) ||
+        (r.OrderNo ?? '').toLowerCase().includes(k) ||
+        (r.TradeNO ?? '').toLowerCase().includes(k)
+      if (!hit) return false
+    }
+    if (code && !(r.Code ?? '').includes(code)) return false
+    return true
+  })
+
+  const map = new Map<string, { count: number; amount: number }>()
+  for (const r of rows) {
+    const day = String(r.TradeTime ?? '').slice(0, 10)
+    if (!day) continue
+    const cur = map.get(day) ?? { count: 0, amount: 0 }
+    cur.count += 1
+    cur.amount += (r.Price ?? 0) * Number(r.Volumn ?? 0)
+    map.set(day, cur)
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, v]) => ({ date, count: v.count, amount: v.amount }))
+}
+
 /** 买卖方向分布（全量口径，后端 /orders/stats/bs 对应） */
 export function mockBsDistribution(rows: OrderRecord[]): Array<{ name: string; value: number }> {
   return [

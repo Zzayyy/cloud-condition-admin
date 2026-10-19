@@ -32,7 +32,7 @@ import BaseChart from '@/components/BaseChart.vue'
 import QueryErrorAlert from '@/components/QueryErrorAlert.vue'
 import StatCard from '@/components/StatCard.vue'
 import { tradeApi } from '@/api/endpoints'
-import { mockTradeApi, mockTradeCodes, mockTradeStats } from '@/api/mock/trade'
+import { mockTradeApi, mockTradeCodes, mockTradeDaily, mockTradeStats } from '@/api/mock/trade'
 import { withDelay } from '@/api/mock/_shared'
 import type { OrderRecord, TradeRecord } from '@/api/domain'
 import { useResource } from '@/composables/useResource'
@@ -98,10 +98,36 @@ const {
   { mock: (params: Record<string, unknown>) => withDelay(mockTradeCodes(params, 8)) },
 )
 
+/**
+ * 近 14 天成交趋势（**全量口径**，双轴：笔数 + 金额）。
+ *
+ * 补的是这个页面唯一缺失的维度：时间。饼图给「集中在哪个合约」、
+ * 卡片给「总量多少」，但「500 万是某一天一笔打出来的」与
+ * 「均匀分布在 14 天」是两件事 —— 不画时序就分不出来。
+ */
+const {
+  data: dailyRows,
+  load: loadDaily,
+} = useResource(
+  (params: Record<string, unknown>) => tradeApi.tradeDaily(params),
+  { mock: (params: Record<string, unknown>) => withDelay(mockTradeDaily(params)) },
+)
+
+/** 近 14 天窗口（含今天）—— 后端 from/to 不传会返回全部历史，白拉再丢掉没必要 */
+function dailyWindow() {
+  const p = (n: number) => String(n).padStart(2, '0')
+  const d = (dt: Date) => `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`
+  const today = new Date()
+  const from = new Date(today.getTime() - 13 * 86400_000)
+  return { from: `${d(from)} 00:00:00`, to: `${d(today)} 23:59:59` }
+}
+
 function reload() {
   load(currentParams())
   loadStats(statsParams())
   loadCodes(statsParams())
+  // 趋势与列表同源，一起刷新 —— 否则切 tab 后图表会滞后一次
+  loadDaily({ ...statsParams(), ...dailyWindow() })
 }
 
 onMounted(reload)
@@ -158,6 +184,71 @@ const codeChartOption = computed(() => {
         itemStyle: { borderWidth: 2, borderColor: 'transparent', borderRadius: 4 },
         data,
         color: ['#0d9c9c', '#3b6ff5', '#7c5cf0', '#dd7a15', '#d6455e', '#2f9e5f', '#d94f8a', '#5b6b8c'],
+      },
+    ],
+  }
+})
+
+/** 近 14 天成交趋势（双轴：左轴笔数、右轴金额） */
+const dailyOption = computed(() => {
+  const rows = dailyRows.value ?? []
+  return {
+    tooltip: {
+      trigger: 'axis',
+      formatter: (ps: Array<{ axisValue: string; seriesName: string; value: number; marker: string }>) => {
+        if (!ps.length) return ''
+        const day = ps[0].axisValue
+        const lines = ps.map((x) =>
+          `${x.marker} ${x.seriesName}：` +
+          (x.seriesName === '成交金额' ? thousands(Math.round(x.value)) + ' 元' : x.value + ' 笔'),
+        )
+        return `${day}<br/>` + lines.join('<br/>')
+      },
+    },
+    legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11 } },
+    grid: { left: 8, right: 8, top: 34, bottom: 40, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: rows.map((r) => String(r.date).slice(5)),
+      axisLabel: { fontSize: 11 },
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '笔数',
+        minInterval: 1,
+        nameTextStyle: { fontSize: 11, color: '#8a94a6', align: 'left' },
+        axisLabel: { fontSize: 11 },
+      },
+      {
+        type: 'value',
+        name: '金额（元）',
+        nameTextStyle: { fontSize: 11, color: '#8a94a6', align: 'right' },
+        // 金额与笔数量级差很大，用独立右轴，否则柱状会被压成一条线
+        axisLabel: {
+          fontSize: 11,
+          formatter: (v: number) => (v >= 10000 ? `${Math.round(v / 10000)}万` : String(v)),
+        },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: '成交笔数',
+        type: 'bar',
+        barMaxWidth: 20,
+        data: rows.map((r) => r.count),
+        itemStyle: { color: '#3b6ff5', borderRadius: [3, 3, 0, 0] },
+      },
+      {
+        name: '成交金额',
+        type: 'line',
+        yAxisIndex: 1,
+        smooth: true,
+        symbolSize: 6,
+        data: rows.map((r) => r.amount),
+        itemStyle: { color: '#dd7a15' },
+        lineStyle: { width: 2 },
       },
     ],
   }
@@ -347,18 +438,45 @@ const prettyOrderParam = computed(() => formatJson(relatedOrder.value?.OrderPara
       </n-gi>
     </n-grid>
 
-    <n-card class="page-card" size="small" :bordered="false" style="margin-top: 16px">
-      <template #header>
-        <span class="section-title">
-          <n-icon :component="CashOutline" :color="accent" :size="17" />
-          各合约成交量分布
-        </span>
-      </template>
-      <template #header-extra>
-        <span class="text-muted" style="font-size: 12px">按筛选后全量统计，最多显示 8 个合约</span>
-      </template>
-      <BaseChart :option="codeChartOption" :height="280" empty-text="暂无成交数据" />
-    </n-card>
+    <n-grid
+      cols="1 m:2"
+      :x-gap="16"
+      :y-gap="16"
+      responsive="screen"
+      item-responsive
+      style="margin-top: 16px; margin-bottom: 16px"
+    >
+      <n-gi>
+        <n-card class="page-card" size="small" :bordered="false">
+          <template #header>
+            <span class="section-title">
+              <n-icon :component="CashOutline" :color="accent" :size="17" />
+              各合约成交量分布
+            </span>
+          </template>
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">最多 8 个合约</span>
+          </template>
+          <BaseChart :option="codeChartOption" :height="280" empty-text="暂无成交数据" />
+        </n-card>
+      </n-gi>
+      <n-gi>
+        <n-card class="page-card" size="small" :bordered="false">
+          <template #header>
+            <span class="section-title">
+              <n-icon :component="TimeOutline" :color="accent" :size="17" />
+              近 14 天成交趋势
+            </span>
+          </template>
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">
+              {{ tab === 'active' ? 'T_Trade' : 'T_Trade_his' }}
+            </span>
+          </template>
+          <BaseChart :option="dailyOption" :height="280" empty-text="近 14 天内没有成交" />
+        </n-card>
+      </n-gi>
+    </n-grid>
 
     <n-card class="page-card" size="small" :bordered="false">
       <template #header>

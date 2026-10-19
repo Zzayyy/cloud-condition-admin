@@ -18,6 +18,7 @@ import com.qianlong.cloud.admin.dto.TradeDtos.OrderPage;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderQuery;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderStats;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderView;
+import com.qianlong.cloud.admin.dto.TradeDtos.TradeDailyRow;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradePage;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeQuery;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeStats;
@@ -155,6 +156,19 @@ public class OrderController {
     @GetMapping("/trades/stats/summary")
     public ApiResult<TradeStats> tradeStats(TradeQuery query) {
         return ApiResult.ok(orderService.tradeStats(query));
+    }
+
+    /**
+     * 按天成交笔数与金额（趋势图，**全量口径**）。
+     *
+     * <p>参数与 {@code /trades} 列表一致（keyword / code / table），
+     * 切换「当前成交 / 历史成交」tab 时趋势跟着变。
+     */
+    @SaCheckLogin
+    @GetMapping("/trades/stats/daily")
+    public ApiResult<List<TradeDailyRow>> tradeDaily(TradeQuery query) {
+        return ApiResult.ok(orderService.tradeDaily(
+                query.getTable(), query.getKeyword(), query.getCode()));
     }
 
     /**

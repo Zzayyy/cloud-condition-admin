@@ -119,6 +119,15 @@ public final class TradeDtos {
     }
 
     /**
+     * 按天的成交笔数与金额（趋势图，**全量口径**）。
+     *
+     * <p>{@code amount} 由后端把 varchar 的 {@code Volumn} 转 DECIMAL 后求和，
+     * 前端不要再拿明细自己算。
+     */
+    public record TradeDailyRow(String date, long count, double amount) {
+    }
+
+    /**
      * 列表附加信息（非前端契约字段，前端会忽略）。
      *
      * <p>让排查一眼可见「这次查的是哪张表、命中多少行」——

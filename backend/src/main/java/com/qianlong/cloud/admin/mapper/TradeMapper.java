@@ -177,11 +177,57 @@ public interface TradeMapper {
                                    @Param("code") String code,
                                    @Param("limit") int limit);
 
+    /**
+     * 按天统计成交笔数与成交金额（趋势图，**全量口径**）。
+     *
+     * <p>为什么需要它：页面原本只有「各合约成交量分布」一张饼图，
+     * 卡片也只有总数 —— **唯一缺失的维度是时间**。而成交数据的价值主要就在时序上：
+     * 「500 万是某一天一笔打出来的」与「均匀分布在 14 天」是完全不同的两件事，
+     * 现状下看不出来。
+     *
+     * <p>⚠️ {@code Volumn} 是 varchar，求和前必须 CAST 成 DECIMAL（同 {@code selectStats}）。
+     * <p>⚠️ {@code TradeTime} 是 date 类型（无时分秒），所以直接按日期分组；
+     * 用 {@code IS NOT NULL} 过滤，避免非法空串进入 {@code DATE_FORMAT}。
+     */
+    @Select("""
+            <script>
+            SELECT DATE_FORMAT(TradeTime, '%Y-%m-%d') AS day,
+                   COUNT(*) AS tradeCount,
+                   COALESCE(SUM(COALESCE(Price, 0) * CAST(COALESCE(Volumn, '0') AS DECIMAL(20,4))), 0) AS amount
+            FROM
+            <choose>
+              <when test="table == 'T_Trade'">T_Trade</when>
+              <when test="table == 'T_Trade_his'">T_Trade_his</when>
+              <otherwise>(SELECT NULL AS TradeTime FROM DUAL WHERE 1=0) dummy</otherwise>
+            </choose>
+            <where>
+              <if test="keyword != null and keyword != ''">
+                AND (Account LIKE CONCAT('%', #{keyword}, '%')
+                  OR Code LIKE CONCAT('%', #{keyword}, '%')
+                  OR OrderNo LIKE CONCAT('%', #{keyword}, '%')
+                  OR TradeNO LIKE CONCAT('%', #{keyword}, '%')
+                  OR UserAccount LIKE CONCAT('%', #{keyword}, '%'))
+              </if>
+              <if test="code != null and code != ''">AND Code LIKE CONCAT('%', #{code}, '%')</if>
+              AND TradeTime IS NOT NULL
+            </where>
+             GROUP BY DATE_FORMAT(TradeTime, '%Y-%m-%d')
+             ORDER BY day
+            </script>
+            """)
+    List<TradeDailyRow> selectDaily(@Param("table") String table,
+                                     @Param("keyword") String keyword,
+                                     @Param("code") String code);
+
     /** 成交汇总原始行 */
     record TradeStatsRow(Long totalCount, java.math.BigDecimal totalVolumn, java.math.BigDecimal totalAmount) {
     }
 
     /** 按合约的成交量 */
     record CodeCountRow(String code, java.math.BigDecimal cnt) {
+    }
+
+    /** 按天的成交笔数与金额 */
+    record TradeDailyRow(String day, Long tradeCount, java.math.BigDecimal amount) {
     }
 }

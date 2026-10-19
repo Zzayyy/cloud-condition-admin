@@ -17,6 +17,7 @@ import com.qianlong.cloud.admin.dto.TradeDtos.OrderPage;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderQuery;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderStats;
 import com.qianlong.cloud.admin.dto.TradeDtos.OrderView;
+import com.qianlong.cloud.admin.dto.TradeDtos.TradeDailyRow;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeListMeta;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradePage;
 import com.qianlong.cloud.admin.dto.TradeDtos.TradeQuery;
@@ -201,6 +202,30 @@ public class OrderService {
                         r.code() == null ? "未知" : r.code(),
                         r.cnt() == null ? 0d : r.cnt().doubleValue()))
                 .toList();
+    }
+
+    /**
+     * 按天成交笔数与金额（趋势图，**全量口径**）。
+     *
+     * <p>补的是这个页面**唯一缺失的维度：时间**。
+     * 饼图给「成交集中在哪个合约」、卡片给「总量多少」，
+     * 但「500 万是某一天一笔打出来的」与「均匀分布在 14 天」是两件事 ——
+     * 不画时序就分不出来。
+     *
+     * <p>⚠️ 现场 {@code T_Trade} 0 行、{@code T_Trade_his} 1 行，
+     * 所以大概率只返回一个很小的时间点或空列表 —— 如实呈现，不拿假数据填。
+     */
+    public List<TradeDailyRow> tradeDaily(String tableName, String keyword, String code) {
+        TradeTable table = TradeTable.ofTrade(tableName);
+        List<TradeDailyRow> out = new ArrayList<>();
+        for (TradeMapper.TradeDailyRow row : tradeMapper.selectDaily(
+                table.table(), trimToNull(keyword), trimToNull(code))) {
+            out.add(new TradeDailyRow(
+                    row.day(),
+                    row.tradeCount() == null ? 0L : row.tradeCount(),
+                    row.amount() == null ? 0d : row.amount().doubleValue()));
+        }
+        return out;
     }
 
     /* ================================ 成交 ================================ */

@@ -1043,6 +1043,16 @@ export interface CodeCountRow {
   count: number
 }
 
+/** 按天的成交笔数与金额（对应后端 TradeDailyRow） */
+export interface TradeDailyRow {
+  /** YYYY-MM-DD */
+  date: string
+  /** 当天成交笔数 */
+  count: number
+  /** 当天成交金额（后端已把 varchar 的 Volumn 转 DECIMAL 求和） */
+  amount: number
+}
+
 /** 策略日志汇总（对应后端 StrategyLogStats） */
 export interface StrategyLogStats {
   okCount: number

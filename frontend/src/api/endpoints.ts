@@ -49,6 +49,7 @@ import type {
   TimeSeriesPoint,
   TradeRecord,
   TraderServer,
+  TradeDailyRow,
   TradeStats,
   TraderServerPage,
   TimeSeriesView,
@@ -232,6 +233,14 @@ export const tradeApi = {
    */
   tradeCodes: (query?: PageQuery) =>
     api.get<CodeCountRow[]>('/trade/trades/stats/codes', query),
+
+  /**
+   * 按天成交笔数与金额（趋势图，**全量口径**）。
+   *
+   * 参数与 `listTrades` 一致（keyword / code / table），切 tab 时趋势跟着变。
+   */
+  tradeDaily: (query?: PageQuery) =>
+    api.get<TradeDailyRow[]>('/trade/trades/stats/daily', query),
 
   /** 某委托号下的成交明细（委托 → 成交 下钻） */
   listTradesByOrder: (orderNo: string) =>
