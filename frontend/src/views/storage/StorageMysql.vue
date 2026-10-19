@@ -628,12 +628,14 @@ function useSample(s: string) {
       </template>
 
       <div class="samples">
-        <span class="text-muted" style="font-size: 12.5px; margin-right: 4px">示例：</span>
+        <span class="samples-label">示例（点击填入）</span>
         <n-button
           v-for="s in SQL_SAMPLES"
           :key="s.label"
           size="tiny"
-          quaternary
+          secondary
+          round
+          class="sample-chip"
           @click="useSample(s.sql)"
         >
           {{ s.label }}
@@ -831,12 +833,44 @@ function useSample(s: string) {
 }
 
 /* SQL 区 */
+/*
+ * 示例 SQL 的快捷入口。
+ *
+ * 原先是 `quaternary` 按钮 —— 无边框、无底色、hover 也只有很淡的底，
+ * 和旁边「示例：」那行灰字长得一模一样，**看不出可以点**。
+ * 现在改成 `secondary` + 圆角胶囊，并给一句「点击填入」的提示：
+ * 具体执行什么、点了会发生什么，都不该让人去猜。
+ */
 .samples {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px;
+  gap: 6px;
   align-items: center;
   margin-bottom: 10px;
+}
+
+.samples-label {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+/*
+ * 让 chip 有明确的「按得动」的观感：底色 + 边框 + hover 高亮。
+ *
+ * ⚠️ 不要试图用 `--n-border` 或 `border` 改边框 —— naive-ui 的按钮是
+ * 用 `box-shadow` 画边框的（`.n-button__border` 那层），
+ * 写 `border` 量出来的 `borderWidth` 仍是 0px，看着像没生效。
+ * 这里直接叠一层 box-shadow 内描边，并用 `--n-color-hover` 调 hover 底色。
+ */
+.samples :deep(.sample-chip) {
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.samples :deep(.sample-chip:hover) {
+  color: var(--brand) !important;
+  box-shadow: inset 0 0 0 1px var(--brand);
 }
 
 .sql-input {
