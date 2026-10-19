@@ -146,21 +146,31 @@ const summary = computed(() => {
     unsigned: total - signed,
     withShareholders: s?.withShareholdersCount ?? 0,
     totalShares: s?.totalShares ?? 0,
+    /*
+     * 交叉统计的两个「缺股东号」计数。
+     *
+     * ⚠️ 这两个必须在 computed 里显式返回：模板里写 `summary.signedNoShares` 时，
+     * 若这里没返回就是 `undefined`，`undefined + undefined = NaN`，
+     * `NaN > 0` 为 false —— 于是页头永远显示「资料齐全」，
+     * 而实际有账号缺股东号。这类错误**不报错、类型检查也过**，只能靠实测发现。
+     */
+    signedNoShares: s?.signedNoShares ?? 0,
+    unsignedNoShares: s?.unsignedNoShares ?? 0,
   }
 })
 
 const marketOptions = Object.entries(EXCHANGE_NUMS).map(([v, l]) => ({ label: l, value: Number(v) }))
 
-/** 各市场股东号数量 */
+/**
+ * 各市场股东号数量（**全量口径**）。
+ *
+ * 原来是对当前页 `rows` 数出来的 —— 那是「本页口径」，翻一页数字就变。
+ * 现在取后端汇总里的 `marketShareCounts`（与列表 total 同源）。
+ */
 const marketOption = computed(() => {
-  const map = new Map<number, number>()
-  for (const r of rows.value) {
-    for (const s of r.shareHolders) {
-      map.set(s.ExchangeNum, (map.get(s.ExchangeNum) ?? 0) + 1)
-    }
-  }
-  const data = [...map.entries()].map(([k, v]) => ({
-    name: EXCHANGE_NUMS[k] ?? `市场 ${k}`,
+  const raw = statsData.value?.marketShareCounts ?? {}
+  const data = Object.entries(raw).map(([k, v]) => ({
+    name: EXCHANGE_NUMS[Number(k)] ?? `市场 ${k}`,
     value: v,
   }))
   return {
@@ -175,6 +185,70 @@ const marketOption = computed(() => {
         itemStyle: { borderWidth: 2, borderColor: 'transparent', borderRadius: 4 },
         data,
         color: ['#3b6ff5', '#d94f8a'],
+      },
+    ],
+  }
+})
+
+/**
+ * 签署状态 × 股东号完备度（**全量口径**，堆叠柱状图）。
+ *
+ * 为什么加这张图：卡片只给「已签署 13 / 有股东号 12」这类总数，
+ * 看不出两者的**交叉**关系。真正要跟进的是这两类：
+ *   - 已签署但没有股东号 → 协议签了却配不了单（最该处理）；
+ *   - 未签署但有股东号 → 号配了、协议没签，也下不了单。
+ * 只给总数时，「13 和 12」看着差不多，这两类会被掩盖。
+ */
+const completenessOption = computed(() => {
+  const s = statsData.value
+  const withSh = [s?.signedWithShares ?? 0, s?.unsignedWithShares ?? 0]
+  const noSh = [s?.signedNoShares ?? 0, s?.unsignedNoShares ?? 0]
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 12 } },
+    /*
+     * top 原来是 16，而 yAxis.name（「账号数」）默认画在轴顶部**外侧**，
+     * 于是它被挤出 grid 上边界、被卡片裁掉半截（实测截图里只剩下半部分）。
+     * 这里给 top 留 30px 容纳轴名，并用 nameGap/nameLocation 把它钉在轴的正上方内侧。
+     */
+    grid: { left: 8, right: 16, top: 30, bottom: 34, containLabel: true },
+    xAxis: {
+      type: 'category',
+      // 左柱 = 已签署，右柱 = 未签署；每柱按「有无股东号」堆叠
+      data: ['已签署', '未签署'],
+      axisLabel: { fontSize: 12 },
+    },
+    yAxis: {
+      type: 'value',
+      minInterval: 1,
+      /*
+       * 轴名放**顶部横排**（end），不放 middle ——
+       * middle 会让文字沿轴方向竖排、字号显得很小，夹在刻度数字旁也挤。
+       * end + align:'left' 让它横排在 y 轴正上方，和 grid.top 的 30px 留白对齐。
+       */
+      name: '账号数',
+      nameLocation: 'end',
+      nameGap: 12,
+      nameTextStyle: { fontSize: 11, color: '#8a94a6', align: 'left' },
+    },
+    series: [
+      {
+        name: '有股东号',
+        type: 'bar',
+        stack: 'total',
+        barMaxWidth: 42,
+        data: withSh,
+        itemStyle: { color: '#2f9e5f', borderRadius: [0, 0, 4, 4] },
+        label: { show: true, position: 'inside', fontSize: 11, color: '#fff' },
+      },
+      {
+        name: '无股东号',
+        type: 'bar',
+        stack: 'total',
+        barMaxWidth: 42,
+        data: noSh,
+        itemStyle: { color: '#dd7a15', borderRadius: [4, 4, 0, 0] },
+        label: { show: true, position: 'inside', fontSize: 11, color: '#fff' },
       },
     ],
   }
@@ -449,15 +523,48 @@ const protocolColumns: DataTableColumns<(typeof PROTOCOL_ROWS)[number]> = [
       运维日常不需要每次打开页面都看 acc_sign 是否加密，
       所以已移进详情弹窗的「协议清单」tab（需要时再看，与「报文模板」天然是一组）。
     -->
-    <n-card class="page-card" size="small" :bordered="false" style="margin-top: 16px">
-      <template #header>
-        <span class="section-title">
-          <n-icon :component="SwapHorizontalOutline" :color="accent" :size="17" />
-          各市场股东号数量
-        </span>
-      </template>
-      <BaseChart :option="marketOption" :height="220" empty-text="暂无股东号" />
-    </n-card>
+    <n-grid
+      cols="1 m:2"
+      :x-gap="16"
+      :y-gap="16"
+      responsive="screen"
+      item-responsive
+      style="margin-top: 16px; margin-bottom: 16px"
+    >
+      <n-gi>
+        <n-card class="page-card" size="small" :bordered="false">
+          <template #header>
+            <span class="section-title">
+              <n-icon :component="SwapHorizontalOutline" :color="accent" :size="17" />
+              各市场股东号数量
+            </span>
+          </template>
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">筛选后全量</span>
+          </template>
+          <BaseChart :option="marketOption" :height="220" empty-text="暂无股东号" />
+        </n-card>
+      </n-gi>
+      <n-gi>
+        <n-card class="page-card" size="small" :bordered="false">
+          <template #header>
+            <span class="section-title">
+              <n-icon :component="WarningOutline" :color="accent" :size="17" />
+              签署 × 股东号完备度
+            </span>
+          </template>
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">
+              <b v-if="(summary.signedNoShares + summary.unsignedNoShares) > 0" style="color: var(--warning)">
+                {{ summary.signedNoShares + summary.unsignedNoShares }} 个账号缺股东号
+              </b>
+              <template v-else>资料齐全</template>
+            </span>
+          </template>
+          <BaseChart :option="completenessOption" :height="220" empty-text="暂无账号" />
+        </n-card>
+      </n-gi>
+    </n-grid>
 
     <n-card class="page-card" size="small" :bordered="false">
       <template #header>

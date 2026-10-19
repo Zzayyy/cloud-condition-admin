@@ -1101,6 +1101,16 @@ export interface AccountStats {
   redisOnlyCount: number
   withShareholdersCount: number
   totalShares: number
+  /** 已签署 且 有股东号（正常） */
+  signedWithShares: number
+  /** 已签署 但 无股东号 —— 协议签了却配不了单，最该跟进的一类 */
+  signedNoShares: number
+  /** 未签署 但 有股东号 */
+  unsignedWithShares: number
+  /** 未签署 且 无股东号 */
+  unsignedNoShares: number
+  /** 各市场股东号数量：key = ExchangeNum（1 上海 / 2 深圳） */
+  marketShareCounts: Record<string, number>
 }
 
 /** 键类型 → 数量（对应后端 TypeCountRow） */

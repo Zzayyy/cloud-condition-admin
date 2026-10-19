@@ -231,13 +231,27 @@ export const mockAccountApi = {
    */
   accountStats(query: PageQuery = {}): AccountStats {
     const rows = filterAccounts(query)
+    const hasSh = (r: AccountRow) => r.shareHolders.length > 0
+    // 各市场股东号数量（key = ExchangeNum 字符串，与后端 Map<Integer,Long> 序列化后一致）
+    const marketShareCounts: Record<string, number> = {}
+    for (const r of rows) {
+      for (const sh of r.shareHolders) {
+        const k = String(sh.ExchangeNum)
+        marketShareCounts[k] = (marketShareCounts[k] ?? 0) + 1
+      }
+    }
     return {
       totalCount: rows.length,
       signedCount: rows.filter((r) => r.signed).length,
       onlineCount: rows.filter((r) => r.onlineflag === 1).length,
       redisOnlyCount: rows.filter((r) => r.hasRedis && !r.userId).length,
-      withShareholdersCount: rows.filter((r) => r.shareHolders.length > 0).length,
+      withShareholdersCount: rows.filter(hasSh).length,
       totalShares: rows.reduce((s, r) => s + r.shareHolders.length, 0),
+      signedWithShares: rows.filter((r) => r.signed && hasSh(r)).length,
+      signedNoShares: rows.filter((r) => r.signed && !hasSh(r)).length,
+      unsignedWithShares: rows.filter((r) => !r.signed && hasSh(r)).length,
+      unsignedNoShares: rows.filter((r) => !r.signed && !hasSh(r)).length,
+      marketShareCounts,
     }
   },
 

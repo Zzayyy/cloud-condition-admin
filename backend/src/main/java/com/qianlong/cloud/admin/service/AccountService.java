@@ -147,17 +147,73 @@ public class AccountService {
         long totalShares = all.stream()
                 .filter(r -> r.shareHolders() != null)
                 .mapToLong(r -> r.shareHolders().size()).sum();
-        return new AccountStats(all.size(), signed, online, redisOnly, withShareholders, totalShares);
+
+        /*
+         * 签署状态 × 股东号完备度的交叉计数（「签署与股东号」页的堆叠柱状图用）。
+         *
+         * 为什么值得单算：卡片只给「已签署 13 / 有股东号 12」这类总数，
+         * 看不出两者的**交叉**。而真正要跟进的是这两类：
+         *   - 已签署但**没有**股东号 → 协议签了却配不了单，最该处理；
+         *   - 未签署但有股东号 → 号配了、协议没签，也下不了单。
+         * 只给总数的话，这两类会被「13 和 12 差不多」掩盖掉。
+         */
+        long signedWithShares = all.stream()
+                .filter(r -> r.signed() && hasShares(r)).count();
+        long signedNoShares = all.stream()
+                .filter(r -> r.signed() && !hasShares(r)).count();
+        long unsignedWithShares = all.stream()
+                .filter(r -> !r.signed() && hasShares(r)).count();
+        long unsignedNoShares = all.stream()
+                .filter(r -> !r.signed() && !hasShares(r)).count();
+
+        /*
+         * 各市场的股东号数量（全量口径）。
+         * 前端原来按当前页 `rows` 数，翻页就变 —— 与前面修掉的「本页口径」是同一类问题。
+         */
+        Map<Integer, Long> marketCounts = new java.util.TreeMap<>();
+        for (AccountRow r : all) {
+            if (r.shareHolders() == null) {
+                continue;
+            }
+            for (ShareholderDto sh : r.shareHolders()) {
+                if (sh.ExchangeNum() != null) {
+                    marketCounts.merge(sh.ExchangeNum(), 1L, Long::sum);
+                }
+            }
+        }
+
+        return new AccountStats(all.size(), signed, online, redisOnly, withShareholders, totalShares,
+                signedWithShares, signedNoShares, unsignedWithShares, unsignedNoShares,
+                marketCounts);
     }
 
-    /** 账号汇总结果（全量口径） */
+    /** 该账号是否至少有一个股东号（null 与空数组都算「没有」） */
+    private static boolean hasShares(AccountRow r) {
+        return r.shareHolders() != null && !r.shareHolders().isEmpty();
+    }
+
+    /**
+     * 账号汇总结果（全量口径）。
+     *
+     * <p>后三组字段是「签署与股东号」页专用的交叉统计，其它页忽略即可。
+     */
     public record AccountStats(
             long totalCount,
             long signedCount,
             long onlineCount,
             long redisOnlyCount,
             long withShareholdersCount,
-            long totalShares) {
+            long totalShares,
+            /** 已签署 且 有股东号（正常） */
+            long signedWithShares,
+            /** 已签署 但 无股东号（协议签了却配不了单，需跟进） */
+            long signedNoShares,
+            /** 未签署 但 有股东号（号配了、协议没签） */
+            long unsignedWithShares,
+            /** 未签署 且 无股东号（都缺） */
+            long unsignedNoShares,
+            /** 各市场的股东号数量：key = ExchangeNum（1 上海 / 2 深圳） */
+            Map<Integer, Long> marketShareCounts) {
     }
 
     /**
