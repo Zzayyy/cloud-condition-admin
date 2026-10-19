@@ -39,7 +39,23 @@ withDefaults(
 </template>
 
 <style scoped>
+/*
+ * 指标卡在栅格单元里一律撑满高度。
+ *
+ * 为什么放在组件内部而不是各页面各写一条：
+ * 各卡片的 hint 文字长短不一（1~3 行），内容高度天然不同，
+ * 同一排并排时下沿会参差不齐（实测过 149/149/132/132）。
+ * 而 `<n-gi>` 渲染出来是**无类名的 div**，各页面只能靠
+ * `.n-grid :deep(> div > .stat-card)` 这种脆弱选择器命中 ——
+ * 此前 DashboardView 与 DatahubNode 两处写法就已不一致。
+ * 写在组件自己的根元素上，任何容器都不用再管。
+ *
+ * `height:100%` 在**没有**定高的父容器里会退化成 auto（CSS 规范行为），
+ * 所以不会把卡片意外拉高；只有栅格单元这种等高容器里才真正生效。
+ */
 .stat-card {
+  height: 100%;
+  box-sizing: border-box;
   position: relative;
   display: flex;
   gap: 14px;

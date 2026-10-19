@@ -604,15 +604,6 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
 </template>
 
 <style scoped>
-/**
- * 第一张卡片塞了节点明细行，会比其余三张高。
- * 让栅格单元内的卡片一律撑满，四张卡等高才整齐。
- */
-:deep(.stat-card) {
-  height: 100%;
-  box-sizing: border-box;
-}
-
 /*
  * 栅格单元本身是等高的，但**卡片不撑满就会下沿对不齐**。
  * 第一排的指标卡早有上面那条 `.stat-card { height:100% }`，第二、三排的卡片之前漏了，

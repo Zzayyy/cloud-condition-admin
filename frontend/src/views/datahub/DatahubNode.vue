@@ -927,22 +927,6 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
 </template>
 
 <style scoped>
-/*
- * 四张指标卡等高。
- *
- * 它们的 hint 文字长短不一（1~3 行不等），内容高度天然不同：
- * 实测 149/149/132/132，视觉上参差不齐。
- * 靠「把文字都压到一样长」治标不治本 —— 一旦某条 hint 因数据变化折行数改变，
- * 又会对不齐。所以让栅格单元等高、卡片撑满：
- * 高度由最高的一张决定，其余底部对齐（hint 居上，多余空白留在卡片内）。
- *
- * 注意 `:deep()` 的写法：`<n-gi>` 渲染出来是**无类名的 div**，
- * 不能用 `.n-gi` 选择（详见总览页同类注释）。
- */
-.n-grid :deep(> div > .stat-card) {
-  height: 100%;
-  box-sizing: border-box;
-}
 
 .num {
   font-variant-numeric: tabular-nums;

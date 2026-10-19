@@ -26,6 +26,7 @@ import {
   CodeSlashOutline,
   CopyOutline,
   CreateOutline,
+  InformationCircleOutline,
   KeyOutline,
   LockClosedOutline,
   PeopleOutline,
@@ -440,43 +441,23 @@ const protocolColumns: DataTableColumns<(typeof PROTOCOL_ROWS)[number]> = [
       </n-gi>
     </n-grid>
 
-    <n-grid
-      cols="1 m:2"
-      :x-gap="16"
-      :y-gap="16"
-      responsive="screen"
-      item-responsive
-      style="margin-top: 16px; margin-bottom: 16px"
-    >
-      <n-gi>
-        <n-card class="page-card" size="small" :bordered="false">
-          <template #header>
-            <span class="section-title">
-              <n-icon :component="SwapHorizontalOutline" :color="accent" :size="17" />
-              各市场股东号数量
-            </span>
-          </template>
-          <BaseChart :option="marketOption" :height="220" empty-text="暂无股东号" />
-        </n-card>
-      </n-gi>
-      <n-gi>
-        <n-card class="page-card" size="small" :bordered="false">
-          <template #header>
-            <span class="section-title">
-              <n-icon :component="LockClosedOutline" :color="accent" :size="17" />
-              相关协议
-            </span>
-          </template>
-          <n-data-table
-            :columns="protocolColumns"
-            :data="PROTOCOL_ROWS"
-            :bordered="false"
-            size="small"
-            :pagination="false"
-          />
-        </n-card>
-      </n-gi>
-    </n-grid>
+    <!--
+      图表独占整行。
+
+      原来这里并排放着「相关协议」那张表 —— 它是**静态协议字典**（4 条硬编码，
+      不随筛选/账号变化），和一张真实统计图并排会让人误以为两者同一层次。
+      运维日常不需要每次打开页面都看 acc_sign 是否加密，
+      所以已移进详情弹窗的「协议清单」tab（需要时再看，与「报文模板」天然是一组）。
+    -->
+    <n-card class="page-card" size="small" :bordered="false" style="margin-top: 16px">
+      <template #header>
+        <span class="section-title">
+          <n-icon :component="SwapHorizontalOutline" :color="accent" :size="17" />
+          各市场股东号数量
+        </span>
+      </template>
+      <BaseChart :option="marketOption" :height="220" empty-text="暂无股东号" />
+    </n-card>
 
     <n-card class="page-card" size="small" :bordered="false">
       <template #header>
@@ -657,6 +638,33 @@ const protocolColumns: DataTableColumns<(typeof PROTOCOL_ROWS)[number]> = [
                 </n-button>
               </div>
               <n-code :code="updateTemplate" language="json" show-line-numbers word-wrap />
+            </div>
+          </n-tab-pane>
+
+          <n-tab-pane name="protocols">
+            <template #tab>协议清单</template>
+            <div class="json-head">
+              <n-icon :component="LockClosedOutline" :color="accent" />
+              <span>
+                本页面涉及的 4 个协议（照 <code>请求接口字段.txt</code>）。
+                前三个<b>需要加密并编码</b>；<code>logout</code> 不需要。
+              </span>
+            </div>
+
+            <n-data-table
+              :columns="protocolColumns"
+              :data="PROTOCOL_ROWS"
+              :bordered="false"
+              size="small"
+              :pagination="false"
+            />
+
+            <div class="detail-note" style="margin-top: 14px">
+              <n-icon :component="InformationCircleOutline" :color="accent" />
+              <div>
+                这里是<b>静态协议字典</b>，不随筛选或账号变化 ——
+                具体某个账号的报文体请切到「报文模板」看，那里已按当前账号填好。
+              </div>
             </div>
           </n-tab-pane>
         </n-tabs>
