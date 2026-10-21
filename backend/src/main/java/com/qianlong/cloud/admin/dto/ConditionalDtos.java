@@ -17,8 +17,16 @@ import java.util.List;
      * 条件单，对应前端 {@code Conditional}。
      *
      * <p>字段名与 {@code T_Conditional} 的列名一致（首字母大写）。
-     * 数据**只来自 MySQL** 的 {@code T_Conditional} / {@code T_Conditional_his} /
-     * {@code V_Conditional}。
+     *
+     * <p><b>数据来源有两个</b>（2026-10-21 起）：
+     * <ul>
+     *   <li>{@code redis} —— Redis {@code strategy-*} 键里的<b>实时态</b>。
+     *       现场真实条件单都在这里（60 条），MySQL 那三张表是 0 行。</li>
+     *   <li>{@code db} —— MySQL {@code T_Conditional} / {@code T_Conditional_his}
+     *       里的<b>归档</b>。</li>
+     * </ul>
+     * 所以每行都带 {@code source}，让页面能如实显示"这条是从哪读到的" ——
+     * 两边都有同一条时以 Redis 为准（实时态），但仍标出来，不做静默合并。
      */
     public record ConditionalView(
             Long id,
@@ -46,7 +54,15 @@ import java.util.List;
             Integer Mode,
             /** 云条件单类型：0 保留，1 开仓，2 平仓，3 按合约止盈止损，4 按标的止盈止损 */
             Integer Type,
-            String Name) {
+            String Name,
+            /** 数据来源：redis（实时态）/ db（MySQL 归档） */
+            String source,
+            /** 来源实例，如 {@code 192.168.1.136/db1}（MySQL 来源为 null） */
+            String sourceInstance,
+            /** 策略服务器编号（Redis 侧才有；现场全是 -1，即"尚未分配"） */
+            Integer strategyServerID,
+            /** 同一个单号在几个实例上各存了一份 */
+            int copies) {
     }
 
     /** 按天新增趋势（前端 mockDailyCreated 的同口径） */
@@ -83,19 +99,26 @@ import java.util.List;
     /**
      * 列表附加信息（非前端契约字段，前端会忽略）。
      *
-     * <p>用途是让排查一眼可见「这次查的是哪张表、命中多少行」——
-     * 现场三张表都是 0 行，有了这两个字段就能立刻确认
-     * 「是表里确实没有数据」，而不是「接口/筛选写错了」。
+     * <p>用途是让排查一眼可见「这次读的是哪边、命中多少行」——
+     * 现在数据来自两个地方（Redis 实时态 + MySQL 归档），
+     * 有了 {@code redisCount} / {@code dbOnlyCount} 就能立刻确认
+     * 「这 60 条全在实时态、还没落库」这个事实，而不是靠猜。
      */
     public record ConditionalListMeta(
             /** 数据源标识：running / history / all */
             String source,
-            /** 对应的真实表/视图名 */
-            String table,
             /** 该数据源的中文说明 */
             String label,
-            /** 该表命中的行数（等于 total，保留是为了排查时更直观） */
-            long tableRows) {
+            /** 筛选口径说明（这个 tab 到底筛了什么） */
+            String scope,
+            /** 命中行数（等于 total，保留是为了排查时更直观） */
+            long tableRows,
+            /** 其中来自 Redis 实时态的条数 */
+            long redisCount,
+            /** 其中只存在于 MySQL 归档的条数 */
+            long dbOnlyCount,
+            /** 是否因为超过内存上限而被截断（截断了就<b>如实标注</b>，不静默丢数据） */
+            boolean truncated) {
     }
 
     /** 列表返回：行 + 元信息 */

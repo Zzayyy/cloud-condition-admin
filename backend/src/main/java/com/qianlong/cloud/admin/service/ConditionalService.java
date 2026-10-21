@@ -2,7 +2,10 @@ package com.qianlong.cloud.admin.service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -20,124 +23,188 @@ import com.qianlong.cloud.admin.entity.ConditionalEntity;
 import com.qianlong.cloud.admin.mapper.ConditionalMapper;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
- * 条件单查询 —— <b>只读 MySQL 的「三张表 + 一个视图」</b>。
+ * 条件单查询 —— <b>Redis 实时态为主 + MySQL 归档为辅</b>。
  *
- * <h2>三个数据源</h2>
- * <ul>
- *   <li>{@code running} → {@code T_Conditional}（运行中的条件单）</li>
- *   <li>{@code history} → {@code T_Conditional_his}（历史条件单）</li>
- *   <li>{@code all} → {@code V_Conditional}（前两张表的并集视图）</li>
- * </ul>
+ * <h2>⚠️ 为什么 2026-10-21 改成读 Redis</h2>
+ * 现场实况（当日复核）：
+ * <pre>
+ *   MySQL  T_Conditional / T_Conditional_his / V_Conditional : 0 行
+ *   Redis  strategy-* 键（136 db1 四个键 + 137 db1 两个键）  : 60 条真实条件单
+ * </pre>
+ * 只读 MySQL 的话页面永远是空的 —— 那不是"没有条件单"，是"没读对地方"。
+ * 所以主数据源换成 Redis，MySQL 退为归档补充。
  *
- * <h2>⚠️ 为什么这里**不**读 Redis（曾经读过，已移除）</h2>
- * 现场这三张表都是 0 行，而 Redis {@code strategy-*} 里有 60 多条条件单，
- * 字段与表结构一一对应。我一开始做成「两侧合并」，想着
- * 「至少页面上有数据可看」—— <b>那是错的</b>：
+ * <p><b>但"表为空"这个信号不能被掩盖</b>（本项目一贯的口径）：
+ * 所以每行都带 {@code source}（redis / db），meta 里也如实给出两边的条数。
+ * 运维能一眼看出"这些单只在实时态存在、还没落库"。
  *
+ * <h2>合并规则</h2>
  * <ol>
- *   <li><b>它让页面的读数失去了意义。</b>页面标题与菜单写的是
- *       「条件单管理 / T_Conditional」，用户看到 58 条会认为
- *       「T_Conditional 里有 58 条」。而事实是这张表**一条都没有**。
- *       运维据此判断「库里数据正常」，就永远不会去查为什么没落库。</li>
- *   <li><b>Redis 侧根本说不清是哪一份。</b>现场三个实例/db 都有
- *       {@code strategy-*}（136 db0 有 3 条、136 db1 有 55 条、
- *       137 db1 有 4 条），还有 4 条同一个 {@code id} 在两个实例上各存一份。
- *       合并时的「取第一个」是配置顺序决定的，页面无法表达这件事 ——
- *       用户看到的数字既不是某个实例的真实条数，也不是可靠的去重结果。</li>
+ *   <li>同一个单号两边都有 → <b>以 Redis 为准</b>（实时态），标 {@code source=redis}；</li>
+ *   <li>只在 Redis 有 → 照常展示，标 {@code source=redis}；</li>
+ *   <li>只在 MySQL 有 → 照常展示，标 {@code source=db}。</li>
  * </ol>
  *
- * <p><b>空表是可接受的、也是正确的呈现</b>：它如实反映「这张表没有数据」，
- * 而这本身就是一个需要现场关注的信号（README 里记着这个待确认事项）。
- * 用别处的数据把空表填满，只会把这个信号掩盖掉。
- *
- * <p>Redis 侧的 {@code strategy-*} 归「服务器管理」类页面去读更合适
- * （那里本来就在展示 Redis 的实时对象与流），不该混进「业务数据 / 对应一张
- * MySQL 表」的查询页里。
+ * <h2>⚠️ 关于"读 Redis 会不会让页面读数失去意义"</h2>
+ * 当初把 Redis 合并移出去，是因为<b>那时候只有读、没有写</b>：
+ * 空表 + 外部数据 = 用户以为"表里有 58 条"，掩盖了"没落库"这个问题。
+ * 现在有了写操作（状态变更），Redis 侧就是<b>正在运行的那份</b>，
+ * 页面读它才是对的；而"有没有落库"这件事由 {@code source} 字段如实呈现。
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ConditionalService {
 
-    private final ConditionalMapper conditionalMapper;
+    /**
+     * 内存里最多保留多少条条件单。
+     *
+     * <p>Redis 侧是「一次读全量 → 内存筛选 → 内存分页」，现场只有 60 条，代价可忽略。
+     * 但如果哪天涨到百万级，这条上限会生效 —— 那时应该改成在 Redis 侧分页，
+     * 而不是继续全量读进内存。**上限生效时 meta 会标注 truncated**，不静默截断。
+     */
+    private static final int MAX_ROWS = 20_000;
 
-    /** 查询条件单（三源之一 + 筛选 + 分页） */
+    private final ConditionalMapper conditionalMapper;
+    private final RedisConditionalRepository redisRepository;
+
+    /**
+     * 合并两个数据源。
+     *
+     * <p>Redis 优先（实时态），MySQL 补充（归档里可能有 Redis 已清掉的）。
+     * 同一单号两边都有时以 Redis 为准，但计数照实统计。
+     */
+    private Merge merge() {
+        List<ConditionalView> redis = redisRepository.findAll();
+        List<ConditionalView> out = new ArrayList<>();
+        java.util.Set<Long> redisIds = new java.util.HashSet<>();
+        for (ConditionalView v : redis) {
+            redisIds.add(v.id());
+            out.add(v);
+        }
+        int dbOnly = 0;
+        try {
+            for (ConditionalEntity e : conditionalMapper.selectPage(
+                    ConditionalSource.ALL.table(), null, null, null, 0, MAX_ROWS)) {
+                if (redisIds.contains(e.getId())) {
+                    continue;
+                }
+                dbOnly++;
+                out.add(toView(e));
+            }
+        } catch (Exception ex) {
+            // MySQL 读不到不影响 Redis 侧的展示 —— 但要如实说明，不能假装没有
+            log.warn("读取 MySQL 条件单归档失败，页面只呈现 Redis 侧：{}", ex.getMessage());
+        }
+        boolean truncated = redis.size() >= MAX_ROWS;
+        return new Merge(out, redis.size(), dbOnly, truncated);
+    }
+
+    /** 合并结果 */
+    private record Merge(List<ConditionalView> views, int redisCount, int dbOnlyCount, boolean truncated) {
+    }
+
+    /** 查询条件单（筛选 + 排序 + 分页） */
     public ConditionalPage listConditionals(ConditionalQuery query) {
         ConditionalSource source = ConditionalSource.of(query.getSource());
         String keyword = trimToNull(query.getKeyword());
 
-        long total = conditionalMapper.countPage(
-                source.table(), keyword, query.getType(), query.getMode());
+        Merge merge = merge();
+        List<ConditionalView> rows = new ArrayList<>();
+        for (ConditionalView v : merge.views()) {
+            if (!source.matches(v.Mode(), v.Flag())) {
+                continue;
+            }
+            if (!matchesKeyword(v, keyword)) {
+                continue;
+            }
+            if (query.getType() != null && !query.getType().equals(v.Type())) {
+                continue;
+            }
+            if (query.getMode() != null && !query.getMode().equals(v.Mode())) {
+                continue;
+            }
+            rows.add(v);
+        }
+        rows.sort(Comparator
+                .comparing((ConditionalView v) -> v.AddTime() == null ? "" : v.AddTime())
+                .reversed()
+                .thenComparing(v -> v.id() == null ? 0L : v.id(), Comparator.reverseOrder()));
 
+        long total = rows.size();
         int page = query.pageOrDefault();
         int pageSize = query.pageSizeOrDefault();
         long offset = (long) (page - 1) * pageSize;
-
-        List<ConditionalView> rows = conditionalMapper.selectPage(
-                        source.table(), keyword, query.getType(), query.getMode(), offset, pageSize)
-                .stream().map(ConditionalService::toView).toList();
+        List<ConditionalView> pageRows = rows.stream()
+                .skip(Math.min(offset, total))
+                .limit(pageSize)
+                .toList();
 
         ConditionalListMeta meta = new ConditionalListMeta(
-                source.code(), source.table(), source.label(), total);
+                source.code(),
+                source.label(),
+                source.scopeText(),
+                total,
+                merge.redisCount(),
+                merge.dbOnlyCount(),
+                merge.truncated());
 
-        return new ConditionalPage(rows, total, page, pageSize, meta);
+        return new ConditionalPage(pageRows, total, page, pageSize, meta);
     }
 
-    /**
-     * 单条详情。
-     *
-     * <p>依次在运行中、历史、并集视图里找 —— 详情接口不带 {@code source}，
-     * 前端从列表点进来时并不知道这条在哪张表里
-     * （列表页的「全部」数据源本身就是并集视图）。
-     */
+    /** 单条详情（Redis 优先，MySQL 兜底） */
     public ConditionalView getConditional(Long id) {
         if (id == null) {
             return null;
         }
-        for (ConditionalSource source : List.of(
-                ConditionalSource.RUNNING, ConditionalSource.HISTORY, ConditionalSource.ALL)) {
-            ConditionalEntity entity = conditionalMapper.selectByIdIn(source.table(), id);
-            if (entity != null) {
-                return toView(entity);
+        for (ConditionalView v : merge().views()) {
+            if (id.equals(v.id())) {
+                return v;
             }
         }
         return null;
     }
 
     /**
-     * 按天新增趋势。
+     * 按天新增趋势（按 {@code AddTime} 分组）。
      *
-     * <p>口径是 {@code V_Conditional}（并集视图），按 {@code AddTime} 分组。
-     * 表为空时返回空列表 —— 前端图表会显示「暂无数据」，
-     * 不用别处的数据充数（前端 README 第 4 条明确要求这一点）。
+     * <p>口径与列表同源（同一批数据），否则会出现"图上 30 张、列表里 0 张"
+     * 这种没法解释的偏差。
      */
     public List<DailyCreatedRow> dailyCreated(String from, String to) {
         LocalDateTime f = TimeParams.parse(from, "from");
         LocalDateTime t = TimeParams.parse(to, "to");
-        List<DailyCreatedRow> out = new ArrayList<>();
-        for (ConditionalMapper.DayCountRow row : conditionalMapper.selectDaily(
-                ConditionalSource.ALL.table(), f, t)) {
-            out.add(new DailyCreatedRow(row.day(), row.cnt() == null ? 0L : row.cnt()));
+        String fromText = f == null ? null : DateTimes.format(f);
+        String toText = t == null ? null : DateTimes.format(t);
+        Map<String, Long> byDay = new LinkedHashMap<>();
+        for (ConditionalView v : merge().views()) {
+            String addTime = v.AddTime();
+            if (addTime == null || addTime.length() < 10) {
+                continue;
+            }
+            if (fromText != null && addTime.compareTo(fromText) < 0) {
+                continue;
+            }
+            if (toText != null && addTime.compareTo(toText) > 0) {
+                continue;
+            }
+            byDay.merge(addTime.substring(0, 10), 1L, Long::sum);
         }
+        List<DailyCreatedRow> out = new ArrayList<>();
+        byDay.forEach((day, cnt) -> out.add(new DailyCreatedRow(day, cnt)));
+        out.sort(Comparator.comparing(DailyCreatedRow::date));
         return out;
     }
 
-    /**
-     * 类型分布（全量口径，不限于当前页）。
-     *
-     * <p>只统计主表与历史表，**不含并集视图** —— 视图是前两张表的并集，
-     * 一起统计会把每条条件单算两遍。
-     */
+    /** 类型分布（全量口径） */
     public List<TypeCountRow> typeDistribution() {
-        java.util.Map<Integer, Long> counts = new java.util.TreeMap<>();
-        for (ConditionalSource source : List.of(
-                ConditionalSource.RUNNING, ConditionalSource.HISTORY)) {
-            for (ConditionalEntity e : conditionalMapper.selectPage(
-                    source.table(), null, null, null, 0, MAX_STATS_ROWS)) {
-                if (e.getType() != null) {
-                    counts.merge(e.getType(), 1L, Long::sum);
-                }
+        Map<Integer, Long> counts = new java.util.TreeMap<>();
+        for (ConditionalView v : merge().views()) {
+            if (v.Type() != null) {
+                counts.merge(v.Type(), 1L, Long::sum);
             }
         }
         List<TypeCountRow> out = new ArrayList<>();
@@ -148,40 +215,65 @@ public class ConditionalService {
     /**
      * 条件单汇总（全量口径，卡片用）。
      *
-     * <p>按当前**筛选条件**统计全表，而不是统计当前页 —— 卡片上「运行中」「已触发」
-     * 这类标签没有「本页」二字，给页内数字会被读成全量，且翻页就变。
-     *
-     * <p>{@code source} 与列表同一个枚举，保证卡片与列表看的是同一张表。
+     * <p>按当前<b>筛选条件</b>统计全量，而不是统计当前页 —— 卡片上「运行中」
+     * 「已触发」这类标签没有「本页」二字，给页内数字会被读成全量，且翻页就变。
      */
     public ConditionalStats stats(ConditionalQuery query) {
         ConditionalSource source = ConditionalSource.of(query.getSource());
         String keyword = trimToNull(query.getKeyword());
-        ConditionalMapper.ConditionalStatsRow row = conditionalMapper.selectStats(
-                source.table(), keyword, query.getType(), query.getMode());
-        if (row == null) {
-            return new ConditionalStats(0, 0, 0, 0, 0);
+        long running = 0;
+        long triggered = 0;
+        long paused = 0;
+        long totalRun = 0;
+        long total = 0;
+        for (ConditionalView v : merge().views()) {
+            if (!source.matches(v.Mode(), v.Flag())) {
+                continue;
+            }
+            if (!matchesKeyword(v, keyword)) {
+                continue;
+            }
+            if (query.getType() != null && !query.getType().equals(v.Type())) {
+                continue;
+            }
+            if (query.getMode() != null && !query.getMode().equals(v.Mode())) {
+                continue;
+            }
+            total++;
+            if (v.Mode() != null && v.Mode() == 1) {
+                running++;
+            }
+            if (v.Status() != null && v.Status() == 1) {
+                triggered++;
+            }
+            if (v.Flag() != null && v.Flag() == 1) {
+                paused++;
+            }
+            if (v.RunCount() != null) {
+                totalRun += v.RunCount();
+            }
         }
-        return new ConditionalStats(
-                nz(row.runningCount()), nz(row.triggeredCount()),
-                nz(row.pausedCount()), nz(row.totalRunCount()), nz(row.totalCount()));
+        return new ConditionalStats(running, triggered, paused, totalRun, total);
     }
 
-    private static long nz(Long v) {
-        return v == null ? 0L : v;
+    /** 关键字匹配（账号 / 单号 / 名称 / 描述） */
+    private static boolean matchesKeyword(ConditionalView v, String keyword) {
+        if (keyword == null) {
+            return true;
+        }
+        String k = keyword.toLowerCase();
+        return contains(v.Account(), k) || contains(v.UserAccount(), k)
+                || contains(v.Name(), k) || contains(v.Description(), k)
+                || (v.id() != null && String.valueOf(v.id()).contains(k));
     }
 
-    /**
-     * 统计类查询的取数上限。
-     *
-     * <p>类型分布是「全量口径」，但也不能无上限地把整表读进内存。
-     * 现场三张表都是 0 行，永远不会触发；真涨上去之后这个上限会让统计
-     * 只覆盖前 N 条 —— 那时应该改成在 SQL 里 {@code GROUP BY Type} 让数据库算，
-     * 而不是把明细捞回来。这一点留在此处备忘。
-     */
-    private static final int MAX_STATS_ROWS = 5000;
+    private static boolean contains(String value, String lowerKeyword) {
+        return value != null && value.toLowerCase().contains(lowerKeyword);
+    }
 
     /* ================================ 映射 ================================ */
 
+    /** MySQL 行 → 前端契约形状（标 {@code source=db}） */
     private static ConditionalView toView(ConditionalEntity e) {
         return new ConditionalView(
                 e.getId(), e.getAccount(), e.getUserAccount(), e.getStrategy(),
@@ -190,7 +282,8 @@ public class ConditionalService {
                 DateTimes.format(e.getBeginTime()), DateTimes.format(e.getEndTime()),
                 e.getStatus(), e.getFlag(), e.getDescription(), e.getValidity(),
                 DateTimes.format(e.getModifyTime()), DateTimes.format(e.getTriggeredTime()),
-                e.getReason(), e.getMode(), e.getType(), e.getName());
+                e.getReason(), e.getMode(), e.getType(), e.getName(),
+                "db", null, null, 1);
     }
 
     /** 与前端 {@code CONDITIONAL_TYPES} 一致的标签 */

@@ -15,6 +15,8 @@ import type {
   AuditLog,
   AuditStats,
   Conditional,
+  ConditionalWriteResult,
+  ConditionalWriteStatus,
   CodeCountRow,
   DashboardOverview,
   DailyCountRow,
@@ -92,19 +94,37 @@ export const strategyApi = {
    */
   listServers: (query?: PageQuery) => api.get<StrategyServerPage>('/strategy/servers', query),
 
-  /** 条件单列表（T_Conditional + T_Conditional_his） */
+  /** 条件单列表（Redis 实时态 + MySQL 归档合并） */
   listConditionals: (query?: PageQuery) =>
     api.get<PageResult<Conditional>>('/strategy/conditionals', query),
 
   /** 条件单详情 */
   getConditional: (id: number) => api.get<Conditional>(`/strategy/conditionals/${id}`),
 
-  /** 启停条件单（对应 set 协议） */
-  setConditional: (id: number, running: boolean) =>
-    api.post<void>(`/strategy/conditionals/${id}/state`, { running }),
+  /**
+   * 条件单状态变更（对应 setByStrategy 协议）。
+   *
+   * ⚠️ **只做状态操作，不做删除** —— 需求方明确「不允许删除，
+   * 只允许停止、终止等状态操作」。删除不可逆（remove 协议一旦被
+   * 策略平台执行就删掉了），状态变更是可逆的。
+   *
+   * @param mode 目标状态：0 停止 / 1 运行 / 2 终止（INVALID）
+   *
+   * 返回体带 `outcome`（success / business_failed / timeout）——
+   * 「已下发但没收到回执」是 **timeout**，既不是成功也不是失败，
+   * 页面必须区分，否则会把"不知道结果"显示成"成功"。
+   */
+  setConditional: (id: number, body: { mode: number }) =>
+    api.post<ConditionalWriteResult>(`/strategy/conditionals/${id}/state`, body),
 
-  /** 删除条件单（对应 remove 协议） */
-  removeConditional: (id: number) => api.delete<void>(`/strategy/conditionals/${id}`),
+  /**
+   * 写操作现状（含**当前是否可写**）。
+   *
+   * 页面加载时拉一次：`enabled=false` 时提前把按钮置灰并说明原因，
+   * 而不是让用户点了才发现"未启用"——那种提示很容易被当成"按钮坏了"。
+   */
+  getConditionalWriteStatus: () =>
+    api.get<ConditionalWriteStatus>('/strategy/conditionals/instructions'),
 
   /**
    * 按天新增条件单（趋势图）。

@@ -67,7 +67,7 @@ public class PermissionCatalog {
     private static final Map<String, ActionDef> ACTIONS = new LinkedHashMap<>();
 
     static {
-        ACTIONS.put("action:conditional:write", new ActionDef("启停 / 删除条件单", "bizdata", "high"));
+        ACTIONS.put("action:conditional:write", new ActionDef("条件单状态变更（停止/运行/终止）", "bizdata", "high"));
         ACTIONS.put("action:storage-redis:delete-key", new ActionDef("删除 Redis 键", "storage", "high"));
         ACTIONS.put("action:storage-mysql:readonly-sql", new ActionDef("执行只读 SQL", "storage", "medium"));
         ACTIONS.put("action:system-user:manage", new ActionDef("管理后台账号", "system", "high"));

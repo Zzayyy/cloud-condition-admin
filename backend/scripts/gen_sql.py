@@ -109,7 +109,7 @@ MENU_TITLES = {
 }
 
 ACTION_PERMS = [
-    ("conditional", "write", "启停 / 删除条件单", "bizdata", "high"),
+    ("conditional", "write", "条件单状态变更（停止/运行/终止）", "bizdata", "high"),
     ("server-trade", "toggle", "启停委托服务器", "server", "high"),
     ("storage-redis", "delete-key", "删除 Redis 键", "storage", "high"),
     ("storage-mysql", "readonly-sql", "执行只读 SQL", "storage", "medium"),
@@ -157,7 +157,9 @@ AUDIT_MESSAGES = {
         "删除成功（DEL a = 1）", "键不存在，未产生写入", "拒绝：该键属于 DataHub_* 流，后端要求二次确认",
     ],
     "action:conditional:write": [
-        "已下发 remove 协议，策略平台已回执", "已下发 set 协议（停止）", "超时未收到策略平台回执",
+        "已下发 setByStrategy 协议，策略平台已回执成功",
+        "已下发 setByStrategy 协议，策略平台回执失败：ref not exist",
+        "已下发 setByStrategy 协议，超时未收到策略平台回执",
     ],
     "action:server-trade:toggle": ["enable 已写回 Redis JSON", "目标节点 id 重复，按 mac 定位成功"],
     "action:storage-mysql:readonly-sql": [

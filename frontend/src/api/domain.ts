@@ -307,7 +307,17 @@ export const CONDITIONAL_FLAGS = {
   2: '删除',
 } as const
 
-/** MySQL T_Conditional / T_Conditional_his / V_Conditional */
+/**
+ * 云条件单。
+ *
+ * ⚠️ 数据来源有两个（2026-10-21 起）：
+ * - `redis` —— Redis `strategy-*` 键里的**实时态**。现场真实条件单都在这里
+ *   （60 条），MySQL 那三张表是 0 行。
+ * - `db` —— MySQL `T_Conditional` / `T_Conditional_his` 里的**归档**。
+ *
+ * 所以每行都带 `source`，页面要如实显示「这条是从哪读到的」——
+ * 两边都有同一条时以 Redis 为准（实时态），但仍标出来，不做静默合并。
+ */
 export interface Conditional {
   id: number
   /** 拼接的唯一账号信息，如 300130000461_1_6 */
@@ -337,6 +347,75 @@ export interface Conditional {
   /** 云条件单类型 */
   Type: number | null
   Name: string | null
+  /** 数据来源：redis（实时态）/ db（MySQL 归档） */
+  source?: 'redis' | 'db'
+  /** 来源实例，如 192.168.1.136/db1（MySQL 来源为 null） */
+  sourceInstance?: string | null
+  /**
+   * 策略服务器编号（Redis 侧才有）。
+   * ⚠️ 现场全部是 -1 —— 那是「尚未分配到编号」的哨兵值，不是可用编号。
+   */
+  strategyServerID?: number | null
+  /** 同一个单号在几个实例上各存了一份 */
+  copies?: number
+}
+
+/**
+ * 条件单状态变更的结果。
+ *
+ * ⭐ **本地（Redis + MySQL）永远都改**，四个档位说的是"通知策略平台"的结果：
+ * - `success` —— 本地已改 + 平台回执明确成功
+ * - `local_only` —— 本地已改 + **无需/未下发通知**（账号未连策略服务器等）。
+ *   这是**正常路径**，不是失败。
+ * - `timeout` —— 本地已改 + 已下发但没等到回执。平台状态未知，可能不一致。
+ * - `business_failed` —— 本地已改 + 平台回执失败。**两边已经不一致**，要人工核对。
+ */
+export interface ConditionalWriteResult {
+  /** 条件单号 */
+  ref: string
+  /** 用的协议：setByStrategy */
+  protocol: string
+  /** 目标策略服务器编号 */
+  serverId: string | null
+  /** 报文发到了哪条流 */
+  targetStream: string
+  /** 本次请求的 request_id（回执按它匹配） */
+  requestId: string
+  /** 写进流里的条目 id（排查用） */
+  entryId: string | null
+  /** success / business_failed / timeout / local_only */
+  outcome: 'success' | 'business_failed' | 'timeout' | 'local_only'
+  /** 回执里的错误码（无回执为 null） */
+  errCode: number | null
+  /** 回执原文 / 说明 */
+  message: string
+  /** 回执报文原文（排查用） */
+  replyRaw: string | null
+  /** 条件单来自哪个实例 */
+  sourceInstance: string | null
+  /** 补充提示 */
+  note: string | null
+  /** 是否真的下发了协议（false = 只改了本地） */
+  dispatched: boolean
+  /** 本地同步结果（redis / mysql 分别怎么写），如 `redis=ok；mysql=ok（1 行）` */
+  localSync: string | null
+}
+
+/** 条件单写操作的现状（`GET /strategy/conditionals/instructions`） */
+export interface ConditionalWriteStatus {
+  /** 状态变更是否已实现 */
+  implemented: boolean
+  /** 说明 */
+  reason: string
+  /** 所需权限点 */
+  requiredPermission: string
+  /** 是否支持新增（当前不支持） */
+  createSupported: boolean
+  /**
+   * **当前是否可写**（`app.conditional.enabled`）。
+   * 页面据此提前置灰按钮，而不是等点了才报"未启用"。
+   */
+  enabled: boolean
 }
 
 /** MySQL T_StrategyLog */

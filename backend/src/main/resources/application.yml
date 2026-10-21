@@ -226,6 +226,60 @@ app:
     # 用来区分「节点都离线」与「这个注册表本身就没在更新」。
     stale-registry-after-sec: 120
 
+  # ===========================================================================
+  # 条件单状态变更（停止 / 运行 / 终止）—— 高危，默认**全关**
+  # ---------------------------------------------------------------------------
+  # ⭐ 语义（需求方 2026-10-21 明确）：
+  #     改本地（Redis strategy-* + MySQL T_Conditional）—— **必做的主路径**
+  #     下发 setByStrategy 通知策略平台 —— **附加动作**，有编号就发、没有就跳过
+  #    原话：「不管是否连上对应的策略服务器，只要后台发了改状态的申请就要改状态
+  #           （REDIS+MYSQL）」「只是如果连上策略服务器还要顺带通知一下」
+  #    所以 strategyServerID=-1（账号未连策略服务器）不是错误，结果是 local_only。
+  #
+  # ⚠️ 但总开关默认关：改错了会直接影响客户正在运行的条件单。
+  #      enabled=false              → 一个字节都不写
+  #      allowed-server-ids: []    → **一律不下发**（本地改照做）
+  #      allow-live-platform=false → 目标流上坐着真平台时不下发（本地改照做）
+  #
+  # 协议（2026-10-21 现场实测样本，不是照文档抄的）：
+  #   请求 {"setByStrategy":{"Unique_Account":"010100011300_7_6","Mode":2,"Refs":["2026..."]}}
+  #   回执 {"Err":0,"Msg":"set conditional mode success","Results":[{"Ref":"...","Mode":2}]}
+  #     —— 回执在 ST-<编号>-reply，**不在** DataHub_reply_stream
+  #        （那里是中台的解析失败，是**假失败**）
+  #
+  # ⚠️ 不提供新增与删除：需求方明确「不允许删除，只允许停止、终止等状态操作」。
+  # ===========================================================================
+  conditional:
+    # 写操作总开关。
+    #
+    # ⚠️ 当前是 true —— 这是**联调态**（页面上要能点得动）。
+    #    交付/上生产前必须改回 false，或者改用 profile 隔离：
+    #      application.yml         enabled: false   ← 安全基线
+    #      application-local.yml   enabled: true    ← 本地联调
+    #    代码里的默认值仍是 false（见 ConditionalWriteProperties.enabled），
+    #    所以**不写这一项就是关的** —— 安全基线不依赖这个文件。
+    #
+    # 开之前请先确认下面两项配好了。
+    enabled: true
+    # 目标 Redis 实例（真策略平台所在的那个库：现场是 192.168.1.136 db0）
+    instance-id: 136-0
+    # 等回执的超时（毫秒）。超时 = 「已下发但结果未知」，不是失败
+    reply-timeout-ms: 10000
+    # 允许下发到的策略服务器编号白名单。**为空 = 全部拒绝**。
+    # ⚠️ 现场 Redis 里条件单的 strategyServerID 全是 -1（尚未分配），
+    #    acc-* 的 strategyserverid 也是 -1/0 —— 也就是说"这条单该发给哪台
+    #    策略平台"这个映射在现场并不存在，必须由运维显式指定。
+    allowed-server-ids: []
+    # 目标流上坐着真策略平台时是否仍然下发（默认否）。
+    # 判据：XINFO CONSUMERS 里存在「消费者名 = 流名本身」的消费者。
+    allow-live-platform: false
+    # 下发流名模板与回执流后缀
+    stream-prefix: 'ST-'
+    reply-suffix: '-reply'
+    # 入口流名（客户端 → 数据中台）与其 server_type
+    request-stream: DataHub_req_stream
+    server-type: ST
+
 logging:
   level:
     root: INFO

@@ -55,8 +55,8 @@ export const ACTION_PERMISSIONS: ActionPermissionDef[] = [
   {
     menu: 'conditional',
     action: 'write',
-    label: '启停 / 删除条件单',
-    desc: '对应 set / remove 协议，会直接改变客户正在运行的条件单，并下发到策略平台。',
+    label: '条件单状态变更（停止/运行/终止）',
+    desc: '对应 setByStrategy 协议，会直接改变客户正在运行的条件单，并下发到策略平台。不含删除（删除不可逆，需求方明确不做）。',
     dangerous: true,
   },
   {

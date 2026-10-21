@@ -1,9 +1,11 @@
 package com.qianlong.cloud.admin.mapper;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import com.qianlong.cloud.admin.entity.ConditionalEntity;
 
@@ -25,9 +27,17 @@ import com.qianlong.cloud.admin.entity.ConditionalEntity;
  * 之所以不在 Java 里做白名单就算完，是因为这类「拼接进 SQL 的标识符」
  * 一旦有人绕过 service 直接调 mapper 就失守了；写在 SQL 里更靠近危险点。
  *
- * <p><b>不提供任何写方法</b>：条件单的启停/删除要走 set / remove 协议
- * 下发到策略平台（另一条链路，需要数据中心配合）。直接改库不会生效，
- * 反而会让库与 Redis 不一致 —— 所以本 Mapper 只读。
+ * <p><b>只有一个写方法，而且只改 {@code Mode} 与 {@code ModifyTime} 两列</b>：
+ * {@link #updateMode}。理由：
+ * <ul>
+ *   <li>状态变更要走协议下发给策略平台，<b>库里的 Mode 只是"本地镜像"</b> ——
+ *       改它不会让运行中的条件单真的停下来；</li>
+ *   <li>但页面读数来自库里，如果不跟着改，就会出现
+ *       「平台已停止、页面还显示运行」。所以下发成功后要同步这一列。</li>
+ * </ul>
+ * <b>刻意不提供</b> INSERT / DELETE / 改内容（`Strategy`/`CondName` 等）的方法：
+ * 那几件事要么需求方明确不做（新增/删除），要么必须由策略平台落地。
+ * 表名写死为 {@code T_Conditional}，不接受外部传入 —— 状态变更只作用于运行中的单。
  */
 public interface ConditionalMapper {
 
@@ -35,6 +45,25 @@ public interface ConditionalMapper {
     String T_RUNNING = "T_Conditional";
     String T_HISTORY = "T_Conditional_his";
     String T_ALL = "V_Conditional";
+
+    /**
+     * 只改状态与修改时间（本 Mapper 唯一一个写方法）。
+     *
+     * <p>表名写死为 {@code T_Conditional} —— 状态变更只作用于运行中的单，
+     * 不碰历史表，也不接受外部传表名。
+     *
+     * @return 影响行数。<b>0 表示库里没有这条单</b>（例如它只存在于 Redis 实时态），
+     *         调用方要如实告诉用户，不能当成成功
+     */
+    @Update("""
+            UPDATE T_Conditional
+               SET Mode = #{mode},
+                   ModifyTime = #{modifyTime}
+             WHERE id = #{id}
+            """)
+    int updateMode(@Param("id") Long id,
+                   @Param("mode") Integer mode,
+                   @Param("modifyTime") LocalDateTime modifyTime);
 
     @Select("""
             <script>

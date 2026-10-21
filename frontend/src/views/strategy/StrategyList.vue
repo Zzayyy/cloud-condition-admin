@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import {
   NButton,
@@ -33,7 +33,6 @@ import {
   PlayOutline,
   RefreshOutline,
   TimeOutline,
-  TrashOutline,
   TrendingUpOutline,
 } from '@vicons/ionicons5'
 
@@ -149,7 +148,30 @@ function reload() {
   loadStats(statsParams())
 }
 
-onMounted(reload)
+/**
+ * 写操作当前是否可用（后端 `app.conditional.enabled`）。
+ *
+ * ⚠️ 默认 `true`：演示态（mock）没有这个接口，不该让按钮全灰。
+ * 真实态拉一次后按后端为准 —— 未启用时把按钮置灰并写明原因，
+ * 而不是让用户点了才看到"未启用"（那种提示很容易被当成"按钮坏了"）。
+ */
+const writable = ref(true)
+const writeDisabledReason = ref('')
+
+async function loadWriteStatus() {
+  try {
+    const st = await strategyApi.getConditionalWriteStatus()
+    writable.value = st?.enabled !== false
+    writeDisabledReason.value = writable.value ? '' : st?.reason ?? '写操作未启用'
+  } catch {
+    // 拉不到就保持默认可写：真点了会由后端给出明确错误，不会静默失败
+  }
+}
+
+onMounted(() => {
+  reload()
+  loadWriteStatus()
+})
 
 function handleSearch() {
   page.value = 1
@@ -410,45 +432,109 @@ const columns: DataTableColumns<Conditional> = [
         ),
         h(
           NPopconfirm,
-          { onPositiveClick: () => toggleRunning(row), positiveText: '确认', negativeText: '取消' },
+          { onPositiveClick: () => setMode(row, 0), positiveText: '确认', negativeText: '取消' },
           {
             trigger: () =>
               h(
                 NButton,
-                { size: 'tiny', quaternary: true, type: row.Mode === 1 ? 'warning' : 'primary' },
+                { size: 'tiny', quaternary: true, type: 'warning', disabled: isTerminal(row.Mode) || row.Mode === 0 || !writable },
                 {
-                  icon: () =>
-                    h(NIcon, null, { default: () => h(row.Mode === 1 ? PauseOutline : PlayOutline) }),
-                  default: () => (row.Mode === 1 ? '停止' : '运行'),
+                  icon: () => h(NIcon, null, { default: () => h(PauseOutline) }),
+                  default: () => '停止',
                 },
               ),
-            default: () => `确认${row.Mode === 1 ? '停止' : '运行'}条件单 ${row.id}？`,
+            default: () => `确认停止条件单 ${row.id}？会下发 set 协议让策略平台停止它。`,
           },
         ),
         h(
           NPopconfirm,
-          { onPositiveClick: () => removeConditional(row), positiveText: '删除', negativeText: '取消' },
+          { onPositiveClick: () => setMode(row, 1), positiveText: '确认', negativeText: '取消' },
           {
             trigger: () =>
               h(
                 NButton,
-                { size: 'tiny', quaternary: true, type: 'error' },
-                { icon: () => h(NIcon, null, { default: () => h(TrashOutline) }) },
+                { size: 'tiny', quaternary: true, type: 'primary', disabled: isTerminal(row.Mode) || row.Mode === 1 || !writable },
+                {
+                  icon: () => h(NIcon, null, { default: () => h(PlayOutline) }),
+                  default: () => '运行',
+                },
               ),
-            default: () => `确认删除条件单 ${row.id}？此操作会下发 remove 协议。`,
+            default: () => `确认让条件单 ${row.id} 重新运行？会下发 set 协议。`,
+          },
+        ),
+        h(
+          NPopconfirm,
+          { onPositiveClick: () => setMode(row, 2), positiveText: '确认', negativeText: '取消' },
+          {
+            trigger: () =>
+              h(
+                NButton,
+                { size: 'tiny', quaternary: true, type: 'error', disabled: isTerminal(row.Mode) || !writable },
+                {
+                  icon: () => h(NIcon, null, { default: () => h(AlertCircleOutline) }),
+                  default: () => '终止',
+                },
+              ),
+            default: () => `确认终止条件单 ${row.id}（置为 INVALID）？终止后不可恢复。`,
           },
         ),
       ]),
   },
 ]
 
-function toggleRunning(row: Conditional) {
-  // 后端未接通：这里如实提示，不做本地假状态变更，避免误以为已生效
-  message.warning(`后端接口尚未实现：启停将下发 set 协议（条件单 ${row.id}）`)
+/**
+ * 终态：一旦到了这里就**不能再改**。
+ *
+ * - `2` 终止（失效）—— 需求方明确「终止真的不可恢复」
+ * - `3` 结束 —— **策略平台**在生命周期走完后自己写的（触发执行完 / 过了 EndTime）。
+ *   它是「结果」不是「指令」，人工改它会让"正常走完"和"被强行结束"在审计上分不开，
+ *   而且现场 `setByStrategy` 样本里从没出现过 `Mode:3`。
+ *
+ * ⚠️ 这里只是**禁用按钮**，真正的拦截在后端（`ConditionalDispatchService`
+ * 的状态机）—— 直接 POST 接口照样能绕过 UI。
+ */
+function isTerminal(mode?: number | null) {
+  return mode === 2 || mode === 3
 }
 
-function removeConditional(row: Conditional) {
-  message.warning(`后端接口尚未实现：删除将下发 remove 协议（条件单 ${row.id}）`)
+/**
+ * 状态变更（停止 / 运行 / 终止）。
+ *
+ * ⚠️ **不做删除**：需求方明确「不允许删除，只允许停止、终止等状态操作」——
+ * 删除是不可逆的（remove 协议一旦被策略平台执行就删掉了），
+ * 而状态变更是可逆的，风险低得多。
+ *
+ * ⚠️ 这里**不做本地假状态变更**：只有拿到策略平台的回执才算生效。
+ * 没回执就是「已下发、结果未知」，页面会如实这么显示，不会先把行状态改了。
+ */
+async function setMode(row: Conditional, mode: number) {
+  const label = mode === 1 ? '恢复运行' : mode === 0 ? '停止' : '终止'
+  try {
+    const res = await strategyApi.setConditional(row.id, { mode })
+    const outcome = res?.outcome
+    const localSync = res?.localSync ? `（本地同步：${res.localSync}）` : ''
+    if (outcome === 'success') {
+      message.success(`条件单 ${row.id} 已${label}${localSync}`)
+      reload()
+    } else if (outcome === 'business_failed') {
+      message.error(`策略平台回执失败：${res?.message ?? '原因未给出'}`)
+    } else if (outcome === 'local_only') {
+      // ⭐ 正常路径：本地（Redis + MySQL）已经改了，只是没有平台可通知
+      // （账号未连策略服务器 / 编号不在白名单 / 真平台闸未放行）。
+      // 所以用 success 而不是 warning —— 说成"警告"会让人以为操作没生效。
+      message.success(
+        `条件单 ${row.id} 已${label}（${res?.localSync ?? '本地已改'}）` +
+          (res?.note ? `；${res.note}` : ''),
+        { duration: 6000 },
+      )
+      reload()
+    } else {
+      message.warning(`已下发，但未收到策略平台回执（结果未知）：条件单 ${row.id}`, { duration: 8000 })
+      reload()
+    }
+  } catch (e) {
+    message.error(`下发失败：${(e as Error)?.message ?? '未知错误'}`)
+  }
 }
 
 /* ------------------------------ 详情抽屉 ------------------------------ */
@@ -565,18 +651,31 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
         </span>
       </template>
 
-      <!-- 数据源切换：对应 T_Conditional / T_Conditional_his / V_Conditional
-           注意：naive-ui 2.45.x 的 n-tab-pane 只认 #tab 插槽，不认 tab 属性，
-           写成 tab="..." 会渲染成空标签，所以这里必须用插槽。 -->
+      <!-- 写操作未启用时提前说明，别让用户"点了才发现按钮不能用" -->
+      <div v-if="!writable" class="write-off-hint">
+        <n-icon :component="AlertCircleOutline" />
+        <span>
+          当前**不可修改状态**（后端 <code>app.conditional.enabled=false</code>）。
+          启用后：先改 Redis + MySQL，若该账号连了策略服务器还会顺带通知平台。
+        </span>
+      </div>
+
+      <!--
+        数据源切换：按【状态】筛，不是按表筛。
+        ⚠️ 2026-10-21 起主数据源是 Redis 的 strategy-* 键（实时态），
+           MySQL 那三张表是 0 行 —— 原来写的「运行中（T_Conditional）」是表名，
+           现在不再是查表，tab 文案必须跟着改，否则会误导成"在查某张表"。
+           注意：naive-ui 2.45.x 的 n-tab-pane 只认 #tab 插槽，不认 tab 属性。
+      -->
       <n-tabs v-model:value="source" type="segment" size="small" style="margin-bottom: 14px" @update:value="handleSearch">
         <n-tab-pane name="running">
-          <template #tab>运行中（T_Conditional）</template>
+          <template #tab>运行中</template>
         </n-tab-pane>
         <n-tab-pane name="history">
-          <template #tab>历史（T_Conditional_his）</template>
+          <template #tab>已停止 / 已失效</template>
         </n-tab-pane>
         <n-tab-pane name="all">
-          <template #tab>全部（V_Conditional 视图）</template>
+          <template #tab>全部</template>
         </n-tab-pane>
       </n-tabs>
 
@@ -706,22 +805,37 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
       </template>
 
       <template #footer>
+        <!--
+          ⚠️ 需求方明确「不允许删除，只允许停止、终止等状态操作」。
+          删除不可逆（remove 协议一旦执行就删掉了），状态变更是可逆的。
+          所以这里只有「停止/运行」与「终止」，没有删除。
+        -->
         <n-button
           size="small"
           :type="active?.Mode === 1 ? 'warning' : 'primary'"
-          @click="active && toggleRunning(active)"
+          :disabled="isTerminal(active?.Mode) || !writable"
+          @click="active && setMode(active, active.Mode === 1 ? 0 : 1)"
         >
           <template #icon>
             <n-icon :component="active?.Mode === 1 ? PauseOutline : PlayOutline" />
           </template>
           {{ active?.Mode === 1 ? '停止运行' : '开始运行' }}
         </n-button>
-        <n-button size="small" type="error" ghost @click="active && removeConditional(active)">
+        <n-button
+          size="small"
+          type="error"
+          ghost
+          :disabled="isTerminal(active?.Mode) || !writable"
+          @click="active && setMode(active, 2)"
+        >
           <template #icon>
-            <n-icon :component="TrashOutline" />
+            <n-icon :component="AlertCircleOutline" />
           </template>
-          删除
+          终止（INVALID）
         </n-button>
+        <span v-if="isTerminal(active?.Mode)" class="terminal-hint">
+          {{ active?.Mode === 3 ? '已结束（策略平台写入的终态，不可操作）' : '已终止，不可恢复' }}
+        </span>
         <div class="spacer" />
         <n-button size="small" @click="showDetail = false">关闭</n-button>
       </template>
@@ -771,5 +885,36 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
 
 .spacer {
   flex: 1;
+}
+
+/* 写操作未启用时的说明条 */
+.write-off-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  background: var(--bg-body);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid #e8a33d;
+}
+
+.write-off-hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-code);
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 12px;
+}
+
+/* 终态提示：告诉运维"为什么按钮是灰的"，而不是让他以为页面坏了 */
+.terminal-hint {
+  align-self: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.85;
 }
 </style>
