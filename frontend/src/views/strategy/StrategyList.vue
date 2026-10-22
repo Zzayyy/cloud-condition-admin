@@ -59,8 +59,19 @@ const accent = '#7c5cf0'
 const keyword = ref('')
 const typeFilter = ref<number | null>(null)
 const modeFilter = ref<number | null>(null)
-/** 数据源：运行中主表 / 历史表 / 并集视图（对应 V_Conditional） */
-const source = ref<'running' | 'history' | 'all'>('running')
+/**
+ * 数据源 tab：全部 / 运行中 / 已停止或已失效。
+ *
+ * ⚠️ **默认「全部」**（2026-10-22 调整）：
+ * 之前默认「运行中」，导致页面一打开：
+ *   ① 卡片是全量、列表只是运行中，两个数字对不上，看着像 bug；
+ *   ② 顶部两个图表（类型分布 / 近 14 天新增）也跟着只画运行中的那批 ——
+ *      而图表标题写的是「条件单类型分布」这种全量说法。
+ * 默认落在「全部」后，打开即是全量视图，图表与列表口径自然一致，
+ * 想看运行中的再点第二个 tab。
+ */
+const DEFAULT_SOURCE = 'all' as const
+const source = ref<'running' | 'history' | 'all'>(DEFAULT_SOURCE)
 const page = ref(1)
 const pageSize = ref(10)
 
@@ -176,7 +187,8 @@ function resetFilters() {
   keyword.value = ''
   typeFilter.value = null
   modeFilter.value = null
-  source.value = 'running'
+  // 与页面初始值保持一致：默认落在「全部」
+  source.value = DEFAULT_SOURCE
   page.value = 1
   reload()
 }
@@ -645,7 +657,7 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
           <template #header-extra>
             <span class="text-muted" style="font-size: 12px">
               按 AddTime 聚合（当前数据源：
-              {{ source === 'running' ? '运行中' : source === 'history' ? '历史' : '全部' }}）
+              {{ source === 'running' ? '运行中' : source === 'history' ? '已停止 / 已失效' : '全部' }}）
             </span>
           </template>
           <BaseChart
@@ -676,21 +688,22 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
       </div>
 
       <!--
-        数据源切换：按【状态】筛，不是按表筛。
-        ⚠️ 2026-10-21 起主数据源是 Redis 的 strategy-* 键（实时态），
-           MySQL 那三张表是 0 行 —— 原来写的「运行中（T_Conditional）」是表名，
-           现在不再是查表，tab 文案必须跟着改，否则会误导成"在查某张表"。
-           注意：naive-ui 2.45.x 的 n-tab-pane 只认 #tab 插槽，不认 tab 属性。
+        数据源 tab：按【状态】筛，不是按表筛。
+        ⚠️ 「全部」放在**第一个**并作为默认值（2026-10-22）：
+           卡片是全量口径，图表也跟着 tab 走 —— 默认落在「全部」时，
+           打开页面三处口径天然一致（全量）。默认「运行中」的话，
+           卡片说 9 条、列表说 6 条、图表只画 6 条，看着像 bug。
+        注意：naive-ui 2.45.x 的 n-tab-pane 只认 #tab 插槽，不认 tab 属性。
       -->
       <n-tabs v-model:value="source" type="segment" size="small" style="margin-bottom: 14px" @update:value="handleSearch">
+        <n-tab-pane name="all">
+          <template #tab>全部</template>
+        </n-tab-pane>
         <n-tab-pane name="running">
           <template #tab>运行中</template>
         </n-tab-pane>
         <n-tab-pane name="history">
           <template #tab>已停止 / 已失效</template>
-        </n-tab-pane>
-        <n-tab-pane name="all">
-          <template #tab>全部</template>
         </n-tab-pane>
       </n-tabs>
 
