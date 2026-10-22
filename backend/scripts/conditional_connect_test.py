@@ -111,10 +111,11 @@ def yml_value(key, default=None):
 
 yml_enabled = (yml_value("enabled", "") or "").lower()
 
-print("\n===== 2. 三个数据源：按【状态】筛，且每行都标出来源 =====")
-# 2026-10-21 起主数据源是 Redis 的 strategy-* 键（现场 56 条），MySQL 三张表是 0 行。
-# source 的语义也从「查哪张表」改成「筛哪类状态」：
-#   running → Mode=1；history → Mode≠1 或 Flag=2；all → 不筛
+print("\n===== 2. 三个数据源：按【状态】筛，且数据只来自 MySQL =====")
+# 2026-10-22：读路径改回纯 MySQL（现场确认 MySQL 与 Redis 应当一致，
+# 两边都读必然重复；Redis 数据分散在各账号 strategy- 键里，读起来更麻烦）。
+# source 的语义是「筛哪类状态」：
+#   running → Mode=1 且未删除；history → Mode≠1 或已删除；all → 不筛
 seen = {}
 for src in ("running", "history", "all"):
     res = call("GET", f"/strategy/conditionals?page=1&pageSize=200&source={src}", None, TOKEN)
@@ -125,23 +126,26 @@ for src in ("running", "history", "all"):
     check(f"source={src} 返回 list/total/page/pageSize",
           {"list", "total", "page", "pageSize"} <= set(d), str(list(d)))
     meta = d.get("meta") or {}
-    check(f"source={src} meta 带来源构成（redisCount/dbOnlyCount）",
-          "redisCount" in meta and "dbOnlyCount" in meta, str(meta))
+    check(f"source={src} meta 标出真实表/视图名", bool(meta.get("table")), str(meta))
+    check(f"source={src} meta 不再有双源字段（redisCount/dbOnlyCount 已移除）",
+          "redisCount" not in meta and "dbOnlyCount" not in meta, str(meta))
     check(f"source={src} meta 带筛选口径说明 scope", bool(meta.get("scope")), str(meta))
     seen[src] = d["total"]
     rows = d["list"]
-    # 口径核对：running 必须全是 Mode=1；history 必须都不是 Mode=1 或 Flag=2
+    # 口径核对：running 必须全是 Mode=1；history 必须都不是运行中
     if src == "running":
         bad = [r for r in rows if r.get("Mode") != 1]
         check("source=running 只含 Mode=1 的单", not bad, f"{len(bad)} 条 Mode≠1")
     if src == "history":
         bad = [r for r in rows if r.get("Mode") == 1 and r.get("Flag") != 2]
         check("source=history 不含 Mode=1 的单（除非 Flag=2）", not bad, f"{len(bad)} 条")
-    # 每行都要标来源，且 Redis 来源的行要带实例
-    no_source = [r for r in rows if r.get("source") not in ("redis", "db")]
-    check(f"source={src} 每行都标了 source", not no_source, f"{len(no_source)} 行缺 source")
-    print(f"  -> {src}: total={d['total']}  实时态={meta.get('redisCount')} "
-          f"仅归档={meta.get('dbOnlyCount')}  截断={meta.get('truncated')}")
+    # 双源字段必须彻底消失，否则前端契约里还留着"这行来自哪"的歧义
+    leftover = [r for r in rows if "source" in r or "sourceInstance" in r
+                or "strategyServerID" in r or "copies" in r]
+    check(f"source={src} 每行不再带 source/sourceInstance/strategyServerID/copies",
+          not leftover, f"{len(leftover)} 行仍有残留字段")
+    print(f"  -> {src}: total={d['total']}  表={meta.get('table')}  "
+          f"截断={meta.get('truncated')}")
 
 if len(seen) == 3:
     check("all 的条数 = running + history（状态二分不重不漏）",
@@ -200,20 +204,27 @@ if m:
           "dataSource" not in dto_fields, str(dto_fields))
     check("已移除 redisInstance 字段", "redisInstance" not in dto_fields, str(dto_fields))
 
-print("\n===== 4. 代码里确认：读 Redis 只走 RedisConditionalRepository 这一条明确路径 =====")
+print("\n===== 4. 代码里确认：列表读路径**不碰 Redis** =====")
+# 2026-10-22：读路径改回纯 MySQL。守门要点回到最初那条 ——
+# 条件单列表只认表，不许再把 Redis 实时态混进来（会重复、且掩盖"没落库"）。
 svc_path = os.path.join(BACKEND, "src", "main", "java", "com", "qianlong", "cloud",
                         "admin", "service", "ConditionalService.java")
 with open(svc_path, encoding="utf-8") as fh:
     svc = fh.read()
-# 守门思想的**要点**没变：Redis 的访问必须收敛到一个专门的类里，
-# 不能在 service 里到处散着调 scanJson —— 否则以后没法回答"这个类到底读了什么"。
-check("ConditionalService 通过 RedisConditionalRepository 读 Redis",
-      "RedisConditionalRepository" in svc, "没有注入 RedisConditionalRepository")
 code_lines = [ln for ln in svc.split("\n")
               if not ln.strip().startswith(("*", "/*", "//"))]
 code_only = "\n".join(code_lines)
-check("ConditionalService 不直接调 scanJson（访问收敛到 repository）",
-      "scanJson" not in code_only, "service 里仍在散着扫 Redis 键")
+check("ConditionalService 未注入任何 Redis 组件",
+      "RedisJsonGateway" not in code_only and "RedisConditionalRepository" not in code_only,
+      "service 里仍引用了 Redis 组件")
+check("ConditionalService 未出现 strategy- 键扫描调用",
+      "scanJson" not in code_only and "findOne" not in code_only,
+      "service 里仍在读 Redis 键")
+check("RedisConditionalRepository 已删除（读路径不再需要它）",
+      not os.path.exists(os.path.join(BACKEND, "src", "main", "java", "com", "qianlong",
+                                      "cloud", "admin", "service",
+                                      "RedisConditionalRepository.java")),
+      "文件仍然存在")
 
 print("\n===== 5. 图表接口：与列表同源，不用假数据充数 =====")
 res = call("GET", "/strategy/conditionals/stats/daily", None, TOKEN)

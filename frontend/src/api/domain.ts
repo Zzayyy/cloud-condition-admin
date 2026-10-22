@@ -310,13 +310,12 @@ export const CONDITIONAL_FLAGS = {
 /**
  * 云条件单。
  *
- * ⚠️ 数据来源有两个（2026-10-21 起）：
- * - `redis` —— Redis `strategy-*` 键里的**实时态**。现场真实条件单都在这里
- *   （60 条），MySQL 那三张表是 0 行。
- * - `db` —— MySQL `T_Conditional` / `T_Conditional_his` 里的**归档**。
+ * 数据**只来自 MySQL** 的 `T_Conditional` / `T_Conditional_his` / `V_Conditional`。
  *
- * 所以每行都带 `source`，页面要如实显示「这条是从哪读到的」——
- * 两边都有同一条时以 Redis 为准（实时态），但仍标出来，不做静默合并。
+ * ⚠️ 2026-10-22 从「Redis + MySQL 双源」改回「纯 MySQL」：现场确认
+ * 「MySQL 和 Redis 应该是一致的（不一致只会发生在收盘后未开盘）」，
+ * 两边都读必然重复，而 Redis 数据分散在各账号的 `strategy-` 键里、读起来更麻烦。
+ * 写操作（改状态）仍需读 Redis 定位目标编号，但那不在这个契约里。
  */
 export interface Conditional {
   id: number
@@ -347,17 +346,6 @@ export interface Conditional {
   /** 云条件单类型 */
   Type: number | null
   Name: string | null
-  /** 数据来源：redis（实时态）/ db（MySQL 归档） */
-  source?: 'redis' | 'db'
-  /** 来源实例，如 192.168.1.136/db1（MySQL 来源为 null） */
-  sourceInstance?: string | null
-  /**
-   * 策略服务器编号（Redis 侧才有）。
-   * ⚠️ 现场全部是 -1 —— 那是「尚未分配到编号」的哨兵值，不是可用编号。
-   */
-  strategyServerID?: number | null
-  /** 同一个单号在几个实例上各存了一份 */
-  copies?: number
 }
 
 /**
@@ -391,7 +379,10 @@ export interface ConditionalWriteResult {
   message: string
   /** 回执报文原文（排查用） */
   replyRaw: string | null
-  /** 条件单来自哪个实例 */
+  /**
+   * 本地同步时写到了哪个 Redis 实例，如 `192.168.1.136/db1`。
+   * `null` 表示 Redis 里没定位到这条单（只改了 MySQL）。
+   */
   sourceInstance: string | null
   /** 补充提示 */
   note: string | null

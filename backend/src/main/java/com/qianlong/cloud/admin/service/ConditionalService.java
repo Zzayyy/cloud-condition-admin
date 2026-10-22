@@ -26,33 +26,29 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 条件单查询 —— <b>Redis 实时态为主 + MySQL 归档为辅</b>。
+ * 条件单查询 —— <b>只读 MySQL</b> 的 {@code T_Conditional} / {@code T_Conditional_his}
+ * / {@code V_Conditional}。
  *
- * <h2>⚠️ 为什么 2026-10-21 改成读 Redis</h2>
- * 现场实况（当日复核）：
- * <pre>
- *   MySQL  T_Conditional / T_Conditional_his / V_Conditional : 0 行
- *   Redis  strategy-* 键（136 db1 四个键 + 137 db1 两个键）  : 60 条真实条件单
- * </pre>
- * 只读 MySQL 的话页面永远是空的 —— 那不是"没有条件单"，是"没读对地方"。
- * 所以主数据源换成 Redis，MySQL 退为归档补充。
+ * <h2>⭐ 2026-10-22：读路径从「Redis + MySQL 双源」改回「纯 MySQL」</h2>
+ * 2026-10-21 曾把主数据源换成 Redis（当时 MySQL 三张表 0 行、页面全空），
+ * 并做了双源合并。结果页面上出现 58 条、而库里只有 2 条 —— 看着像"凭空多出一堆"。
  *
- * <p><b>但"表为空"这个信号不能被掩盖</b>（本项目一贯的口径）：
- * 所以每行都带 {@code source}（redis / db），meta 里也如实给出两边的条数。
- * 运维能一眼看出"这些单只在实时态存在、还没落库"。
+ * <p>需求方与现场确认后明确：
+ * <blockquote>
+ * 「MySQL 和 Redis 应该是一致的（如果不一致，要不就是收盘后还未开盘）。
+ * 你两个都读的话肯定会读重复，就方便性来说肯定是读 MySQL 的表方便
+ * （Redis 数据都分散保存在各个账号对应的 {@code strategy-} 键中）。」
+ * </blockquote>
  *
- * <h2>合并规则</h2>
- * <ol>
- *   <li>同一个单号两边都有 → <b>以 Redis 为准</b>（实时态），标 {@code source=redis}；</li>
- *   <li>只在 Redis 有 → 照常展示，标 {@code source=redis}；</li>
- *   <li>只在 MySQL 有 → 照常展示，标 {@code source=db}。</li>
- * </ol>
+ * <p>所以：
+ * <ul>
+ *   <li><b>读</b>（本类）→ 只读 MySQL。两边一致时不会重复；</li>
+ *   <li><b>写</b>（{@code ConditionalDispatchService} / {@code ConditionalTargetLookup}）
+ *       → 仍需读 Redis 定位目标编号与数组下标。Redis 只服务写路径。</li>
+ * </ul>
  *
- * <h2>⚠️ 关于"读 Redis 会不会让页面读数失去意义"</h2>
- * 当初把 Redis 合并移出去，是因为<b>那时候只有读、没有写</b>：
- * 空表 + 外部数据 = 用户以为"表里有 58 条"，掩盖了"没落库"这个问题。
- * 现在有了写操作（状态变更），Redis 侧就是<b>正在运行的那份</b>，
- * 页面读它才是对的；而"有没有落库"这件事由 {@code source} 字段如实呈现。
+ * <p><b>为什么不再保留"MySQL 挂了就降级显示 Redis"</b>：那个降级会让人以为
+ * "表里就这么多"，把真实故障掩盖成一个看似正常的空列表。现在读失败直接报错。
  */
 @Service
 @Slf4j
@@ -69,42 +65,33 @@ public class ConditionalService {
     private static final int MAX_ROWS = 20_000;
 
     private final ConditionalMapper conditionalMapper;
-    private final RedisConditionalRepository redisRepository;
 
     /**
-     * 合并两个数据源。
+     * 读出全部条件单（<b>只读 MySQL</b>）。
      *
-     * <p>Redis 优先（实时态），MySQL 补充（归档里可能有 Redis 已清掉的）。
-     * 同一单号两边都有时以 Redis 为准，但计数照实统计。
+     * <p>现场约定：MySQL 与 Redis 应当一致（不一致只发生在"收盘后未开盘"这个窗口）。
+     * 只读一边就不会重复 —— 两个都读再合并，本质是把同一批数据读两遍。
+     *
+     * @return 条件单列表；读失败时抛出让全局异常处理器给出明确错误，
+     *         <b>不再</b>像双源时代那样"MySQL 挂了就只显示 Redis"的降级
+     *         （那样会让人以为表里就这么多，掩盖真实故障）
      */
-    private Merge merge() {
-        List<ConditionalView> redis = redisRepository.findAll();
+    private List<ConditionalView> loadAll() {
         List<ConditionalView> out = new ArrayList<>();
-        java.util.Set<Long> redisIds = new java.util.HashSet<>();
-        for (ConditionalView v : redis) {
-            redisIds.add(v.id());
-            out.add(v);
+        for (ConditionalEntity e : conditionalMapper.selectPage(
+                ConditionalSource.ALL.table(), null, null, null, 0, MAX_ROWS)) {
+            out.add(toView(e));
         }
-        int dbOnly = 0;
-        try {
-            for (ConditionalEntity e : conditionalMapper.selectPage(
-                    ConditionalSource.ALL.table(), null, null, null, 0, MAX_ROWS)) {
-                if (redisIds.contains(e.getId())) {
-                    continue;
-                }
-                dbOnly++;
-                out.add(toView(e));
-            }
-        } catch (Exception ex) {
-            // MySQL 读不到不影响 Redis 侧的展示 —— 但要如实说明，不能假装没有
-            log.warn("读取 MySQL 条件单归档失败，页面只呈现 Redis 侧：{}", ex.getMessage());
-        }
-        boolean truncated = redis.size() >= MAX_ROWS;
-        return new Merge(out, redis.size(), dbOnly, truncated);
+        return out;
     }
 
-    /** 合并结果 */
-    private record Merge(List<ConditionalView> views, int redisCount, int dbOnlyCount, boolean truncated) {
+    /** 是否因为超过内存上限而被截断（截断了就如实标注，不静默丢数据） */
+    private boolean truncated(int loaded) {
+        if (loaded >= MAX_ROWS) {
+            log.warn("条件单超过内存上限 {} 条，已截断（请改为数据库侧分页）", MAX_ROWS);
+            return true;
+        }
+        return false;
     }
 
     /** 查询条件单（筛选 + 排序 + 分页） */
@@ -112,9 +99,9 @@ public class ConditionalService {
         ConditionalSource source = ConditionalSource.of(query.getSource());
         String keyword = trimToNull(query.getKeyword());
 
-        Merge merge = merge();
+        List<ConditionalView> all = loadAll();
         List<ConditionalView> rows = new ArrayList<>();
-        for (ConditionalView v : merge.views()) {
+        for (ConditionalView v : all) {
             if (!source.matches(v.Mode(), v.Flag())) {
                 continue;
             }
@@ -147,20 +134,19 @@ public class ConditionalService {
                 source.code(),
                 source.label(),
                 source.scopeText(),
+                source.table(),
                 total,
-                merge.redisCount(),
-                merge.dbOnlyCount(),
-                merge.truncated());
+                truncated(all.size()));
 
         return new ConditionalPage(pageRows, total, page, pageSize, meta);
     }
 
-    /** 单条详情（Redis 优先，MySQL 兜底） */
+    /** 单条详情（只查 MySQL） */
     public ConditionalView getConditional(Long id) {
         if (id == null) {
             return null;
         }
-        for (ConditionalView v : merge().views()) {
+        for (ConditionalView v : loadAll()) {
             if (id.equals(v.id())) {
                 return v;
             }
@@ -180,7 +166,7 @@ public class ConditionalService {
         String fromText = f == null ? null : DateTimes.format(f);
         String toText = t == null ? null : DateTimes.format(t);
         Map<String, Long> byDay = new LinkedHashMap<>();
-        for (ConditionalView v : merge().views()) {
+        for (ConditionalView v : loadAll()) {
             String addTime = v.AddTime();
             if (addTime == null || addTime.length() < 10) {
                 continue;
@@ -202,7 +188,7 @@ public class ConditionalService {
     /** 类型分布（全量口径） */
     public List<TypeCountRow> typeDistribution() {
         Map<Integer, Long> counts = new java.util.TreeMap<>();
-        for (ConditionalView v : merge().views()) {
+        for (ConditionalView v : loadAll()) {
             if (v.Type() != null) {
                 counts.merge(v.Type(), 1L, Long::sum);
             }
@@ -226,7 +212,7 @@ public class ConditionalService {
         long paused = 0;
         long totalRun = 0;
         long total = 0;
-        for (ConditionalView v : merge().views()) {
+        for (ConditionalView v : loadAll()) {
             if (!source.matches(v.Mode(), v.Flag())) {
                 continue;
             }
@@ -282,8 +268,7 @@ public class ConditionalService {
                 DateTimes.format(e.getBeginTime()), DateTimes.format(e.getEndTime()),
                 e.getStatus(), e.getFlag(), e.getDescription(), e.getValidity(),
                 DateTimes.format(e.getModifyTime()), DateTimes.format(e.getTriggeredTime()),
-                e.getReason(), e.getMode(), e.getType(), e.getName(),
-                "db", null, null, 1);
+                e.getReason(), e.getMode(), e.getType(), e.getName());
     }
 
     /** 与前端 {@code CONDITIONAL_TYPES} 一致的标签 */

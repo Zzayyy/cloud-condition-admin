@@ -104,7 +104,7 @@ public class ConditionalDispatchService {
         // ---- 1. 本地状态：**必做的主路径** ----
         // 需求方口径：「不管是否连上策略服务器，只要后台发了改状态的申请就要改状态
         // （REDIS+MYSQL）」—— 所以先改本地，再谈通知。
-        LocalSync sync = syncLocal(instance, target, mode);
+        LocalSync sync = syncLocal(target, mode);
         if (!sync.redisOk() && !sync.mysqlOk()) {
             // 两个都没改成 = 主路径失败，必须报错（不能假装成功）
             throw BizException.badRequest("改本地状态失败：" + sync.describe());
@@ -118,7 +118,7 @@ public class ConditionalDispatchService {
                     target.ref(), "local-only", null, null, null, null,
                     "local_only", null,
                     "已改本地状态；未下发协议：" + st.reason(),
-                    null, target.sourceInstance(),
+                    null, target.instanceDisplay(),
                     "该账号当前未连接策略服务器（strategyServerID=" + target.serverId()
                             + "），因此无需通知平台；本地状态已改。",
                     false, sync.describe());
@@ -134,7 +134,7 @@ public class ConditionalDispatchService {
                     target.ref(), "local-only", st.serverId(), targetStream, null, null,
                     "local_only", null,
                     "已改本地状态；未下发协议：" + gateReason,
-                    null, target.sourceInstance(),
+                    null, target.instanceDisplay(),
                     "⚠️ 未通知策略平台（" + gateReason + "），本地状态已改。",
                     false, sync.describe());
         }
@@ -159,7 +159,7 @@ public class ConditionalDispatchService {
                     target.ref(), PROTOCOL, st.serverId(), targetStream, requestId, null,
                     "timeout", null,
                     "已改本地状态；下发失败：" + ex.getMessage(),
-                    null, target.sourceInstance(),
+                    null, target.instanceDisplay(),
                     "⚠️ 本地已改，但报文没发出去 —— 平台状态未知，可能不一致。",
                     false, sync.describe());
         }
@@ -185,7 +185,7 @@ public class ConditionalDispatchService {
                 reply.errCode(),
                 reply.message(),
                 reply.raw(),
-                target.sourceInstance(),
+                target.instanceDisplay(),
                 note,
                 true,
                 sync.describe());
@@ -310,31 +310,41 @@ public class ConditionalDispatchService {
      * 所以写完要<b>重新读一次</b>，确认键名、下标、状态三者都对得上 ——
      * 否则宁可报失败，也不能默认成功（那会改错单子）。
      */
-    private LocalSync syncLocal(RedisProperties.Instance instance, ConditionalTarget target, int mode) {
+    private LocalSync syncLocal(ConditionalTarget target, int mode) {
         String now = java.time.LocalDateTime.now()
                 .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        // ⚠️ 必须写到「键实际所在的那个实例」，不是配置里的那个：
+        // 现场 strategy-* 在 136 db0/db1 与 137 db1 都有多个副本，
+        // 往一个本来没有这个键的库上 JSON.SET 会因路径不存在而失败。
+        String host = target.patchHost();
+        int db = target.patchDb();
         boolean redisOk = false;
         String redisMsg;
         if (!target.patchableInRedis()) {
-            redisMsg = "Redis 侧未定位到（不在 strategy-* 里），跳过";
+            redisMsg = "Redis 侧未定位到（strategy-" + target.uniqueAccount() + " 里没有 "
+                    + target.ref() + "），跳过";
         } else {
             try {
-                streamWriter.patchConditionalMode(instance.getHost(), instance.getDb(),
-                        target.sourceKey(), target.arrayIndex(), mode, now);
-                // 写完校验：键、下标、状态三者都要对得上
+                streamWriter.patchConditionalMode(host, db,
+                        target.strategyKey(), target.arrayIndex(), mode, now);
+                // 写完校验：键、下标、状态三者都要对得上。
                 // ⚠️ 只比 mode 不够 —— 若并发插入把下标挤走，mode 可能"碰巧"已经是目标值，
-                //    那样会把"改错了单"当成成功。所以 sourceKey + arrayIndex 一起校验。
+                //    那样会把"改错了单"当成成功。所以 strategyKey + arrayIndex 一起校验。
+                // ⚠️⚠️ 必须比【Redis 的 mode】（redisMode），不能比 MySQL 的：
+                //    syncLocal 是先写 Redis、后写 MySQL，此刻 MySQL 还是旧值，
+                //    拿它来校验会 100% 判失败 → 每次都被回滚（踩过）。
                 ConditionalTarget after = targetLookup.resolve(Long.valueOf(target.ref()));
                 redisOk = after != null
-                        && target.sourceKey().equals(after.sourceKey())
+                        && target.strategyKey().equals(after.strategyKey())
                         && after.arrayIndex() == target.arrayIndex()
-                        && after.mode() != null
-                        && after.mode() == mode;
+                        && after.redisMode() != null
+                        && after.redisMode() == mode;
                 if (!redisOk) {
-                    if (target.mode() != null) {
-                        streamWriter.patchConditionalMode(instance.getHost(), instance.getDb(),
-                                target.sourceKey(), target.arrayIndex(), target.mode(), now);
-                        redisMsg = "已写入但回读校验不通过（下标可能已漂移），已回滚为原状态 " + target.mode();
+                    if (target.redisMode() != null) {
+                        streamWriter.patchConditionalMode(host, db,
+                                target.strategyKey(), target.arrayIndex(), target.redisMode(), now);
+                        redisMsg = "已写入但回读校验不通过（下标可能已漂移），"
+                                + "已回滚为原状态 " + target.redisMode();
                     } else {
                         redisMsg = "已写入但回读校验不通过（下标可能已漂移），"
                                 + "且原状态未知、无法回滚 —— 需要人工核对";

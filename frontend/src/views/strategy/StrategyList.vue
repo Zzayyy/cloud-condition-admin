@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
 import {
   NButton,
@@ -337,20 +337,20 @@ const columns: DataTableColumns<Conditional> = [
   {
     title: '账号',
     key: 'Account',
-    width: 175,
+    width: 165,
     render: (row) => h('span', { class: 'mono' }, orDash(row.Account)),
   },
   {
     title: '名称',
     key: 'Name',
-    width: 150,
+    width: 128,
     ellipsis: { tooltip: true },
     render: (row) => orDash(row.Name),
   },
   {
     title: '类型',
     key: 'Type',
-    width: 150,
+    width: 118,
     render: (row) => {
       const label = row.Type != null ? CONDITIONAL_TYPES[row.Type as keyof typeof CONDITIONAL_TYPES] : null
       return label ? h(NTag, { size: 'small', round: true, bordered: false, type: 'info' }, { default: () => label }) : '-'
@@ -398,14 +398,16 @@ const columns: DataTableColumns<Conditional> = [
   {
     title: '运行次数',
     key: 'RunCount',
-    width: 96,
+    // 从 96 收窄到 76，让给「操作」列 —— 这一列只放数字，
+    // 表头 4 个字 + 单元格左右内边距刚好占满，再窄表头就会挤成两行。
+    width: 76,
     align: 'right',
     render: (row) => h('span', { class: 'num' }, thousands(row.RunCount ?? 0)),
   },
   {
     title: '加入时间',
     key: 'AddTime',
-    width: 150,
+    width: 132,
     render: (row) =>
       h(
         NTooltip,
@@ -420,11 +422,23 @@ const columns: DataTableColumns<Conditional> = [
   {
     title: '操作',
     key: 'actions',
-    width: 168,
+    // 明细 / 停止 / 运行 / 终止 四个按钮要在一行放下。
+    // 每个 tiny 按钮（图标 + 2 个汉字）约 58px，四个 ≈ 232px，
+    // 加 3 个 2px 间隙和单元格内边距 → 至少要 250px。
+    // 原来是 168，直接换行成两行（实测截图确认）。
+    width: 252,
     fixed: 'right',
     render: (row) =>
-      // 用单个 div 包裹，避免多子节点结构问题
-      h('div', { class: 'row-actions' }, [
+      // 用单个 div 包裹，避免多子节点结构问题。
+      // ⚠️ 布局必须写成**行内样式**，不能只靠 <style scoped> 里的 .row-actions：
+      //    这些节点是 n-data-table 在【它自己的渲染上下文】里调 render() 生成的，
+      //    拿不到本组件的 scope id，scoped 规则命中不了 →
+      //    退化成普通 div（display:block），里面 inline-block 的按钮就自然换行了。
+      //    行内样式与 scoping 无关，稳定生效。
+      h('div', {
+        class: 'row-actions',
+        style: 'display:flex;flex-wrap:nowrap;align-items:center;gap:2px',
+      }, [
         h(
           NButton,
           { size: 'tiny', quaternary: true, onClick: () => openDetail(row) },
@@ -731,7 +745,7 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
         :single-line="false"
         size="small"
         :row-key="(row: Conditional) => String(row.id)"
-        :scroll-x="1340"
+        :scroll-x="1330"
         :pagination="{
           page: page,
           pageSize: pageSize,
@@ -856,9 +870,18 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
   font-variant-numeric: tabular-nums;
 }
 
-.row-actions {
-  display: flex;
-  gap: 2px;
+/*
+ * ⚠️ `.row-actions` 的 flex 布局写在 TS 里的**行内样式**上，不在这里。
+ * 原因：列的 render() 是被 n-data-table 在它自己的渲染上下文里调用的，
+ * 生成的节点带的是 n-data-table 的 scope id，本组件的 scoped 规则命中不了 ——
+ * 这就是「明明写了 display:flex 却还是换行」的根因。
+ *
+ * 下面这条用 :deep() 从 n-data-table（这个元素在本模板里，有 scope id）往下钻，
+ * 只做一件事：禁止按钮被 flex 压缩。否则列宽一紧，按钮文字会自己折成两行。
+ */
+.n-data-table :deep(.row-actions .n-button) {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .json-head {

@@ -8,7 +8,7 @@
 | 总览 | 全局健康度 / 跨表量级 / 趋势 | ✅ **只读**（聚合 MySQL + Redis；如实呈现现场现状） |
 | 登录鉴权 | 登录 / 登出 / 资料 / 改密 | ✅ |
 | 账户与用户 | 用户账号 / 签署与股东号 / 登录日志 | ✅ |
-| 业务数据 | 条件单管理 | ✅ **读 Redis 实时态 + 写（状态变更：停止/运行/终止）** |
+| 业务数据 | 条件单管理 | ✅ **读 MySQL + 写（状态变更：停止/运行/终止）** |
 | 业务数据 | 委托单管理 | ✅ 只读 |
 | 业务数据 | 成交回报管理 | ✅ 只读 |
 | 业务数据 | 策略日志管理 | ✅ 只读 |
@@ -293,40 +293,43 @@ app:
 > 而订阅要在后台长期占一条连接。`channels` 目前仅用于展示与排查。
 > 将来若要做「实时上下线告警」，再在这里加开关。
 
-### 条件单模块的数据来源（2026-10-21 改造）
+### 条件单模块的数据来源（2026-10-22 定稿：**只读 MySQL**）
 
 | 对象 | 用途 | 现场实况 |
 |---|---|---|
-| Redis `strategy-<账号>_<类型>_<渠道>` | **条件单实时态（主数据源）** | **56 条**（136 db1 四个键 + 137 db1 两个键） |
-| `T_Conditional` | 条件单归档 | **0 行** |
-| `T_Conditional_his` | 历史条件单归档 | **0 行** |
-| `V_Conditional` | 前两张表的并集视图 | **0 行** |
+| `T_Conditional` | 运行中的条件单 | 见下方「现场实况」 |
+| `T_Conditional_his` | 历史条件单 | 同上 |
+| `V_Conditional` | 前两张表的并集视图 | 同上 |
+| Redis `strategy-<账号>_<类型>_<渠道>` | 只服务**写路径**（取编号 + 数组下标） | 不作为列表数据源 |
 
-> ### ⚠️ 为什么主数据源从 MySQL 换成了 Redis（2026-10-21）
+> ### ⭐ 2026-10-22：读路径从「Redis + MySQL 双源」改回「纯 MySQL」
 >
-> 改造前只读 MySQL 那三张表，而它们**都是 0 行** —— 页面永远是空的。
-> 那不是"没有条件单"，是"没读对地方"：**真实条件单在 Redis 的 `strategy-*` 键里**。
+> 2026-10-21 曾把主数据源换成 Redis（当时 MySQL 三张表 0 行、页面全空），
+> 做了双源合并 + 每行标 `source`。结果**页面上出现 58 条、而库里只有 2 条**，
+> 看起来像"凭空多出一堆"。
 >
-> 当初把 Redis 合并移出去，理由是充分的：
+> 需求方与现场确认后明确：
 >
-> 1. **它让页面的读数失去意义。** 菜单写的是「条件单管理 / `T_Conditional`」，
->    用户看到 58 条会认为「这张表里有 58 条」，而事实是一条都没有 ——
->    运维据此判断「库里数据正常」，就永远不会去查为什么没落库。
-> 2. **Redis 侧说不清是哪一份。** 多个实例/db 都有 `strategy-*`，
->    还有同一个 `id` 在两个实例上各存一份。
+> > 「MySQL 和 Redis 应该是一致的（如果不一致，要不就是收盘后还未开盘）。
+> > 你两个都读的话肯定会读重复，就方便性来说肯定是读 MySQL 的表方便
+> > （Redis 数据都分散保存在各个账号对应的 `strategy-` 键中，你要读的话还是有点麻烦的）」
 >
-> **这两条今天依然成立**，所以改造不是"把合并搬回来"，而是：
+> 三条都成立，所以改回去：
 >
-> | | 改造前 | 改造后 |
+> | | 双源（2026-10-21） | 纯 MySQL（2026-10-22） |
 > |---|---|---|
-> | 读什么 | 只读 MySQL（0 行 → 空页面） | Redis 实时态（56 条）+ MySQL 归档 |
-> | 每行标来源 | 无 | `source` = `redis` / `db` |
-> | meta 标构成 | 表名 + 行数 | `redisCount` / `dbOnlyCount` / `truncated` |
-> | 同一单号多份 | — | 保留第一次出现的，**份数如实带回**（`copies`） |
+> | 读什么 | Redis 实时态 + MySQL 归档合并 | 只读 MySQL |
+> | 每行来源 | `source` = `redis` / `db` | 无此字段 |
+> | meta 构成 | `redisCount` / `dbOnlyCount` | `table`（真实表/视图名） |
+> | 同一单号多份 | `copies` 带回份数 | 不存在（表里 id 是主键） |
 >
-> 也就是说：「表里没有数据」这个信号**没有被掩盖** ——
-> `meta.dbOnlyCount` 与每行的 `source` 会明确告诉运维
-> "这 56 条全在实时态、还没落库"。
+> **为什么不再保留"MySQL 挂了就降级显示 Redis"**：那个降级会让人以为
+> "表里就这么多"，把真实故障掩盖成一个看似正常的列表。现在读失败直接报错。
+>
+> **写路径为什么还必须读 Redis**：两件事 MySQL 表里没有 ——
+> ① `strategyServerID`（决定报文发到哪个 `ST-<编号>`）；
+> ② `Strategy` 数组的**下标**（`JSON.SET` 只能按下标定位）。
+> 详见 `ConditionalTargetLookup`。
 
 > ### ✅ 原「待现场确认」已由需求方答复（2026-10-21）
 >
@@ -395,20 +398,20 @@ app:
 | 方法 | 路径 | 说明 | 权限 |
 |---|---|---|---|
 | GET | `/strategy/conditionals` | 列表（`source` 三源切换 + `type`/`mode`/`keyword` 筛选 + 分页） | 登录即可 |
-| GET | `/strategy/conditionals/{id}` | 详情（Redis 实时态优先，MySQL 归档兜底） | 登录即可 |
+| GET | `/strategy/conditionals/{id}` | 详情（只查 MySQL） | 登录即可 |
 | GET | `/strategy/conditionals/stats/daily` | 按天新增趋势（按 `AddTime` 分组，与列表同源） | 登录即可 |
 | GET | `/strategy/conditionals/stats/types` | 类型分布（全量口径） | 登录即可 |
 | GET | `/strategy/conditionals/stats/summary` | 汇总卡片（全量口径） | 登录即可 |
 | GET | `/strategy/conditionals/instructions` | **写操作现状说明**（见下） | 登录即可 |
 | **POST** | **`/strategy/conditionals/{id}/state`** | **状态变更**：`{mode: 0 停止 / 1 运行 / 2 终止}`（**不接受 3**） | **`action:conditional:write`** |
 
-`source` 的语义（**2026-10-21 从「查哪张表」改成「筛哪类状态」**）：
+`source` 的语义（**筛哪类状态**，不是"查哪张表"）：
 
-| `source` | 筛选口径 | 现场条数 |
+| `source` | 筛选口径 | meta.table |
 |---|---|---|
-| `running` | `Mode=1` 且未删除（`Flag≠2`） | 35 |
-| `history` | `Mode≠1` 或已删除（`Flag=2`） | 21 |
-| `all` | 不筛 | 56 |
+| `running` | `Mode=1` 且未删除（`Flag≠2`） | `T_Conditional` |
+| `history` | `Mode≠1` 或已删除（`Flag=2`） | `T_Conditional_his` |
+| `all` | 不筛 | `V_Conditional` |
 
 > ⚠️ **必须是不重不漏的二分**（`all = running + history`）。
 > 第一版写成「running = Mode=1」「history = Mode≠1 **或** Flag=2」，
@@ -1582,8 +1585,7 @@ backend/
     │   │   └── service/
     │   │       ├── RedisJsonGateway.java        # ★ 多实例连接 + SCAN + 按实例读同一个键（只读）
     │   │       ├── RedisStreamWriter.java        # ★ Stream 写通道（XADD/XREAD/XINFO，只给条件单下发用）
-    │   │       ├── RedisConditionalRepository.java # ★ 条件单实时态（strategy-* 键 → 前端契约）
-    │   │       ├── ConditionalTargetLookup.java  # ★ 定位条件单 + 目标策略服务器编号
+    │   │       ├── ConditionalTargetLookup.java  # ★ 定位条件单 + 目标策略服务器编号（写路径）
     │   │       ├── ConditionalDispatchService.java # ★ setByStrategy 下发 + 等回执 + 安全闸
     │   │       ├── RedisAccountRepository.java  # ★ 多实例 acc-* 只读访问
     │   │       ├── AccountService.java          # ★ MySQL+Redis 合并

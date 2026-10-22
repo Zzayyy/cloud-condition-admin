@@ -18,15 +18,24 @@ import java.util.List;
      *
      * <p>字段名与 {@code T_Conditional} 的列名一致（首字母大写）。
      *
-     * <p><b>数据来源有两个</b>（2026-10-21 起）：
+     * <p><b>数据只来自 MySQL</b> 的 {@code T_Conditional} / {@code T_Conditional_his}
+     * / {@code V_Conditional}。
+     *
+     * <h2>⚠️ 2026-10-22：读路径已从「Redis + MySQL 双源」改回「纯 MySQL」</h2>
+     * 2026-10-21 曾把主数据源换成 Redis（当时 MySQL 三张表 0 行、页面全空），
+     * 结果页面上出现 58 条、而库里只有 2 条，看起来像"凭空多出一堆"。
+     * 需求方与现场确认后明确：
+     * <blockquote>
+     * 「MySQL 和 Redis 应该是一致的（如果不一致，要不就是收盘后还未开盘）。
+     * 你两个都读的话肯定会读重复，就方便性来说肯定是读 MySQL 的表方便
+     * （Redis 数据都分散保存在各个账号对应的 {@code strategy-} 键中）。」
+     * </blockquote>
+     * 所以：
      * <ul>
-     *   <li>{@code redis} —— Redis {@code strategy-*} 键里的<b>实时态</b>。
-     *       现场真实条件单都在这里（60 条），MySQL 那三张表是 0 行。</li>
-     *   <li>{@code db} —— MySQL {@code T_Conditional} / {@code T_Conditional_his}
-     *       里的<b>归档</b>。</li>
+     *   <li><b>读</b>（列表/详情/图表）→ 只读 MySQL，两边一致时不会重复；</li>
+     *   <li><b>写</b>（状态变更）→ 仍需读 Redis 定位目标编号与数组下标，
+     *       见 {@code ConditionalTargetLookup}。Redis 只服务写路径，不服务读路径。</li>
      * </ul>
-     * 所以每行都带 {@code source}，让页面能如实显示"这条是从哪读到的" ——
-     * 两边都有同一条时以 Redis 为准（实时态），但仍标出来，不做静默合并。
      */
     public record ConditionalView(
             Long id,
@@ -54,15 +63,7 @@ import java.util.List;
             Integer Mode,
             /** 云条件单类型：0 保留，1 开仓，2 平仓，3 按合约止盈止损，4 按标的止盈止损 */
             Integer Type,
-            String Name,
-            /** 数据来源：redis（实时态）/ db（MySQL 归档） */
-            String source,
-            /** 来源实例，如 {@code 192.168.1.136/db1}（MySQL 来源为 null） */
-            String sourceInstance,
-            /** 策略服务器编号（Redis 侧才有；现场全是 -1，即"尚未分配"） */
-            Integer strategyServerID,
-            /** 同一个单号在几个实例上各存了一份 */
-            int copies) {
+            String Name) {
     }
 
     /** 按天新增趋势（前端 mockDailyCreated 的同口径） */
@@ -111,12 +112,10 @@ import java.util.List;
             String label,
             /** 筛选口径说明（这个 tab 到底筛了什么） */
             String scope,
+            /** 对应的真实表/视图名（排查时能直接确认查的是哪张表） */
+            String table,
             /** 命中行数（等于 total，保留是为了排查时更直观） */
             long tableRows,
-            /** 其中来自 Redis 实时态的条数 */
-            long redisCount,
-            /** 其中只存在于 MySQL 归档的条数 */
-            long dbOnlyCount,
             /** 是否因为超过内存上限而被截断（截断了就<b>如实标注</b>，不静默丢数据） */
             boolean truncated) {
     }
