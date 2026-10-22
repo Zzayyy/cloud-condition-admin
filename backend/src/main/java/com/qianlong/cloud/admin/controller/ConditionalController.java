@@ -121,8 +121,10 @@ public class ConditionalController {
      */
     @SaCheckLogin
     @GetMapping("/stats/summary")
-    public ApiResult<ConditionalStats> stats(ConditionalQuery query) {
-        return ApiResult.ok(conditionalService.stats(query));
+    public ApiResult<ConditionalStats> stats() {
+        // 全量口径：**故意不接收** source / keyword / type / mode ——
+        // 卡片是"整个条件单池子的现状"，跟着 tab 变会让"运行中"变成 0。
+        return ApiResult.ok(conditionalService.stats());
     }
 
     /**

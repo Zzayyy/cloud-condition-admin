@@ -199,32 +199,28 @@ public class ConditionalService {
     }
 
     /**
-     * 条件单汇总（全量口径，卡片用）。
+     * 条件单汇总（<b>纯全量口径</b>，卡片用）。
      *
-     * <p>按当前<b>筛选条件</b>统计全量，而不是统计当前页 —— 卡片上「运行中」
-     * 「已触发」这类标签没有「本页」二字，给页内数字会被读成全量，且翻页就变。
+     * <h2>⭐ 2026-10-22：从「按当前筛选条件」改成「永远全量」</h2>
+     * 原来卡片跟着 `source`（运行中/已停止/全部）+ 关键字 + 类型一起筛，
+     * 于是切到「已停止」tab 时，「运行中」那张卡片会变成 0 ——
+     * 而卡片标签写的是「运行中累计」「已触发」这种**绝对指标**，
+     * 没有「本页」「当前筛选」字样，读者只会理解成全局数字。
+     *
+     * <p>所以这里<b>不接收任何筛选参数</b>：卡片表达的是「整个条件单池子的
+     * 现状」，列表才是「按 tab 筛出来的那一批」。两者口径不同是**刻意的**，
+     * 页面上也标了「全量口径」避免误解。
+     *
+     * <p>⚠️ 因此 {@code totalCount} 不再等于列表的 {@code total}
+     * （列表按 tab 筛），而是等于「全部」tab 的条数。守门脚本按这个断言。
      */
-    public ConditionalStats stats(ConditionalQuery query) {
-        ConditionalSource source = ConditionalSource.of(query.getSource());
-        String keyword = trimToNull(query.getKeyword());
+    public ConditionalStats stats() {
         long running = 0;
         long triggered = 0;
         long paused = 0;
         long totalRun = 0;
         long total = 0;
         for (ConditionalView v : loadAll()) {
-            if (!source.matches(v.Mode(), v.Flag())) {
-                continue;
-            }
-            if (!matchesKeyword(v, keyword)) {
-                continue;
-            }
-            if (query.getType() != null && !query.getType().equals(v.Type())) {
-                continue;
-            }
-            if (query.getMode() != null && !query.getMode().equals(v.Mode())) {
-                continue;
-            }
             total++;
             if (v.Mode() != null && v.Mode() == 1) {
                 running++;

@@ -144,6 +144,10 @@ for src in ("running", "history", "all"):
                 or "strategyServerID" in r or "copies" in r]
     check(f"source={src} 每行不再带 source/sourceInstance/strategyServerID/copies",
           not leftover, f"{len(leftover)} 行仍有残留字段")
+    # 「已删除但仍在运行」的条数 —— 卡片与 running tab 的差值应当正好是它
+    if src == "all":
+        DELETED_RUNNING = len([r for r in rows
+                               if r.get("Mode") == 1 and r.get("Flag") == 2])
     print(f"  -> {src}: total={d['total']}  表={meta.get('table')}  "
           f"截断={meta.get('truncated')}")
 
@@ -231,19 +235,38 @@ res = call("GET", "/strategy/conditionals/stats/daily", None, TOKEN)
 check("按天趋势 code=0", res.get("code") == 0, str(res)[:150])
 res_types = call("GET", "/strategy/conditionals/stats/types", None, TOKEN)
 check("类型分布 code=0", res_types.get("code") == 0, str(res_types)[:150])
+# 汇总接口现在**不接收任何筛选参数**（全量口径）—— 传了也应当被忽略
 res_stats = call("GET", "/strategy/conditionals/stats/summary?source=all", None, TOKEN)
 check("汇总 code=0", res_stats.get("code") == 0, str(res_stats)[:150])
+# 再传一个「只可能有 0 条」的筛选，验证它**真的没被采纳**
+res_stats_ignored = call(
+    "GET", "/strategy/conditionals/stats/summary?source=running&keyword=__不存在__", None, TOKEN)
 if res.get("code") == 0 and res_types.get("code") == 0 and res_stats.get("code") == 0:
     daily = res.get("data") or []
     types = res_types.get("data") or []
     stats = res_stats.get("data") or {}
+    ignored = res_stats_ignored.get("data") or {}
     all_total = seen.get("all", 0)
     check("类型分布条数合计 == 全部条件单条数（口径一致，不多算）",
           sum(t.get("count", 0) for t in types) == all_total,
           f"类型合计={sum(t.get('count', 0) for t in types)} 全部={all_total}")
-    check("汇总 totalCount == 列表 total",
+    # ⚠️ 2026-10-22：卡片改成全量口径，所以比的是「全部」tab 的条数，
+    #    不再等于当前 tab 的 total（列表按 tab 筛，两者刻意见不同）。
+    check("汇总 totalCount == 「全部」tab 的条数（全量口径）",
           stats.get("totalCount") == all_total,
-          f"汇总={stats.get('totalCount')} 列表={all_total}")
+          f"汇总={stats.get('totalCount')} 全部={all_total}")
+    check("汇总不受筛选参数影响（即使是 0 条命中的筛选）",
+          ignored.get("totalCount") == stats.get("totalCount"),
+          f"带筛选={ignored.get('totalCount')} 全量={stats.get('totalCount')}")
+    # ⚠️ 两者**不相等是正常的**：
+    #    runningCount  = 全表 Mode=1（卡片是全量口径，不看 Flag）
+    #    running tab   = Mode=1 且 Flag≠2（"已删除"的不算在运行中）
+    #    差值正好是「已删除但仍在运行」那批 —— 这是个真实的数据矛盾，
+    #    这里用等式把它钉住，一旦口径写岔就会立刻红。
+    check("汇总 runningCount == running tab + 「已删除但仍在运行」条数（口径自洽）",
+          stats.get("runningCount") == seen.get("running", -1) + DELETED_RUNNING,
+          f"汇总={stats.get('runningCount')} running tab={seen.get('running')} "
+          f"已删除但运行中={DELETED_RUNNING}")
     check("趋势与列表同源（有数据的日子不为空）",
           (len(daily) == 0) == (all_total == 0),
           f"趋势 {len(daily)} 天 / 全部 {all_total} 条")

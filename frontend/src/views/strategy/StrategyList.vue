@@ -118,21 +118,15 @@ function currentParams() {
 }
 
 /**
- * 卡片汇总用的参数：与 `currentParams()` **同筛选条件、但不带分页**。
+ * 卡片汇总 —— **永远全量口径，不跟随任何筛选**。
  *
- * 汇总必须由后端按筛选条件统计全表。原先是对当前页 `rows` 做 filter，
- * 于是「运行中 3 条」翻一页就变成别的数字 —— 而标签上写的是「运行中」，
- * 会被读成全量，且没有总数可对照。
+ * ⚠️ 2026-10-22 改：原来这里会传 `source`/`keyword`/`type`，于是切到
+ * 「已停止」tab 时「运行中」那张卡片会变成 0。而卡片标签是「运行中」「已触发」
+ * 这种**绝对指标**，没有"当前筛选"字样 —— 跟着 tab 变只会让人误解。
+ *
+ * 现在：卡片 = 整个条件单池子的现状；列表 = 按 tab 筛出来的那一批。
+ * 两者口径不同是刻意的，卡片区标了「全量口径」以免混淆。
  */
-function statsParams() {
-  return {
-    keyword: keyword.value.trim() || undefined,
-    type: typeFilter.value ?? undefined,
-    mode: modeFilter.value ?? undefined,
-    source: source.value,
-  }
-}
-
 const {
   data: statsData,
   load: loadStats,
@@ -143,9 +137,9 @@ const {
 
 function reload() {
   load(currentParams())
-  // 趋势与汇总都与列表同源，一起刷新 —— 否则切数据源后会滞后一次
+  // 趋势跟着 tab 走（它画的就是当前筛选下的新增），但汇总不跟
   loadDailyTrend()
-  loadStats(statsParams())
+  loadStats()
 }
 
 /**
@@ -570,6 +564,13 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
   <div>
     <QueryErrorAlert v-if="error" :message="error" :loading="loading" @retry="reload" />
 
+    <!--
+      ⚠️ 这四张卡片是**全量口径**，不随下面的「运行中/已停止/全部」tab 变化。
+      标签写的是「运行中」「已触发」这种绝对指标，跟着 tab 变只会让人误解
+      （切到"已停止"时"运行中"变 0）。所以明确标一句，避免"卡片和列表对不上"的困惑。
+    -->
+    <div class="stats-scope-hint">全量口径（不随下方筛选/tab 变化）</div>
+
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>
         <StatCard
@@ -908,6 +909,14 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
 
 .spacer {
   flex: 1;
+}
+
+/* 统计口径提示：一行小字，说明卡片不随筛选变化 */
+.stats-scope-hint {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.8;
 }
 
 /* 写操作未启用时的说明条 */
