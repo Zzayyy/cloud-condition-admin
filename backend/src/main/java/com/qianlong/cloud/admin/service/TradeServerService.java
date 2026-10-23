@@ -3,7 +3,9 @@ package com.qianlong.cloud.admin.service;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
@@ -68,14 +70,18 @@ public class TradeServerService {
      */
     public TradeServerPage listServers(TraderServerQuery query) {
         List<RegistryEntry> entries = repository.readRegistry();
-        List<TraderServerView> all = new ArrayList<>();
-        int onlineCount = 0;
+        List<TraderServerView> raw = new ArrayList<>();
         for (RegistryEntry entry : entries) {
-            TraderServerView view = toView(entry);
+            raw.add(toView(entry));
+        }
+        // ⚠️ 必须先按 mac 归并再统计，否则"台数"直接是错的：
+        //    现场 14 条里只有 4 台机器，同一台在 3~5 个 (实例,db) 各注册一份。
+        List<TraderServerView> all = dedupeByMac(raw);
+        int onlineCount = 0;
+        for (TraderServerView view : all) {
             if (Boolean.TRUE.equals(view.online())) {
                 onlineCount++;
             }
-            all.add(view);
         }
         // 注册表份数 = 有该键的实例数。entry 摊平后已经丢了「哪几条来自同一份」，
         // 用来源实例去重数一下即可（同一实例只会读一次该键）。
@@ -96,6 +102,7 @@ public class TradeServerService {
 
         TradeServerListMeta meta = new TradeServerListMeta(
                 (int) copies,
+                raw.size(),
                 all.size(),
                 onlineCount,
                 tradeProperties.getOfflineAfterSec(),
@@ -162,13 +169,22 @@ public class TradeServerService {
     /**
      * 某台委托服务器承载的账号（节点详情抽屉的下钻）。
      *
-     * <p>⚠️ 按 {@code id} 匹配 —— 而现场 {@code id} 会重复
-     * （136 db1 的 7 条里有 4 个 {@code id=0}）。所以这个下钻**天然无法区分
-     * 那几个同 id 的节点**，结果是「它们显示承载同一批账号」。
-     * 这是数据本身的问题，不是查询写错了：接口照实返回，
-     * 页面也已写明「按 id 匹配，因 id 会重复仅供参考」。
-     * 不去猜一个更细的匹配规则（比如再拿 ip 过滤）—— 那会把
-     * 「本该看到的重复」藏起来。
+     * <p>⚠️ 按 {@code id} 匹配 —— 而现场 {@code id} 会重复且不稳定
+     * （同一个 {@code mac} 在三个实例里分别是 0/1/2/3）。所以这个下钻
+     * <b>天然无法精确区分节点</b>，结果是「同 id 的几台显示承载同一批账号」。
+     *
+     * <h2>为什么不用 {@code mac}（更准的标识）</h2>
+     * 试过，但<b>做不到</b>：{@code acc-*.traderserver} 里只有
+     * {@code id / ip / lastActiveTime / lastActiveTimeLong / enable}，
+     * <b>没有 {@code mac} 字段</b>（见 {@code TraderServerDto}）。
+     * 注册表侧有 mac，账号分配侧没有 —— 两个数据源之间没有共同的稳定键。
+     *
+     * <p>退而用 {@code ip} 也不可靠：现场 4 台机器只落在 2 个 IP 上
+     * （同一台物理机跑了 Test 与 cloudcond-api 两个程序），按 ip 匹配会把
+     * 不同程序混成一台。
+     *
+     * <p>所以保持按 {@code id}，并把局限写在页面提示里 —— 这比编一个
+     * 「看起来更准、实际更会藏问题」的规则要好。
      */
     public List<RedisAccountView> listAccountsByServer(Integer serverId) {
         if (serverId == null) {
@@ -313,7 +329,68 @@ public class TradeServerService {
                 isOnline(enable, ts),
                 ts == null ? null : age,
                 entry.instanceDisplay(),
-                entry.index());
+                entry.index(),
+                1,
+                List.of());
+    }
+
+    /**
+     * 按 {@code mac} 归并同一台机器在多个注册表里的副本。
+     *
+     * <h2>为什么必须归并</h2>
+     * 现场 {@code traderserver} 在 136 db0 / 136 db1 / 137 db1 各存一份，
+     * 摊平后 **14 条只对应 4 台机器**（同一台出现 3~5 次）。
+     * 不归并的话页面会说"14 台"，而实际只有 4 台 —— 那是**错误的读数**，
+     * 不是"细节有点多"。
+     *
+     * <h2>为什么用 mac 而不是 id</h2>
+     * {@code id} 现场会重复且不稳定：同一个 mac 在三个实例里分别是 0/1/2/3。
+     * {@code mac} 形如 {@code 2cea7fd9d5c0Test}（12 位 mac + 程序名），是稳定标识。
+     *
+     * <h2>保留哪一份</h2>
+     * 保留 {@code lastActiveTimeLong} 最新的那份 —— 它代表"这台机器最近一次在哪个库里活动"。
+     * 其余副本不丢弃，压成 {@code copies} 计数 + {@code otherInstances} 列表，
+     * 让「多副本」这件事仍然可查（而不是被悄悄抹平）。
+     *
+     * <p>没有 {@code mac} 的记录**不参与归并**，原样保留：无从判断是否同一台，
+     * 硬合并会把不同机器并成一台。
+     */
+    private List<TraderServerView> dedupeByMac(List<TraderServerView> raw) {
+        Map<String, List<TraderServerView>> byMac = new LinkedHashMap<>();
+        List<TraderServerView> noMac = new ArrayList<>();
+        for (TraderServerView v : raw) {
+            String mac = trimToNull(v.mac());
+            if (mac == null) {
+                noMac.add(v);
+                continue;
+            }
+            byMac.computeIfAbsent(mac, k -> new ArrayList<>()).add(v);
+        }
+
+        List<TraderServerView> out = new ArrayList<>(noMac);
+        for (List<TraderServerView> group : byMac.values()) {
+            if (group.size() == 1) {
+                out.add(group.get(0));
+                continue;
+            }
+            TraderServerView latest = group.stream()
+                    .max(Comparator.comparingLong(v -> v.lastActiveTimeLong() == null
+                            ? Long.MIN_VALUE : v.lastActiveTimeLong()))
+                    .orElse(group.get(0));
+            List<String> others = group.stream()
+                    .filter(v -> v != latest)
+                    .map(TraderServerView::instance)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            out.add(new TraderServerView(
+                    latest.id(), latest.ip(), latest.mac(), latest.enable(),
+                    latest.lastActiveTime(), latest.lastActiveTimeLong(),
+                    latest.online(), latest.ageSec(),
+                    latest.instance(), latest.arrayIndex(),
+                    group.size(), others));
+        }
+        return out;
     }
 
     /**

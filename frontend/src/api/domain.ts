@@ -22,10 +22,21 @@ export interface TraderServer {
    * 来源实例（如 `192.168.1.136/db1`）。
    *
    * 现场同一个 `traderserver` 键在多个实例上**各存一份且内容不同**
-   * （136 db0 两条测试残留、136 db1 七条、137 db1 四条已过期 63 天），
+   * （136 db0 三条、136 db1 七条、137 db1 四条），
    * 所以必须能看出这一行是从哪个库读到的。
+   *
+   * ⚠️ 列表已按 `mac` 归并：这里给的是**活跃时间最新**的那份所在的库。
    */
   instance?: string
+  /**
+   * 同一个 `mac` 在几个实例的注册表里出现过。
+   *
+   * `1` = 只有一份；`>1` = 另有 `copies-1` 份旧注册。
+   * （不归并的话同一台机器会被列 3~5 遍，「台数」直接是错的：现场 14 条只有 4 台。）
+   */
+  copies?: number
+  /** 其余副本的来源实例（不含被保留的那个） */
+  otherInstances?: string[]
   /**
    * 在该实例数组里的下标。
    *
@@ -251,9 +262,16 @@ export interface DatahubTrace {
 export interface TraderServerListMeta {
   /** 读到注册表的份数（每存在该键的实例算一份） */
   registryCopies: number
-  /** 摊平后的条目总数（未去重） */
+  /** 摊平后的条目总数（**未去重**，即注册表原始记录数） */
   entryTotal: number
-  /** 其中在线数（后端按 offlineAfterSec 判定） */
+  /**
+   * 按 `mac` 归并后的**台数**。
+   *
+   * ⚠️ 离线数、卡片里的"总台数"都要用这个，不能用 `entryTotal` ——
+   * 后者会把同一台机器在多个库里的历史残留各算一次。
+   */
+  uniqueTotal: number
+  /** 其中在线数（后端按 offlineAfterSec 判定；按归并后的台数统计） */
   onlineCount: number
   /** 心跳阈值（秒）——用于自检与前端常量是否一致 */
   offlineAfterSec: number

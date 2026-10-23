@@ -54,8 +54,22 @@ public final class TradeServerDtos {
             /* ---- 以下为非前端契约的排查字段 ---- */
             Boolean online,
             Long ageSec,
+            /** 这一行保留的是哪个实例上的副本（= 活跃时间最新的那份） */
             String instance,
-            Integer arrayIndex) {
+            Integer arrayIndex,
+            /**
+             * 同一个 {@code mac} 在几个实例的注册表里都出现过。
+             *
+             * <p>列表已按 {@code mac} 归并（否则同一台机器会被列 3~5 遍，
+             * 页面"台数"直接是错的），这个字段让「多副本」这件事仍然可见：
+             * 为 1 表示只有一份，&gt;1 表示另有 {@code copies-1} 份旧注册。
+             */
+            Integer copies,
+            /**
+             * 其余副本的来源实例（不含被保留的那个）。
+             * 点开详情能看清「这台机器在哪些库里有历史残留」。
+             */
+            List<String> otherInstances) {
     }
 
     /**
@@ -68,9 +82,16 @@ public final class TradeServerDtos {
     public record TradeServerListMeta(
             /** 读到注册表的份数（每存在该键的实例算一份） */
             int registryCopies,
-            /** 摊平后的条目总数（**未去重**） */
+            /** 摊平后的条目总数（**未去重**，即注册表里的原始记录数） */
             int entryTotal,
-            /** 其中在线数（按 offlineAfterSec 判定，与页面同一口径） */
+            /**
+             * 按 {@code mac} 归并后的**台数**。
+             *
+             * <p>列表与卡片都用这个数，不用 {@code entryTotal} ——
+             * 后者会把同一台机器在多个库里的历史残留各算一次，页面"台数"就是错的。
+             */
+            int uniqueTotal,
+            /** 其中在线数（按 offlineAfterSec 判定，与页面同一口径；按归并后的台数统计） */
             int onlineCount,
             /** 心跳阈值（秒）——回传出去让页面自检与前端常量是否一致 */
             int offlineAfterSec,

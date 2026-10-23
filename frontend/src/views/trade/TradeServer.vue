@@ -286,7 +286,10 @@ const summary = computed(() => {
   if (m) {
     return {
       online: m.onlineCount,
-      offline: Math.max(0, m.entryTotal - m.onlineCount),
+      // ⚠️ 用 uniqueTotal（按 mac 归并后的台数），不能用 entryTotal：
+      //    后者是注册表原始记录数，同一台机器在多个库里各算一次，
+      //    算出来的「离线」会把历史残留全当成离线机器。
+      offline: Math.max(0, m.uniqueTotal - m.onlineCount),
       total: serverTotal.value,
     }
   }
@@ -441,23 +444,42 @@ const serverColumns: DataTableColumns<TraderServer> = [
   {
     title: '来源实例',
     key: 'instance',
-    width: 130,
-    render: (row) =>
-      h(
+    width: 150,
+    render: (row) => {
+      /*
+       * 列表已**按 mac 归并**：同一台机器在多个库里各注册一份时只留活跃最新的那条，
+       * 其余份数压成 `+N` 标在这里。不归并的话同一台机器会被列 3~5 遍，
+       * 「台数」直接是错的（现场 14 条只有 4 台）。
+       * 但副本信息不能丢 —— 悬停能看到「另有几处旧注册、分别是哪个库」。
+       */
+      const extra = (row.copies ?? 1) - 1
+      return h(
         NTooltip,
         { trigger: 'hover' },
         {
-          trigger: () => h('span', { class: 'mono', style: { fontSize: '12px' } }, row.instance ?? '-'),
-          /*
-           * 现场同一个 traderserver 键在多个实例上各存一份且内容不同，
-           * 看不出「这条来自哪」就没法解释「同一台机器出现两次、时间还不一样」。
-           * 下标也是必需的：id 会重复，只有 (实例, 下标) 才能唯一定位一行。
-           */
-          default: () =>
-            `来源：${row.instance ?? '-'}\n数组下标：${row.arrayIndex ?? '-'}\n` +
-            '（同一键在多个实例上各存一份且内容不同；id 会重复，故用来源+下标区分）',
+          trigger: () =>
+            h(
+              'span',
+              { class: 'mono', style: { fontSize: '12px' } },
+              (row.instance ?? '-') + (extra > 0 ? ` +${extra}` : ''),
+            ),
+          default: () => {
+            const lines = [
+              `保留的是活跃时间最新的那份：${row.instance ?? '-'}（数组下标 ${row.arrayIndex ?? '-'}）`,
+            ]
+            if (extra > 0) {
+              // 「份数」和「实例数」是两回事：同一实例里可能存了同 mac 的多条记录
+              const where = (row.otherInstances ?? []).join('、') || '（实例未知）'
+              lines.push(`另有 ${extra} 份旧注册，来自：${where}`)
+              lines.push('列表按 mac 归并，故同一台机器只占一行')
+            } else {
+              lines.push('注册表里只有这一份')
+            }
+            return lines.join('\n')
+          },
         },
-      ),
+      )
+    },
   },
   {
     title: '操作',
