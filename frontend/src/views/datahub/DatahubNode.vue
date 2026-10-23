@@ -151,16 +151,14 @@ const orphanChannels = computed(() => channels.value.filter((c) => c.subscribers
 /* ------------------------------ 汇总 ------------------------------ */
 
 /**
- * 需要注意的信号 —— 全部从**当前已加载的流数据**推导，不用 mock 常量。
+ * 有积压的流（lag 或 pending > 0）—— 供「节点详情」抽屉按实例下钻。
  *
- * 之前这里直接读 `mockGroupLessStreams()` / `mockBacklogStreams()`，
- * 导致生产构建（VITE_USE_MOCK=false、接口 500）时表格是空的、
- * 但风险区仍然列着演示数据 —— 假数据漏出来了。
- * 现在改为需求式推导：没有真实数据就是空列表，绝不显示编造的内容。
+ * ⚠️ 页面上那块「需要注意的信号」卡片已删除（2026-10-23）：
+ *    它展示的两类信号（无消费组的流 / 有积压的流）在「消息总线」页
+ *    有更完整的版本（卡片 + 图表告警线 + 只进不出条目数），这里是重复展示。
+ *    而且现场 32 个流全部有 user_group、lag 全 0，那块一直是空白 ——
+ *    空白分不清「一切正常」与「没读到」，反而制造困惑。
  */
-const groupLess = computed(() =>
-  groupLessStreams.value.length ? groupLessStreams.value : [],
-)
 
 const backlog = computed(() =>
   backlogStreams.value.length ? backlogStreams.value : [],
@@ -176,9 +174,6 @@ const {
 )
 
 const allStreams = computed<RedisStreamInfo[]>(() => allStreamData.value ?? [])
-
-/** 无消费组的流 */
-const groupLessStreams = computed(() => allStreams.value.filter((s) => s.groups.length === 0))
 
 /** 有积压的流（lag 或 pending > 0） */
 const backlogStreams = computed(() =>
@@ -747,60 +742,6 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
       </div>
     </n-card>
 
-    <!-- 风险提示 -->
-    <n-card class="page-card risk-card" size="small" :bordered="false">
-      <template #header>
-        <span class="section-title">
-          <n-icon :component="WarningOutline" color="#d6455e" :size="17" />
-          需要注意的信号
-        </span>
-      </template>
-
-      <div v-if="groupLess.length" class="warn-block">
-        <div class="warn-title">
-          <n-icon :component="AlertCircleOutline" color="#d6455e" />
-          没有消费组的流（{{ groupLess.length }} 条）—— 有人在写，但没有任何消费组，消息不会被处理
-        </div>
-        <n-data-table
-          :columns="[
-            { title: '流', key: 'key', render: (row: any) => h('span', { class: 'mono' }, row.key) },
-            { title: '实例', key: 'instance', width: 150, render: (row: any) => h('span', { class: 'mono' }, row.instance) },
-            { title: 'db', key: 'db', width: 60, align: 'right' },
-            { title: '条目数', key: 'length', width: 130, align: 'right', render: (row: any) => h('span', { class: 'num' }, thousands(row.length)) },
-          ]"
-          :data="groupLess"
-          :bordered="false"
-          size="small"
-          :pagination="false"
-          :max-height="220"
-        />
-      </div>
-
-      <div v-if="backlog.length" class="warn-block">
-        <div class="warn-title">
-          <n-icon :component="WarningOutline" color="#dd7a15" />
-          有积压的流（{{ backlog.length }} 条）—— 消费组 lag 或 pending 大于 0
-        </div>
-        <n-data-table
-          :columns="backlogColumns"
-          :data="backlog"
-          :bordered="false"
-          size="small"
-          :pagination="false"
-          :max-height="220"
-        />
-      </div>
-
-      <div class="detail-note">
-        <n-icon :component="InformationCircleOutline" :color="accent" />
-        <div>
-          数据来自 Redis 的 <code>PUBSUB CHANNELS</code> / <code>NUMSUB</code> /
-          <code>XLEN</code> / <code>XINFO GROUPS</code> / <code>unique_id</code>，
-          全部为只读命令。数值为探查时的快照。
-        </div>
-      </div>
-    </n-card>
-
     <!-- 节点详情 -->
     <AppDialog v-model:show="showDetail" :title="`中台实例详情 · ${active?.ip ?? ''}`" :width="620" mask-closable>
       <template v-if="active">
@@ -982,24 +923,6 @@ const backlogColumns: DataTableColumns<{ key: string; db: number; lag: number; p
 
 .ch-inst {
   font-size: 11px;
-}
-
-/* 风险卡 */
-.risk-card {
-  border-left: 3px solid var(--danger) !important;
-}
-
-.warn-block + .warn-block {
-  margin-top: 18px;
-}
-
-.warn-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-  font-size: 13px;
-  font-weight: 600;
 }
 
 .detail-block {
