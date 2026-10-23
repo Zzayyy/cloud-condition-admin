@@ -40,6 +40,7 @@ import { withDelay } from '@/api/mock/_shared'
 import type { StrategyServer } from '@/api/domain'
 import { useResource } from '@/composables/useResource'
 import { relativeTime, thousands } from '@/utils/format'
+import { ACTIVITY_BUCKETS, buildActivityOption } from '@/utils/activity'
 
 /**
  * 策略服务器页：节点清单 + 在线状态 + 承载条件单用户数。
@@ -68,10 +69,44 @@ const page = ref(1)
 const pageSize = ref(10)
 const sortState = ref<DataTableSortState | null>(null)
 
-const { data, loading, error, load } = useResource(
+const { data, loading, error, load, usingMock } = useResource(
   (params: Record<string, unknown>) => strategyApi.listServers(params),
   { mock: (params: Record<string, unknown>) => withDelay(mockStrategyApi.listServers(params)) },
 )
+
+/** 一次拉全量时的页大小（节点数远小于它；取回后截断会如实标注） */
+const ALL_PAGE_SIZE = 200
+
+/** 全量节点 —— 活跃度分布图要用它，不能用当前页（见下方注释） */
+const allRows = ref<StrategyServer[]>([])
+const allRowsLoaded = ref(false)
+
+/**
+ * 拉全量节点列表。
+ *
+ * ⚠️ 「活跃度分布」必须基于**全量**，不能拿 `rows`（当前页）——
+ * 那画出来是「第 1 页的分布」，节点一多就失真，而且不报错、看不出来。
+ * 委托服务器页的「各节点承载账号数」也是同一个道理（用 allAssignments）。
+ *
+ * ⚠️ 判定走演示分支用 `usingMock`，不用 `isMock`：后者初值 false，
+ * 首个请求 await 之前会误判成真实态（见 useResource 的说明）。
+ */
+async function loadAllRows() {
+  if (usingMock.value) {
+    allRows.value = mockStrategyApi.listServers({ page: 1, pageSize: ALL_PAGE_SIZE }).list
+    allRowsLoaded.value = true
+    return
+  }
+  try {
+    const res = await strategyApi.listServers({ page: 1, pageSize: ALL_PAGE_SIZE })
+    allRows.value = res.list
+    allRowsLoaded.value = true
+  } catch {
+    // 图表取数失败不该把整页打红（表格自己有错误提示）
+    allRows.value = []
+    allRowsLoaded.value = false
+  }
+}
 
 function currentParams() {
   return {
@@ -86,6 +121,8 @@ function currentParams() {
 
 function reload() {
   load(currentParams())
+  // 活跃度图用的是全量，一并刷新 —— 否则它只在首屏对一次，之后一直是旧数据
+  void loadAllRows()
 }
 
 onMounted(reload)
@@ -187,30 +224,53 @@ const statusNote = computed(() => {
 })
 
 const usageOption = computed(() => ({
-  grid: { left: 8, right: 24, top: 8, bottom: 8, containLabel: true },
+  // bottom 留 30：给 x 轴名字腾位置（containLabel 只管刻度标签，不管 axis name）
+  grid: { left: 8, right: 30, top: 8, bottom: 30, containLabel: true },
   tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-  xAxis: { type: 'value', name: '条件单用户数' },
+  xAxis: {
+    type: 'value',
+    name: '条件单用户数',
+    // ⚠️ 默认 nameLocation='end' 会把名字放在轴的最右端，横向柱状图那里
+    //    正好是柱子末尾 + 数值，会被挤掉/裁掉。放中间（middle）才稳定可见。
+    nameLocation: 'middle',
+    nameGap: 24,
+    nameTextStyle: { fontSize: 11 },
+  },
   yAxis: {
     type: 'category',
-    data: [...rows.value].reverse().map((s) => `${s.ip}\n:${s.id}`),
+    // ⚠️ 用 allRows（全量）而不是 rows（当前页）：用当前页会画成
+    //    「第 1 页的负载」，节点一多就失真，且不报错、看不出来。
+    data: [...allRows.value].reverse().map((s) => `${s.ip}\n:${s.id}`),
     axisLabel: { fontSize: 11 },
   },
   series: [
     {
       type: 'bar',
       name: 'usecount',
-      data: [...rows.value].reverse().map((s) => s.usecount ?? 0),
+      data: [...allRows.value].reverse().map((s) => s.usecount ?? 0),
       barMaxWidth: 18,
       itemStyle: {
         borderRadius: [0, 4, 4, 0],
         color: (params: { dataIndex: number }) => {
-          const src = [...rows.value].reverse()[params.dataIndex]
+          const src = [...allRows.value].reverse()[params.dataIndex]
           return src && isServerOnline(src) ? accent : '#b9bfcc'
         },
       },
     },
   ],
 }))
+
+/* ------------------------- 节点活跃度分布 ------------------------- */
+
+/*
+ * 分桶与配色在 @/utils/activity —— 委托服务器页用的是**同一份**。
+ * 两页各写一份迟早会漂移，而这类不一致在页面上几乎看不出来
+ * （只是某一段的柱子高低不同），排查时会被当成数据问题。
+ *
+ * ⚠️ 传 allRows（全量）而不是 rows（当前页）：用当前页会画成
+ *    「第 1 页的分布」，节点一多就失真，而且不报错、看不出来。
+ */
+const activityOption = computed(() => buildActivityOption(allRows.value))
 
 /* ------------------------------ 表格 ------------------------------ */
 
@@ -485,19 +545,61 @@ const heartbeatAge = computed(() => {
       </n-gi>
     </n-grid>
 
-    <!-- 负载分布 -->
-    <n-card class="page-card" size="small" :bordered="false" style="margin-top: 16px">
-      <template #header>
-        <span class="section-title">
-          <n-icon :component="LayersOutline" :color="accent" :size="17" />
-          节点负载分布
-        </span>
-      </template>
-      <template #header-extra>
-        <span class="text-muted" style="font-size: 12px">按 usecount 排序，灰条表示离线/停用节点</span>
-      </template>
-      <BaseChart :option="usageOption" :height="Math.max(180, rows.length * 42)" empty-text="暂无节点" />
-    </n-card>
+    <!-- 两张分布图并排：一个看「承载多少用户」，一个看「还活着没」 -->
+    <n-grid
+      cols="1 m:2"
+      :x-gap="16"
+      :y-gap="16"
+      responsive="screen"
+      item-responsive
+      style="margin-top: 16px"
+    >
+      <n-gi>
+        <n-card class="page-card" size="small" :bordered="false" style="height: 100%">
+          <template #header>
+            <span class="section-title">
+              <n-icon :component="LayersOutline" :color="accent" :size="17" />
+              节点负载分布
+            </span>
+          </template>
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">按 usecount 排序，灰条表示离线/停用节点</span>
+          </template>
+          <BaseChart
+            :option="usageOption"
+            :height="Math.max(180, allRows.length * 42)"
+            :empty-text="allRowsLoaded ? '暂无节点（strategy-srv 键为空）' : '加载中…'"
+          />
+        </n-card>
+      </n-gi>
+
+      <n-gi>
+        <n-card class="page-card" size="small" :bordered="false" style="height: 100%">
+          <template #header>
+            <span class="section-title">
+              <n-icon :component="PulseOutline" :color="accent" :size="17" />
+              节点活跃度分布
+            </span>
+          </template>
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">
+              按最后活跃距今分桶（全量节点，已按 mac 归并）
+            </span>
+          </template>
+          <!--
+            这张图回答的是「0 台在线」背后的程度差异：
+            全是 5 分钟前掉的 → 刚集体掉线，要立刻查；
+            全是 2 个月前     → 历史残留，清理即可。
+            策略服务器未开放时心跳本来就不通，分桶能直接看出「全是陈旧的」。
+          -->
+          <BaseChart
+            :option="activityOption"
+            :height="Math.max(180, ACTIVITY_BUCKETS.length * 42)"
+            :empty-text="allRowsLoaded ? '暂无节点（strategy-srv 键为空）' : '加载中…'"
+          />
+        </n-card>
+      </n-gi>
+    </n-grid>
 
     <!-- 节点列表 -->
     <n-card class="page-card" size="small" :bordered="false">
