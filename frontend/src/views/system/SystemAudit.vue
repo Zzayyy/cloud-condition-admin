@@ -1109,27 +1109,38 @@ function openLoginDetail(row: AdminLoginLog) {
           </span>
         </template>
         <template #header-extra>
-          <span class="text-muted" style="font-size: 12px; margin-right: 10px">
-            导出即离场，需留痕
-          </span>
-          <n-tooltip trigger="hover" :disabled="canExport">
-            <template #trigger>
-              <n-button
-                size="small"
-                type="primary"
-                ghost
-                :disabled="!canExport"
-                :loading="exporting"
-                @click="exportAudit"
-              >
-                <template #icon>
-                  <n-icon :component="DownloadOutline" />
-                </template>
-                导出 CSV
-              </n-button>
-            </template>
-            <span>没有导出权限：需要 action:system-audit:export</span>
-          </n-tooltip>
+          <!--
+            「刷新 / 导出」是**卡片级操作**，不参与筛选 —— 放在头部。
+            之前刷新在下面的 toolbar 末尾，而 toolbar 里 8 个控件合计约 1600px，
+            放不下就换行，于是它被单独挤到第二行，看着像另起一段。
+          -->
+          <div class="header-actions">
+            <span class="text-muted" style="font-size: 12px">导出即离场，需留痕</span>
+            <n-button size="small" :loading="auditLoading" @click="reloadAudit">
+              <template #icon>
+                <n-icon :component="RefreshOutline" />
+              </template>
+              刷新
+            </n-button>
+            <n-tooltip trigger="hover" :disabled="canExport">
+              <template #trigger>
+                <n-button
+                  size="small"
+                  type="primary"
+                  ghost
+                  :disabled="!canExport"
+                  :loading="exporting"
+                  @click="exportAudit"
+                >
+                  <template #icon>
+                    <n-icon :component="DownloadOutline" />
+                  </template>
+                  导出 CSV
+                </n-button>
+              </template>
+              <span>没有导出权限：需要 action:system-audit:export</span>
+            </n-tooltip>
+          </div>
         </template>
 
         <div class="toolbar">
@@ -1207,18 +1218,12 @@ function openLoginDetail(row: AdminLoginLog) {
             @update:value="onAuditRangeChange"
           />
 
+          <!-- 重置属于筛选（清空条件），留在 toolbar；刷新已移到卡片头部 -->
           <n-button size="small" @click="resetAuditFilters">
             <template #icon>
               <n-icon :component="CloseOutline" />
             </template>
             重置
-          </n-button>
-
-          <n-button size="small" :loading="auditLoading" @click="reloadAudit">
-            <template #icon>
-              <n-icon :component="RefreshOutline" />
-            </template>
-            刷新
           </n-button>
 
           <span v-if="auditIsMock" class="text-muted" style="font-size: 12px">
@@ -1358,6 +1363,17 @@ function openLoginDetail(row: AdminLoginLog) {
             管理端登录日志
           </span>
         </template>
+        <!-- 与「操作审计明细」保持一致：刷新是卡片级操作，放头部而不掺进筛选器 -->
+        <template #header-extra>
+          <div class="header-actions">
+            <n-button size="small" :loading="loginLoading" @click="reloadLogin">
+              <template #icon>
+                <n-icon :component="RefreshOutline" />
+              </template>
+              刷新
+            </n-button>
+          </div>
+        </template>
 
         <div class="toolbar">
           <SearchInput
@@ -1403,18 +1419,12 @@ function openLoginDetail(row: AdminLoginLog) {
             @update:value="onLoginRangeChange"
           />
 
+          <!-- 重置属于筛选；刷新已移到卡片头部 -->
           <n-button size="small" @click="resetLoginFilters">
             <template #icon>
               <n-icon :component="CloseOutline" />
             </template>
             重置
-          </n-button>
-
-          <n-button size="small" :loading="loginLoading" @click="reloadLogin">
-            <template #icon>
-              <n-icon :component="RefreshOutline" />
-            </template>
-            刷新
           </n-button>
         </div>
 
@@ -1588,6 +1598,18 @@ function openLoginDetail(row: AdminLoginLog) {
 </template>
 
 <style scoped>
+/*
+ * 卡片头部的操作区（刷新 / 导出 CSV）。
+ * 放在头部而不是 toolbar 里：toolbar 是「筛选条件」，
+ * 而筛选器一多就会换行，把刷新挤到单独一行、看着像另起一段。
+ */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 筛选器：允许换行，但行与行之间也留 10px，换行时不挤在一起 */
 .toolbar {
   display: flex;
   flex-wrap: wrap;

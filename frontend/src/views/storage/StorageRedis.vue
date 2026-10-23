@@ -12,11 +12,9 @@ import {
   NGrid,
   NIcon,
   NInput,
-  NPopconfirm,
   NSelect,
   NTag,
   NTooltip,
-  useMessage,
   type DataTableColumns,
 } from 'naive-ui'
 import {
@@ -31,7 +29,6 @@ import {
   RefreshOutline,
   ServerOutline,
   TimeOutline,
-  TrashOutline,
   WarningOutline,
 } from '@vicons/ionicons5'
 
@@ -58,7 +55,6 @@ import { formatJson, thousands } from '@/utils/format'
  * 一律用 SCAN 且强制条数上限。
  */
 
-const message = useMessage()
 const accent = '#2f9e5f'
 
 /* ------------------------------ 实例与 DB ------------------------------ */
@@ -426,35 +422,30 @@ const columns: DataTableColumns<RedisKeyInfo> = [
     },
   },
   {
+    /*
+     * 操作列**只保留「查看」**。
+     *
+     * 原本还有「删除键」，已按需求移除：删除是 DEL、不可撤销，
+     * 而这一页是**只读浏览**（键值、类型、TTL）。真要删键，
+     * 应该走带审计的运维通道，不该混在浏览列表的每行按钮里 ——
+     * 手指一滑就可能点到隔壁行。
+     *
+     * 宽度从 96 收到 80：单个按钮不再需要为第二个留位。
+     * 同时补上文字「查看」，原来只有图标、没有 tooltip，看不出是干什么的。
+     */
     title: '操作',
     key: 'actions',
-    width: 96,
+    width: 80,
     fixed: 'right',
     render: (row) =>
-      h('div', { class: 'row-actions' }, [
-        h(
-          NButton,
-          { size: 'tiny', quaternary: true, onClick: () => openDetail(row) },
-          { icon: () => h(NIcon, null, { default: () => h(EyeOutline) }) },
-        ),
-        h(
-          NPopconfirm,
-          {
-            onPositiveClick: () => deleteKey(row),
-            positiveText: '删除',
-            negativeText: '取消',
-          },
-          {
-            trigger: () =>
-              h(
-                NButton,
-                { size: 'tiny', quaternary: true, type: 'error' },
-                { icon: () => h(NIcon, null, { default: () => h(TrashOutline) }) },
-              ),
-            default: () => `确认删除键 ${row.key}？此操作不可撤销。`,
-          },
-        ),
-      ]),
+      h(
+        NButton,
+        { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openDetail(row) },
+        {
+          icon: () => h(NIcon, null, { default: () => h(EyeOutline) }),
+          default: () => '查看',
+        },
+      ),
   },
 ]
 
@@ -486,11 +477,6 @@ async function openDetail(row: RedisKeyInfo) {
 }
 
 const prettyJson = computed(() => (detail.value?.json ? formatJson(detail.value.json) : ''))
-
-function deleteKey(row: RedisKeyInfo) {
-  // 后端未接通：如实提示，不做本地假删除
-  message.warning(`后端接口尚未实现：删除键 ${row.key} 将调用 DEL（高危操作，需后端审计）`)
-}
 </script>
 
 <template>
@@ -852,27 +838,14 @@ function deleteKey(row: RedisKeyInfo) {
           <div>
             数据来自 Redis<template v-if="detail?.type === 'stream'">（
               <code>XLEN</code> / <code>XRANGE</code>，只取最近若干条，不读全量）</template>。
-            删除键将执行 <code>DEL</code>，<b>不可撤销</b>，需后端加审计。
+            本页**只读浏览**，不提供删除 —— <code>DEL</code> 不可撤销，
+            应走带审计的运维通道。
           </div>
         </div>
       </template>
 
+      <!-- 只读：没有删除按钮，只留「关闭」 -->
       <template #footer>
-        <n-popconfirm
-          :on-positive-click="() => active && deleteKey(active)"
-          positive-text="删除"
-          negative-text="取消"
-        >
-          <template #trigger>
-            <n-button size="small" type="error" ghost>
-              <template #icon>
-                <n-icon :component="TrashOutline" />
-              </template>
-              删除此键
-            </n-button>
-          </template>
-          确认删除键 {{ active?.key }}？此操作不可撤销。
-        </n-popconfirm>
         <div class="spacer" />
         <n-button size="small" @click="showDetail = false">关闭</n-button>
       </template>
@@ -908,11 +881,6 @@ function deleteKey(row: RedisKeyInfo) {
 
 .num {
   font-variant-numeric: tabular-nums;
-}
-
-.row-actions {
-  display: flex;
-  gap: 2px;
 }
 
 .detail-block {
