@@ -273,19 +273,42 @@ const columns: DataTableColumns<StrategyServer> = [
   {
     title: '来源实例',
     key: 'instance',
-    width: 140,
-    render: (row) =>
-      h(
+    width: 160,
+    render: (row) => {
+      /*
+       * 列表已**按 mac 归并**：同一台机器在多个库里各注册一份时只留活跃最新的那条，
+       * 其余份数压成 `+N`。不归并的话同一台机器会被列多遍、「节点总数」也是错的
+       * （现场 2 条只对应 1 台）。
+       * 副本信息不丢 —— 悬停能看到「另有几份、分别是哪个库」。
+       */
+      const extra = (row.copies ?? 1) - 1
+      return h(
         NTooltip,
         { trigger: 'hover' },
         {
-          trigger: () => h('span', { class: 'mono', style: { fontSize: '12px' } }, row.instance ?? '-'),
-          // 现场 id 全是 0，只有 (来源实例, 下标) 能唯一定位一行
-          default: () =>
-            `来源：${row.instance ?? '-'}\n数组下标：${row.arrayIndex ?? '-'}\n` +
-            '（同一键在多个库上各存一份；id 会重复，故用来源+下标区分）',
+          trigger: () =>
+            h(
+              'span',
+              { class: 'mono', style: { fontSize: '12px' } },
+              (row.instance ?? '-') + (extra > 0 ? ` +${extra}` : ''),
+            ),
+          default: () => {
+            const lines = [
+              `保留的是活跃时间最新的那份：${row.instance ?? '-'}（数组下标 ${row.arrayIndex ?? '-'}）`,
+            ]
+            if (extra > 0) {
+              // 「份数」和「实例数」是两回事：同一实例里可能存了同 mac 的多条记录
+              const where = (row.otherInstances ?? []).join('、') || '（实例未知）'
+              lines.push(`另有 ${extra} 份旧注册，来自：${where}`)
+              lines.push('列表按 mac 归并，故同一台机器只占一行')
+            } else {
+              lines.push('注册表里只有这一份')
+            }
+            return lines.join('\n')
+          },
         },
-      ),
+      )
+    },
   },
   {
     title: '条件单用户数',
@@ -457,7 +480,7 @@ const heartbeatAge = computed(() => {
           suffix="个"
           :icon="ServerOutline"
           :color="accent"
-          hint="跨实例全读（strategy-srv 在 136 db0 / db1 各一份）"
+          hint="按 mac 归并后的台数（同一台在 136 db0 / db1 各注册一份，只算一台）"
         />
       </n-gi>
     </n-grid>

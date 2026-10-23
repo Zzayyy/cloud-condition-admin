@@ -3,7 +3,9 @@ package com.qianlong.cloud.admin.service;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
@@ -74,15 +76,21 @@ public class StrategyServerService {
                 RegistryArrayReader.flatten(gateway.findAllAcrossInstances(properties.getRegistryKey()),
                         properties.getRegistryKey());
 
-        List<StrategyServerView> all = new ArrayList<>();
+        // ⚠️ 必须先按 mac 归并再统计，否则"台数 / usecount 合计"都是错的：
+        //    现场 2 条只对应 1 台机器（136 db0 与 136 db1 各注册一份，
+        //    usecount 一份 19、一份 0 —— 不归并就会算出 19 和两根柱）。
+        List<StrategyServerView> raw = new ArrayList<>();
+        for (RegistryEntry entry : entries) {
+            raw.add(toView(entry));
+        }
+        List<StrategyServerView> all = dedupeByMac(raw);
+
         int onlineCount = 0;
         long usecountTotal = 0;
         int usecountMax = 0;
         Long newestAge = null;
 
-        for (RegistryEntry entry : entries) {
-            StrategyServerView view = toView(entry);
-            all.add(view);
+        for (StrategyServerView view : all) {
             if (Boolean.TRUE.equals(view.online())) {
                 onlineCount++;
             }
@@ -114,6 +122,7 @@ public class StrategyServerService {
                 onlineCount,
                 all.size() - onlineCount,
                 all.size(),
+                raw.size(),
                 usecountTotal,
                 usecountMax,
                 properties.getOfflineAfterSec(),
@@ -252,7 +261,69 @@ public class StrategyServerService {
                 isOnline(enable, ts),
                 ts == null ? null : age,
                 entry.instanceDisplay(),
-                entry.index());
+                entry.index(),
+                1,
+                List.of());
+    }
+
+    /**
+     * 按 {@code mac} 归并同一台机器在多个注册表里的副本。
+     *
+     * <h2>为什么必须归并</h2>
+     * 现场 {@code strategy-srv} 在 136 db0 与 136 db1 各存一份，
+     * 摊平后 **2 条只对应 1 台机器**，而且两份的 {@code usecount} 还不一样
+     * （db0 是 19、db1 是 0）。不归并的话：页面"节点总数"显示 2、
+     * 「各节点承载条件单用户数」图会画出两根柱（19 和 0）——
+     * 那是**错误的读数**，不是"细节多了一点"。
+     *
+     * <h2>为什么用 mac 而不是 id</h2>
+     * {@code id} 现场全是 0（不可靠）。{@code mac} 形如
+     * {@code 20474789c674QLDataHub2}（12 位 mac + 程序名）是稳定标识。
+     *
+     * <h2>保留哪一份</h2>
+     * 保留 {@code lastActiveTimeLong} 最新的那份 —— 它代表"这台机器最近一次
+     * 在哪个库里活动"。其余副本不丢弃，压成 {@code copies} 计数 +
+     * {@code otherInstances} 列表，让「多副本」仍然可查。
+     *
+     * <p>没有 {@code mac} 的记录**不参与归并**：无从判断是否同一台，
+     * 硬合并会把不同机器并成一台。
+     */
+    private List<StrategyServerView> dedupeByMac(List<StrategyServerView> raw) {
+        Map<String, List<StrategyServerView>> byMac = new LinkedHashMap<>();
+        List<StrategyServerView> noMac = new ArrayList<>();
+        for (StrategyServerView v : raw) {
+            String mac = trimToNull(v.mac());
+            if (mac == null) {
+                noMac.add(v);
+                continue;
+            }
+            byMac.computeIfAbsent(mac, k -> new ArrayList<>()).add(v);
+        }
+
+        List<StrategyServerView> out = new ArrayList<>(noMac);
+        for (List<StrategyServerView> group : byMac.values()) {
+            if (group.size() == 1) {
+                out.add(group.get(0));
+                continue;
+            }
+            StrategyServerView latest = group.stream()
+                    .max(Comparator.comparingLong(v -> v.lastActiveTimeLong() == null
+                            ? Long.MIN_VALUE : v.lastActiveTimeLong()))
+                    .orElse(group.get(0));
+            List<String> others = group.stream()
+                    .filter(v -> v != latest)
+                    .map(StrategyServerView::instance)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            out.add(new StrategyServerView(
+                    latest.id(), latest.ip(), latest.mac(), latest.usecount(),
+                    latest.loginTime(), latest.lastActiveTime(), latest.lastActiveTimeLong(),
+                    latest.enable(), latest.online(), latest.ageSec(),
+                    latest.instance(), latest.arrayIndex(),
+                    group.size(), others));
+        }
+        return out;
     }
 
     /**

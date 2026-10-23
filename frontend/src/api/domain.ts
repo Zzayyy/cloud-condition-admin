@@ -77,6 +77,15 @@ export interface StrategyServer {
   instance?: string
   /** 在该实例数组里的下标 —— id 会重复（现场都是 0），只有它+实例能唯一定位一行 */
   arrayIndex?: number
+  /**
+   * 同一个 `mac` 在几个实例的注册表里出现过。
+   *
+   * 列表已按 `mac` 归并 —— 否则同一台机器会被列多遍、「节点总数」也是错的
+   * （现场 2 条只对应 1 台）。
+   */
+  copies?: number
+  /** 其余副本的来源实例（不含被保留的那个） */
+  otherInstances?: string[]
 }
 
 /** 策略服务器列表的附加信息（后端 meta，非表格契约字段） */
@@ -84,8 +93,10 @@ export interface StrategyServerListMeta {
   /** 全量在线数（不是当前页） */
   onlineCount: number
   offlineCount: number
-  /** 全量节点总数（跨实例摊平后，未去重） */
+  /** 全量节点总数 = **按 mac 归并后的台数**（现场 2 条 = 1 台） */
   total: number
+  /** 摊平后的原始条数（未去重）；`entryTotal - total` = 重复注册的份数 */
+  entryTotal: number
   /** 全量 usecount 合计 */
   usecountTotal: number
   /** 全量 usecount 最大值 —— 进度条的分母 */

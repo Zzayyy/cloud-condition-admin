@@ -52,7 +52,17 @@ public final class StrategyServerDtos {
             /** 来源实例，如 192.168.1.136/db0（现场多实例且内容不同） */
             String instance,
             /** 在该实例数组里的下标（id 会重复，只有它+实例能唯一定位一行） */
-            Integer arrayIndex) {
+            Integer arrayIndex,
+            /**
+             * 同一个 {@code mac} 在几个实例的注册表里都出现过。
+             *
+             * <p>列表已按 {@code mac} 归并 —— 否则同一台机器会被列多遍、
+             * 页面"台数"直接是错的（现场 2 条只对应 1 台）。
+             * 为 1 表示只有一份，&gt;1 表示另有 {@code copies-1} 份旧注册。
+             */
+            Integer copies,
+            /** 其余副本的来源实例（不含被保留的那个） */
+            List<String> otherInstances) {
     }
 
     /**
@@ -73,8 +83,19 @@ public final class StrategyServerDtos {
             /** 全量在线数（按 offlineAfterSec 判定，与页面同一口径） */
             int onlineCount,
             int offlineCount,
-            /** 全量「节点总数」（= 跨实例摊平后的总条数，未去重） */
+            /**
+             * 全量「节点总数」= **按 {@code mac} 归并后的台数**（现场 2 条 = 1 台）。
+             *
+             * <p>卡片与列表都用这个数。以前这里是"跨实例摊平后的总条数"，
+             * 于是同一台机器在多个库里各注册一份就会被数成好几台。
+             */
             int total,
+            /**
+             * 摊平后的**原始条数**（未去重）。
+             *
+             * <p>`entryTotal - total` = 重复注册的份数，排查「为什么这台机器在多处出现」时用。
+             */
+            int entryTotal,
             /** 全量 usecount 合计（不是当前页合计） */
             long usecountTotal,
             /** 全量 usecount 最大值 —— 进度条的分母，用当前页最大会导致翻页时跳动 */
