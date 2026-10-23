@@ -111,6 +111,8 @@ function reloadServers() {
  */
 function reloadAll() {
   reloadServers()
+  // 「活跃度分布」图要的是**全量节点**，不能只用当前页（那会画成"第 1 页的分布"）
+  void loadAllServers()
   void loadAllAssignments()
 }
 
@@ -213,6 +215,35 @@ async function loadAllAssignments() {
     allAssignments.value = []
     allAssignmentsTruncated.value = false
     allAssignmentsLoaded.value = false
+  }
+}
+
+/* ------------------------- 全量节点（供活跃度图用） ------------------------- */
+
+const allServers = ref<TraderServer[]>([])
+const allServersLoaded = ref(false)
+
+/**
+ * 拉全量节点列表。
+ *
+ * ⚠️ 「活跃度分布」必须基于**全量**，不能拿 `serverData.list`（当前页）——
+ * 那画出来是"第 1 页的分布"，节点一多就失真，而且不报错、看不出来。
+ * 这与「各节点承载账号数」用 `allAssignments` 而非 `accRows` 是同一个道理。
+ */
+async function loadAllServers() {
+  if (serverUsingMock.value) {
+    allServers.value = mockTradeApi.listServers({ page: 1, pageSize: ALL_PAGE_SIZE }).list
+    allServersLoaded.value = true
+    return
+  }
+  try {
+    const res = await tradeApi.listServers({ page: 1, pageSize: ALL_PAGE_SIZE })
+    allServers.value = res.list
+    allServersLoaded.value = true
+  } catch {
+    // 图表取数失败不该把整页打红，表格自己有错误提示
+    allServers.value = []
+    allServersLoaded.value = false
   }
 }
 
@@ -330,9 +361,20 @@ const loadOption = computed(() => {
   }
   const data = [...buckets.entries()].map(([label, value]) => ({ label, value }))
   return {
-    grid: { left: 8, right: 30, top: 8, bottom: 8, containLabel: true },
+    // bottom 从 8 加到 30：给 x 轴名字留出空间（containLabel 只管刻度标签，不管 axis name）
+    grid: { left: 8, right: 34, top: 8, bottom: 30, containLabel: true },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    xAxis: { type: 'value', name: '账号数', minInterval: 1 },
+    xAxis: {
+      type: 'value',
+      name: '账号数',
+      // ⚠️ 默认 nameLocation='end' 会把名字放在轴的**最右端**，
+      //    横向柱状图那里正好是柱子末尾 + 数值，于是被挤掉/裁掉。
+      //    放到轴中间（middle）既不会被裁，也更容易读。
+      nameLocation: 'middle',
+      nameGap: 24,
+      nameTextStyle: { fontSize: 11 },
+      minInterval: 1,
+    },
     yAxis: {
       type: 'category',
       data: data.map((d) => d.label).reverse(),
@@ -344,6 +386,83 @@ const loadOption = computed(() => {
         data: data.map((d) => d.value).reverse(),
         barMaxWidth: 20,
         itemStyle: { color: accent, borderRadius: [0, 4, 4, 0] },
+      },
+    ],
+  }
+})
+
+/* ------------------------- 节点活跃度分布 ------------------------- */
+
+/**
+ * 分桶口径：按「最后活跃距今多久」。
+ *
+ * ⚠️ **不直接用后端的 `ageSec`**，而是拿 `lastActiveTimeLong`（秒）现算 ——
+ * 后端那个是**它算的时刻**的值，页面停留一分钟后就过时了；
+ * 而「在线」字段前端本来就会随时间自己跳（见 `isServerOnline`）。
+ * 现算才能保证图和卡片说的是一回事。
+ *
+ * ⚠️ 空桶也保留：这样「0 台在线 / 4 台都在 7 天以上」能一眼看出来。
+ * 过滤空桶的话只剩一两根柱，反而看不出"哪些区间是空的"。
+ */
+const ACTIVITY_BUCKETS: { label: string; maxSec: number; color: string }[] = [
+  { label: '30 秒内（在线）', maxSec: 30, color: '#2f9e5f' },
+  { label: '1 小时内', maxSec: 3_600, color: '#79b93c' },
+  { label: '1 天内', maxSec: 86_400, color: '#e8a33d' },
+  { label: '7 天内', maxSec: 7 * 86_400, color: '#e07a3c' },
+  { label: '7 天以上', maxSec: Number.POSITIVE_INFINITY, color: '#d6455e' },
+]
+
+const activityOption = computed(() => {
+  const nowSec = Date.now() / 1000
+  const counts = ACTIVITY_BUCKETS.map(() => 0)
+  let never = 0
+  for (const row of allServers.value) {
+    const ts = row.lastActiveTimeLong
+    if (!ts || ts <= 0) {
+      never += 1
+      continue
+    }
+    const age = Math.max(0, nowSec - ts)
+    const idx = ACTIVITY_BUCKETS.findIndex((b) => age <= b.maxSec)
+    counts[idx < 0 ? ACTIVITY_BUCKETS.length - 1 : idx] += 1
+  }
+
+  const labels = [...ACTIVITY_BUCKETS.map((b) => b.label), '从未活跃']
+  const values = [...counts, never]
+  const colors = [...ACTIVITY_BUCKETS.map((b) => b.color), '#9aa0a6']
+
+  return {
+    // bottom 从 8 加到 30：给 x 轴名字留出空间（containLabel 只管刻度标签，不管 axis name）
+    grid: { left: 8, right: 40, top: 8, bottom: 30, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      // 说明每根柱的含义，避免"7 天以上"被读成"7 天前上线"
+      formatter: (p: { name: string; value: number }[]) =>
+        `${p[0]?.name ?? ''}<br/>节点数：${p[0]?.value ?? 0}`,
+    },
+    xAxis: {
+      type: 'value',
+      name: '节点数',
+      // 同左图：名字居中放，避免默认的 nameLocation='end' 在轴末端被数值标签挤掉
+      nameLocation: 'middle',
+      nameGap: 24,
+      nameTextStyle: { fontSize: 11 },
+      minInterval: 1,
+    },
+    yAxis: {
+      type: 'category',
+      data: [...labels].reverse(),
+      axisLabel: { fontSize: 11 },
+    },
+    series: [
+      {
+        type: 'bar',
+        barMaxWidth: 20,
+        data: values
+          .map((v, i) => ({ value: v, itemStyle: { color: colors[i] ?? '#9aa0a6' } }))
+          .reverse(),
+        label: { show: true, position: 'right', fontSize: 11 },
       },
     ],
   }
@@ -731,30 +850,68 @@ const isActiveOnline = computed(() => {
       </n-gi>
     </n-grid>
 
-    <!-- 节点分布 -->
-    <n-card class="page-card" size="small" :bordered="false" style="margin-top: 16px">
-      <template #header>
-        <span class="section-title">
-          <n-icon :component="GitNetworkOutline" :color="accent" :size="17" />
-          各节点承载账号数
-        </span>
-      </template>
-      <template #header-extra>
-        <span class="text-muted" style="font-size: 12px">
-          按 acc-* 键的分配关系统计（全量）
-          <template v-if="allAssignmentsTruncated">；⚠️ 已截断到前 200 条，实际更多</template>
-        </span>
-      </template>
-      <!--
-        空态文案必须区分「还没加载」与「确实没有分配」：
-        后者要现场去查，前者只是等一下。共用一个「暂无数据」会让人误判。
-      -->
-      <BaseChart
-        :option="loadOption"
-        :height="200"
-        :empty-text="allAssignmentsLoaded ? '暂无分配数据（acc-* 里没有 traderserver 字段）' : '加载中…'"
-      />
-    </n-card>
+    <!-- 两张分布图并排：一个看「分了多少账号」，一个看「还活着没」 -->
+    <n-grid
+      cols="1 m:2"
+      :x-gap="16"
+      :y-gap="16"
+      responsive="screen"
+      item-responsive
+      style="margin-top: 16px"
+    >
+      <n-gi>
+        <n-card class="page-card" size="small" :bordered="false" style="height: 100%">
+          <template #header>
+            <span class="section-title">
+              <n-icon :component="GitNetworkOutline" :color="accent" :size="17" />
+              各节点承载账号数
+            </span>
+          </template>
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">
+              按 acc-* 键的分配关系统计（全量）
+              <template v-if="allAssignmentsTruncated">；⚠️ 已截断到前 200 条，实际更多</template>
+            </span>
+          </template>
+          <!--
+            空态文案必须区分「还没加载」与「确实没有分配」：
+            后者要现场去查，前者只是等一下。共用一个「暂无数据」会让人误判。
+          -->
+          <BaseChart
+            :option="loadOption"
+            :height="200"
+            :empty-text="allAssignmentsLoaded ? '暂无分配数据（acc-* 里没有 traderserver 字段）' : '加载中…'"
+          />
+        </n-card>
+      </n-gi>
+
+      <n-gi>
+        <n-card class="page-card" size="small" :bordered="false" style="height: 100%">
+          <template #header>
+            <span class="section-title">
+              <n-icon :component="PulseOutline" :color="accent" :size="17" />
+              节点活跃度分布
+            </span>
+          </template>
+          <template #header-extra>
+            <span class="text-muted" style="font-size: 12px">
+              按最后活跃距今分桶（全量节点，已按 mac 归并）
+            </span>
+          </template>
+          <!--
+            这张图回答的是「0 台在线」背后的程度差异：
+            全是 5 分钟前掉的 → 刚集体掉线，要立刻查；
+            全是 2 个月前     → 历史残留，清理即可。
+            两者处置完全不同，只给一个「离线 4 个」说不清。
+          -->
+          <BaseChart
+            :option="activityOption"
+            :height="200"
+            :empty-text="allServersLoaded ? '暂无节点数据（traderserver 键为空）' : '加载中…'"
+          />
+        </n-card>
+      </n-gi>
+    </n-grid>
 
     <!-- 主体：两个 Tab -->
     <n-card class="page-card" size="small" :bordered="false">
