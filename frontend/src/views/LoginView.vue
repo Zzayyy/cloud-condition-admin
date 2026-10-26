@@ -264,12 +264,6 @@ const highlights = [
           </div>
         </div>
 
-        <p v-if="USE_MOCK" class="panel-foot">
-          后端 <code>/system/auth/login</code> 尚未实现，当前为演示登录。
-        </p>
-        <p v-else class="panel-foot">
-          登录由后端 <code>/system/auth/login</code> 校验，账号与权限取自数据库。
-        </p>
       </section>
     </div>
   </div>
