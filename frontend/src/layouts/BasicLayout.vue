@@ -285,8 +285,13 @@ async function handleUserSelect(key: string) {
     await authStore.logout()
     message.success('已退出登录')
     router.replace({ name: 'login' })
-  } else {
-    message.info('个人信息页面待开发（后端 /system/auth/profile 尚未实现）')
+  } else if (key === 'profile') {
+    /*
+     * 个人信息页已实现（后端 /system/auth/profile 与 /password 一直都在）。
+     * 原来这里弹「待开发」—— 那条提示是过期的，且正好掩盖了
+     * 「mustChangePassword 没有出口」这个问题。
+     */
+    router.push({ name: 'system-profile' })
   }
 }
 

@@ -2,6 +2,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { firstLeafPath, flattenMenu, menuTree, type MenuNode } from '@/config/menu'
+import { USE_MOCK } from '@/composables/useResource'
 import BasicLayout from '@/layouts/BasicLayout.vue'
 
 /**
@@ -64,6 +65,22 @@ for (const node of menuTree) {
   }
 }
 
+/*
+ * 个人信息页：从右上角头像进入，**不进菜单**。
+ *
+ * 它是「关于自己」的页面，不是业务导航的一站 —— 放进 menu.ts 会白占一个侧边栏位置，
+ * 还会多出一个 menu:profile 权限键（而它对所有已登录用户都该开放）。
+ *
+ * ⚠️ 它同时是「强制改密」的落点：mustChangePassword 为 true 时，
+ *    守卫会把所有页面重定向到这里（见下方 mustChangeRedirect）。
+ */
+layoutRoute.children.push({
+  path: '/system/profile',
+  name: 'system-profile',
+  component: () => import('@/views/system/ProfileView.vue'),
+  meta: { title: '个人信息' },
+})
+
 // 404 也放在布局内，保持侧边栏可用，避免用户走进死胡同
 layoutRoute.children.push({
   path: ':pathMatch(.*)*',
@@ -100,6 +117,31 @@ const router = createRouter({
  *  2. 有 token 但内存里没身份（刷新页面）：先换一次资料再放行；
  *  3. 没有身份：拦到登录页，并把原目标写进 `redirect`，登录后跳回去。
  */
+/**
+ * 「下次登录必须改密」的拦截。
+ *
+ * <h2>为什么现在才加</h2>
+ * 后端从建表起就有 `mustChangePassword`（新账号默认 1、重置密码可置 1、
+ * 本人改完后端置 0），但前端**一直没有改密入口**，也从不读这个字段 ——
+ * 于是标记永远清不掉，强制改密从未真正生效。
+ *
+ * <h2>为什么先做页面再拦</h2>
+ * 顺序反了会把人锁死：拦了却没有地方改，用户进不去系统。
+ * 现在落点是个人信息页（`system-profile`），那里有改密表单。
+ *
+ * <h2>演示态为什么不拦</h2>
+ * mock 没有改密实现（也没有可写的密码库）。真拦进来只会卡死，
+ * 且这与项目一贯口径一致：演示态宁可少一个能力，也不假装有。
+ *
+ * @returns 需要改密时返回重定向目标；否则 null（放行）
+ */
+function mustChangeRedirect(name: unknown, mustChange: boolean) {
+  if (USE_MOCK || !mustChange) return null
+  // 已经在改密页就放行，否则无限重定向
+  if (name === 'system-profile') return null
+  return { name: 'system-profile', query: { force: '1' } }
+}
+
 router.beforeEach(async (to) => {
   const { useAuthStore } = await import('@/stores/auth')
   const auth = useAuthStore()
@@ -108,11 +150,15 @@ router.beforeEach(async (to) => {
     return auth.isLoggedIn ? firstLeafPath() : true
   }
 
-  if (auth.isLoggedIn) return true
+  if (auth.isLoggedIn) {
+    return mustChangeRedirect(to.name, auth.mustChangePassword) ?? true
+  }
 
   // 刷新页面后内存里是空的，但 localStorage 里可能还有 token —— 先试着换回身份
   await auth.fetchProfile()
-  if (auth.isLoggedIn) return true
+  if (auth.isLoggedIn) {
+    return mustChangeRedirect(to.name, auth.mustChangePassword) ?? true
+  }
 
   return {
     name: 'login',

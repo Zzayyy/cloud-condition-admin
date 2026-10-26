@@ -104,19 +104,66 @@ public class AuditService {
         if (request == null) {
             return null;
         }
+        String candidate = null;
         String forwarded = request.getHeader("X-Forwarded-For");
         if (StringUtils.hasText(forwarded)) {
             // XFF 是逗号分隔的链路，第一个才是原始客户端
             String first = forwarded.split(",")[0].trim();
             if (StringUtils.hasText(first)) {
-                return first;
+                candidate = first;
             }
         }
-        String realIp = request.getHeader("X-Real-IP");
-        if (StringUtils.hasText(realIp)) {
-            return realIp.trim();
+        if (candidate == null) {
+            String realIp = request.getHeader("X-Real-IP");
+            if (StringUtils.hasText(realIp)) {
+                candidate = realIp.trim();
+            }
         }
-        return request.getRemoteAddr();
+        if (candidate == null) {
+            candidate = request.getRemoteAddr();
+        }
+        return normalizeIp(candidate);
+    }
+
+    /** IPv4-mapped IPv6 的两种常见写法（压缩形式与完整形式） */
+    private static final java.util.regex.Pattern V4_MAPPED = java.util.regex.Pattern.compile(
+            "^(?i)(::ffff:|0:0:0:0:0:ffff:)\\d{1,3}(\\.\\d{1,3}){3}$");
+
+    /**
+     * 归一化客户端 IP。
+     *
+     * <h2>只处理 IPv4-mapped IPv6</h2>
+     * 形如 {@code ::ffff:192.168.3.81}（或完整形式 {@code 0:0:0:0:0:ffff:192.168.3.81}）——
+     * 它是**同一个 IPv4 客户端**被塞进 IPv6 表示里的产物，Java 在双栈监听时常见。
+     *
+     * <p>为什么不归一化会有问题（2026-10-26 现场实测）：审计里同一个客户端会出现
+     * {@code 192.168.3.81} 和 {@code ::ffff:192.168.3.81} 两个身份，
+     * 按 IP 查记录时会漏，而且看起来像是两台不同的机器。
+     *
+     * <h2>⚠️ {@code ::1} 故意不归一化</h2>
+     * 它是**真正的 IPv6 回环**，与 {@code 127.0.0.1} 分属不同协议族。
+     * 保留这个区别有助于排查「为什么这台机器连不上」——归一成 127.0.0.1 就把线索抹了。
+     * 所以这里只剥 v4-mapped 前缀，不动真正的 IPv6 地址。
+     */
+    private static String normalizeIp(String ip) {
+        if (ip == null) {
+            return null;
+        }
+        String v = ip.trim();
+        if (v.isEmpty()) {
+            return null;
+        }
+        // 兼容 [::ffff:1.2.3.4]:port 这种带方括号/端口的形态
+        if (v.startsWith("[")) {
+            int end = v.indexOf(']');
+            if (end > 0) {
+                v = v.substring(1, end);
+            }
+        }
+        if (V4_MAPPED.matcher(v).matches()) {
+            return v.substring(v.lastIndexOf(':') + 1);
+        }
+        return v;
     }
 
     /** 从 User-Agent 里提炼一个可读的「客户端 / OS」，存进登录日志的 loginOS 列 */
