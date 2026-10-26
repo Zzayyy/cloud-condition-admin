@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch, type Component } from 'vue'
+import { computed, h, nextTick, onMounted, ref, watch, type Component } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import {
   NBreadcrumb,
@@ -125,6 +125,17 @@ onMounted(() => {
   if (title && route.name !== 'not-found' && route.name !== 'root') {
     tabsStore.open({ name: route.name as string, path: route.path, title })
   }
+
+  /*
+   * 首次进入也要滚一次。
+   *
+   * watch(route.path) 默认不 immediate，而刷新页面时路由**本来就没变**——
+   * 页签是从 localStorage 恢复的，当前页签很可能排在靠后的位置，
+   * 不滚的话打开就看不见自己在哪一页。
+   *
+   * 必须 nextTick：这里刚 open() 完，DOM 里的页签还没渲染出来。
+   */
+  void nextTick(() => scrollActiveTabIntoView())
 })
 
 function closeTab(path: string) {
@@ -295,6 +306,78 @@ async function handleUserSelect(key: string) {
   }
 }
 
+/**
+ * 页签栏用滚轮横向滚动。
+ *
+ * <h2>为什么需要</h2>
+ * 页签多了会横向溢出（`.tabs-bar` 有 `overflow-x: auto`），
+ * 但浏览器里**普通滚轮只滚纵向**，横向得去拖那条细滚动条、或按 Shift+滚轮 ——
+ * 都不顺手。把纵向增量转成横向滚动，符合 Chrome / VS Code 标签栏的习惯。
+ *
+ * <h2>三个边界条件，缺一个就会帮倒忙</h2>
+ * <ol>
+ *   <li><b>没溢出就别拦</b>：否则鼠标停在页签栏上时页面滚不动，像卡住了；</li>
+ *   <li><b>触控板横向滑动要让开</b>：那种情况 `deltaX` 本来就大于 `deltaY`，
+ *       浏览器原生就能横向滚，我们再处理会打架（速度翻倍、手感变怪）；</li>
+ *   <li><b>必须能 preventDefault</b>：所以模板里用 `@wheel` 而不是 `.passive`，
+ *       否则拦不住纵向滚动，页面会跟着一起滚。</li>
+ * </ol>
+ */
+function onTabsWheel(e: WheelEvent) {
+  const el = e.currentTarget as HTMLElement | null
+  if (!el || el.scrollWidth <= el.clientWidth) {
+    return
+  }
+  if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) {
+    return
+  }
+  el.scrollLeft += e.deltaY
+  e.preventDefault()
+}
+
+/**
+ * 切换页签后，把当前页签滚进可视区。
+ *
+ * <h2>解决什么</h2>
+ * 页签一多就会横向溢出，而新页签是**追加到最右**的 ——
+ * 用户点了菜单，页签加出去了，可滚动位置还停在左边，等于"开了一个看不见的页签"，
+ * 还得自己滚过去找。这个和新开的页签是在最左边还是最右边无关，统一都滚。
+ *
+ * <h2>两个细节</h2>
+ * <ul>
+ *   <li><b>已经可见就不动</b>：否则每次切页签都平滑滚一下，整条栏轻微抖动，
+ *       比不滚更烦；</li>
+ *   <li><b>用 scrollTo 手算位置而不是 scrollIntoView</b>：
+ *       `scrollIntoView` 会向上遍历所有可滚祖先，可能把整个页面也带着滚一下。</li>
+ * </ul>
+ */
+function scrollActiveTabIntoView() {
+  const bar = document.querySelector('.tabs-bar') as HTMLElement | null
+  const active = bar?.querySelector('.tab-item.active') as HTMLElement | null
+  if (!bar || !active || bar.scrollWidth <= bar.clientWidth) {
+    return
+  }
+
+  const barRect = bar.getBoundingClientRect()
+  const activeRect = active.getBoundingClientRect()
+  // 完整落在可视范围内 → 不需要动
+  if (activeRect.left >= barRect.left && activeRect.right <= barRect.right) {
+    return
+  }
+
+  // 居中放置：贴边滚动会让下一个页签也看不见，居中最稳
+  const offset = activeRect.left - barRect.left
+  bar.scrollTo({
+    left: bar.scrollLeft + offset - (barRect.width - activeRect.width) / 2,
+    behavior: 'smooth',
+  })
+}
+
+watch(() => route.path, async () => {
+  await nextTick()
+  scrollActiveTabIntoView()
+})
+
 const pageTitle = computed(() => route.meta?.title as string | undefined)
 const pageDesc = computed(() => route.meta?.desc as string | undefined)
 const pageStatus = computed(() => route.meta?.status as string | undefined)
@@ -403,8 +486,8 @@ const pageStatus = computed(() => route.meta?.status as string | undefined)
         </div>
       </n-layout-header>
 
-      <!-- 多页签栏 -->
-      <div v-if="tabsStore.tabs.length" class="tabs-bar">
+      <!-- 多页签栏（页签多了横向溢出，滚轮可横向滚动，见 onTabsWheel） -->
+      <div v-if="tabsStore.tabs.length" class="tabs-bar" @wheel="onTabsWheel">
         <div
           v-for="tab in tabsStore.tabs"
           :key="tab.path"
@@ -564,6 +647,44 @@ const pageStatus = computed(() => route.meta?.status as string | undefined)
   overflow-x: auto;
   background: var(--bg-sider);
   border-bottom: 1px solid var(--border);
+}
+
+/*
+ * 细滚动条：默认约 8~12px，会把页签栏撑高，看着像多了一条分隔条。
+ *
+ * ⚠️ 这里**不能**在 .tabs-bar 上写 `scrollbar-width: thin`：
+ *    Chrome 121+ 起，元素一旦设置了标准属性 `scrollbar-width`/`scrollbar-color`，
+ *    就会**整块忽略** `::-webkit-scrollbar-*` 伪元素 ——
+ *    于是下面写 height:3px 等于白写，实际还是 thin 的 8px。
+ *    （曾经就是这样：写了 4px 却一直显示 8px。）
+ *
+ * Firefox 不支持 webkit 伪元素，用 @supports 单独降级，两边互不干扰。
+ */
+.tabs-bar::-webkit-scrollbar {
+  height: 3px;
+}
+
+.tabs-bar::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+  /* 不支持 color-mix 的浏览器用这条 */
+  background: var(--border);
+  /* 半透明：比实色更轻，不抢页签的视觉重量 */
+  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
+}
+
+.tabs-bar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.tabs-bar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 只在「不支持 ::-webkit-scrollbar」的浏览器（Firefox）生效 */
+@supports not selector(::-webkit-scrollbar) {
+  .tabs-bar {
+    scrollbar-width: thin;
+  }
 }
 
 .tab-item {

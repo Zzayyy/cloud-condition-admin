@@ -581,7 +581,7 @@ const prettyStrategy = computed(() => formatJson(active.value?.Strategy))
       标签写的是「运行中」「已触发」这种绝对指标，跟着 tab 变只会让人误解
       （切到"已停止"时"运行中"变 0）。所以明确标一句，避免"卡片和列表对不上"的困惑。
     -->
-    <div class="stats-scope-hint">全量口径（不随下方筛选/tab 变化）</div>
+
 
     <n-grid cols="1 s:2 m:4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi>

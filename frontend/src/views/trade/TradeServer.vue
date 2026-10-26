@@ -406,6 +406,16 @@ const activityOption = computed(() => buildActivityOption(allServers.value))
 
 /* ------------------------------ 节点表格 ------------------------------ */
 
+/**
+ * 「陈旧」阈值：超过这么久没上报心跳，列表里把该行的时间弱化。
+ *
+ * ⚠️ 与 `SERVER_OFFLINE_AFTER_SEC`（30 秒，判在线/离线）**不是一回事**：
+ * 那个回答"现在通不通"，这个回答"这条记录是不是早就不用了"。
+ * 现场大量记录停在几个月前，两者都需要，但混用会得出荒谬结论
+ * （比如把一台昨天还在跑的机器标成"陈旧"）。
+ */
+const STALE_AFTER_SEC = 7 * 24 * 3600
+
 const serverColumns: DataTableColumns<TraderServer> = [
   {
     title: '状态',
@@ -457,23 +467,45 @@ const serverColumns: DataTableColumns<TraderServer> = [
     key: 'lastActiveTimeLong',
     width: 150,
     sorter: true,
-    render: (row) =>
-      h(
+    render: (row) => {
+      /*
+       * 三档呈现：
+       *   · 从未上报 → 「-」+ tooltip 写明原因（不是"0 秒前"，那是编的）
+       *   · 超 7 天  → 整格文字降为 muted。现场就是这样：几台停在几个月前，
+       *                不弱化的话它们和"昨天刚动过"的看起来一样重，
+       *                「状态」列的在线/离线只覆盖 30 秒阈值，管不到这种陈旧度。
+       *   · 其余     → 正常色
+       */
+      const ts = row.lastActiveTimeLong
+      const never = !ts
+      const stale = !never && Date.now() / 1000 - ts > STALE_AFTER_SEC
+
+      return h(
         NTooltip,
         { trigger: 'hover' },
         {
           trigger: () =>
-            h('span', {}, [
-              h(NIcon, {
-                size: 13,
-                style: 'vertical-align:-2px;margin-right:4px;opacity:.6',
-                component: TimeOutline,
-              }),
-              relativeTime(row.lastActiveTimeLong),
-            ]),
-          default: () => row['last-active-time'],
+            h(
+              'span',
+              { style: stale ? 'color:var(--text-muted)' : '' },
+              never
+                ? ['-']
+                : [
+                    h(NIcon, {
+                      size: 13,
+                      style: 'vertical-align:-2px;margin-right:4px;opacity:.6',
+                      component: TimeOutline,
+                    }),
+                    relativeTime(ts),
+                  ],
+            ),
+          default: () =>
+            never
+              ? '该记录从未上报过心跳时间（字段缺失，不是"0 秒前"）'
+              : `${row['last-active-time'] ?? '-'}${stale ? '（已超过 7 天未上报心跳）' : ''}`,
         },
-      ),
+      )
+    },
   },
   {
     title: '启用',
@@ -786,14 +818,21 @@ const isActiveOnline = computed(() => {
       </n-gi>
     </n-grid>
 
-    <!-- 两张分布图并排：一个看「分了多少账号」，一个看「还活着没」 -->
+    <!--
+      两张分布图并排：一个看「分了多少账号」，一个看「还活着没」。
+
+      ⚠️ 间距写 `margin: 16px 0`（上下都要），不能只写 margin-top：
+      卡片间距原本靠 `.page-card { margin-bottom: 16px }`，
+      而这一块是 n-grid 不是 .page-card —— 只给上边距的话，
+      下面的表格卡片会紧贴上来，两块钱连成一片。
+    -->
     <n-grid
       cols="1 m:2"
       :x-gap="16"
       :y-gap="16"
       responsive="screen"
       item-responsive
-      style="margin-top: 16px"
+      style="margin: 16px 0"
     >
       <n-gi>
         <n-card class="page-card" size="small" :bordered="false" style="height: 100%">

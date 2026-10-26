@@ -545,14 +545,21 @@ const heartbeatAge = computed(() => {
       </n-gi>
     </n-grid>
 
-    <!-- 两张分布图并排：一个看「承载多少用户」，一个看「还活着没」 -->
+    <!--
+      两张分布图并排：一个看「承载多少用户」，一个看「还活着没」。
+
+      ⚠️ 间距写 `margin: 16px 0`（上下都要），不能只写 margin-top：
+      卡片间距原本靠 `.page-card { margin-bottom: 16px }`，
+      而这一块是 n-grid 不是 .page-card —— 只给上边距的话，
+      下面的节点表格会紧贴上来，两块钱连成一片。
+    -->
     <n-grid
       cols="1 m:2"
       :x-gap="16"
       :y-gap="16"
       responsive="screen"
       item-responsive
-      style="margin-top: 16px"
+      style="margin: 16px 0"
     >
       <n-gi>
         <n-card class="page-card" size="small" :bordered="false" style="height: 100%">
