@@ -239,7 +239,10 @@ public class DashboardService {
 
             for (var s : streams) {
                 entryTotal += s.length();
-                if (s.groups().isEmpty()) {
+                // ⚠️ 必须同时判 length > 0：空流没有消费组是**正常**的
+                //    （没人写也没人读），只判 groups.isEmpty() 会把它当风险，
+                //    进而在总览页说「有人在往里面写、消息只进不出」——那是假话。
+                if (s.groups().isEmpty() && s.length() > 0) {
                     groupLess++;
                 }
                 for (var g : s.groups()) {

@@ -86,7 +86,14 @@ public final class DashboardDtos {
             long ingressBacklog,
             long consumerLag,
             long pending,
-            /** **没有消费组**的流数 —— 写入后无人投递，最危险的一类 */
+            /**
+             * **有数据但没有消费组**的流数 —— 写入后无人投递，最危险的一类。
+             *
+             * <p>⚠️ 2026-10-26 口径修正：**必须排除空流**（{@code XLEN=0}）。
+             * 一个空的流没有消费组完全正常（没人写也没人读），
+             * 而原实现只判 {@code groups.isEmpty()}，会把它算成风险，
+             * 进而在总览页说「有人在往里面写、消息只进不出」—— 那是假话。
+             */
             long groupLess,
             /** 已超过 1 小时没有新条目的流数（数据流可能已停止） */
             long staleStreams,

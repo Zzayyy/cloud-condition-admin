@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, h, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NAlert,
+  NButton,
   NCard,
   NDataTable,
   NGi,
   NGrid,
   NIcon,
+  NProgress,
   NTag,
   NTooltip,
   type DataTableColumns,
@@ -46,6 +49,7 @@ import { thousands } from '@/utils/format'
  */
 
 const accent = '#3b6ff5'
+const router = useRouter()
 
 const { data, loading, error, load } = useResource(
   () => dashboardApi.getOverview(),
@@ -61,6 +65,54 @@ onMounted(reload)
 const summary = computed(() => data.value?.summary)
 const sources = computed<DashboardSourceRow[]>(() => data.value?.sources ?? [])
 const daily = computed(() => data.value?.daily ?? [])
+
+/* ---------------------------- 云单账号在线情况 ---------------------------- */
+
+/**
+ * 账号四个口径。
+ *
+ * <p>⚠️ **「离线」不能直接用 `total - online`**（原实现就是这么写的）：
+ * `total` 是 MySQL 与 Redis 合并后的账号数，其中 {@code mysqlOnly} 那部分
+ * 在 Redis 里**没有实时对象**（连 `acc-*` 键都没有），谈不上一线还是离线。
+ *
+ * <p>把它们算成「离线」有两个后果：离线数虚高；且与总览页别处
+ * 「未知 ≠ 离线」的原则自相矛盾（数据中台、两类服务器都是三态口径）。
+ *
+ * <p>所以这里：`离线 = total − online − mysqlOnly`，只算「有实时对象但没在线」的。
+ */
+const accountTotal = computed(() => summary.value?.account.total ?? 0)
+const accountOnline = computed(() => summary.value?.account.online ?? 0)
+const accountOffline = computed(() => {
+  const s = summary.value?.account
+  if (!s) return 0
+  return Math.max(0, s.total - s.online - s.mysqlOnly)
+})
+
+/** 在线率；总数为 0 时返回 null（不显示 0%，那会被读成「全离线」） */
+const accountOnlineRate = computed<number | null>(() => {
+  const t = accountTotal.value
+  return t > 0 ? Math.round((accountOnline.value / t) * 100) : null
+})
+
+/**
+ * 两边数据源不一致的提示；都为 0 时返回 null（不占位置）。
+ *
+ * <p>这是后端 `AccountSummary` 里**最该被看见**的两个字段 ——
+ * 它们解释了「总览的数字与账号页为什么可能对不上」。
+ * 后端一直在算，前端却从没显示过。
+ */
+const accountSourceGap = computed(() => {
+  const s = summary.value?.account
+  if (!s) return null
+  const parts: string[] = []
+  if (s.mysqlOnly > 0) {
+    parts.push(`${s.mysqlOnly} 个账号只在 MySQL、Redis 里没有实时对象（无法判断在线状态）`)
+  }
+  if (s.redisOnly > 0) {
+    parts.push(`${s.redisOnly} 个账号只在 Redis、MySQL 里没有记录`)
+  }
+  return parts.length ? parts.join('；') : null
+})
 
 /* ------------------------------ 节点健康度 ------------------------------ */
 
@@ -516,27 +568,73 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
               云单账号在线情况
             </span>
           </template>
+          <!-- 口径说明收进 tooltip：运维在总览页不需要读表名与字段名 -->
+          <template #header-extra>
+            <n-tooltip trigger="hover">
+              <template #trigger>
+                <n-icon :component="InformationCircleOutline" :size="15" class="text-muted" />
+              </template>
+              账号视图 = MySQL <code>T_User</code> 与 Redis <code>acc-*</code> 合并；
+              在线判定取 <code>acc-*</code> 的 <code>onlineflag</code>。
+              「离线」只统计**有实时对象但未在线**的账号，不含只在 MySQL 里的。
+            </n-tooltip>
+          </template>
+
           <div class="account-block">
-            <div class="account-row">
-              <span class="account-label">账号总数</span>
-              <span class="account-value">{{ thousands(summary?.account.total ?? 0) }}</span>
+            <!--
+              左环右表：环形直接表达「在线占比」，右侧三行给精确数字。
+              原来是 4 个灰底方块平铺，视觉上像 4 个同等重要的碎片，
+              而这里真正的主语只有一个 —— 在线率。
+            -->
+            <div class="account-main">
+              <n-progress
+                type="circle"
+                :percentage="accountOnlineRate ?? 0"
+                :stroke-width="9"
+                :color="accountOnlineRate === 100 ? '#2f9e5f' : '#3b6ff5'"
+                :rail-color="'rgba(15,23,42,0.08)'"
+              >
+                <!-- 圆环中心用自定义内容（naive-ui 的 circle 类型会优先渲染默认插槽） -->
+                <div class="account-ring-inner">
+                  <span class="account-ring-value">{{ thousands(accountOnline) }}</span>
+                  <span class="account-ring-label">在线</span>
+                </div>
+              </n-progress>
+
+              <div class="account-facts">
+                <div class="account-fact">
+                  <span class="account-fact-label">账号总数</span>
+                  <span class="account-fact-value">{{ thousands(accountTotal) }}</span>
+                </div>
+                <div class="account-fact">
+                  <span class="account-fact-label">离线</span>
+                  <span class="account-fact-value" style="color: #8a94a6">
+                    {{ thousands(accountOffline) }}
+                  </span>
+                </div>
+                <div class="account-fact">
+                  <span class="account-fact-label">在线率</span>
+                  <span class="account-fact-value">
+                    {{ accountOnlineRate === null ? '—' : `${accountOnlineRate}%` }}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div class="account-row">
-              <span class="account-label">在线</span>
-              <span class="account-value" style="color: #2f9e5f">
-                {{ thousands(summary?.account.online ?? 0) }}
+
+            <!--
+              两边数据源不一致时才出现（后端一直算、前端从没显示过）。
+              这句话解释了「总览的数字和账号页为什么可能对不上」，
+              并给出下钻入口 —— 只说"有 N 个不一致"而不给路径等于没说。
+            -->
+            <div v-if="accountSourceGap" class="account-gap">
+              <n-icon :component="WarningOutline" :size="14" style="flex: 0 0 auto" />
+              <span>
+                {{ accountSourceGap }}
+                <n-button text type="primary" size="tiny" @click="router.push('/account/user')">
+                  去账号页查看
+                </n-button>
               </span>
             </div>
-            <div class="account-row">
-              <span class="account-label">离线</span>
-              <span class="account-value" style="color: #8a94a6">
-                {{ thousands((summary?.account.total ?? 0) - (summary?.account.online ?? 0)) }}
-              </span>
-            </div>
-            <p class="account-note">
-              口径取自「账户与用户」页（MySQL <code>T_User</code> 与 Redis <code>acc-*</code>
-              合并后的账号视图）；在线状态来自 <code>acc-*</code> 的 <code>onlineflag</code>。
-            </p>
           </div>
         </n-card>
       </n-gi>
@@ -587,16 +685,30 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
           需要注意：没有消费组的流
         </span>
       </template>
+      <!--
+        总览页只给结论和下钻入口：
+        · 原来这里展开两段解释（这类流为什么 lag/pending 看不到），
+          那是「为什么」而不是「怎么办」，放在概览页占了半屏；
+        · 里面还写死了「现场实测 137 db0 的 DataHub_req_stream 有 1400 万条、
+          没有消费组」——那条现在已经有 user_group 了，写死的"现场实测"会过期。
+        详细排查留给消息总线页。
+      -->
+      <template #header-extra>
+        <n-button size="small" type="primary" ghost @click="router.push('/server/stream')">
+          <template #icon>
+            <n-icon :component="GitNetworkOutline" />
+          </template>
+          去消息总线页查看
+        </n-button>
+      </template>
       <div class="risk-body">
         <p>
-          有 <b>{{ summary?.stream.groupLess }}</b> 条流<b>完全没有消费组</b> ——
-          有人在往里面写，但**没有任何消费者会处理**，消息只进不出。
-        </p>
-        <p class="risk-why">
-          这类流不会体现在 <code>lag</code> / <code>pending</code> 指标里
-          （那两个指标只在**存在消费组**时才出现），所以不能靠积压告警发现，
-          必须单独看这一项。现场实测 137 db0 的 <code>DataHub_req_stream</code>
-          就属于这种：1400 万条条目，没有一个消费组。
+          有 <b>{{ summary?.stream.groupLess }}</b> 条流<b>有数据但没有消费组</b> ——
+          有人往里面写，却没有任何消费者会处理，消息只进不出。
+          <span class="text-muted">
+            这类流不会出现在 <code>lag</code> / <code>pending</code> 里（那两个只在有消费组时才存在），
+            所以积压告警发现不了。
+          </span>
         </p>
       </div>
     </n-card>
@@ -685,46 +797,97 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
 /* ------------------------------ 账号区块 ------------------------------ */
 
 .account-block {
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   padding: 4px 0;
 }
 
-.account-row {
+/* 左环右表 */
+.account-main {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 9px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-code);
+  align-items: center;
+  gap: 22px;
+  padding: 2px 0;
 }
 
-.account-label {
-  font-size: 13px;
-  color: var(--text-secondary);
+/* 环心的数字：用绝对居中，不依赖 n-progress 默认的 indicator 布局 */
+.account-ring-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.15;
 }
 
-.account-value {
-  font-size: 19px;
+.account-ring-value {
+  font-size: 23px;
   font-weight: 650;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
 
-.account-note {
-  margin: 2px 0 0;
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: var(--text-muted);
+.account-ring-label {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
-.account-note code {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--bg-code);
-  font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 11.5px;
+/* 右侧三个事实：标签左、数值右，中间虚线分隔 */
+.account-facts {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.account-fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.account-fact:first-child {
+  padding-top: 0;
+}
+
+.account-fact:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.account-fact-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.account-fact-value {
+  font-size: 17px;
+  font-weight: 600;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 两边数据源不一致的提示（只在非 0 时出现） */
+.account-gap {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(217, 122, 21, 0.12);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.account-gap code,
+.account-gap .n-button {
+  font-size: 12px;
 }
 
 /* ------------------------------ 成交率 ------------------------------ */
@@ -774,13 +937,6 @@ const sourceColumns: DataTableColumns<DashboardSourceRow> = [
 .risk-body b {
   color: var(--danger);
   font-weight: 600;
-}
-
-/* 「为什么这个指标不会被积压告警发现」——次要说明，弱化一档 */
-.risk-why {
-  margin-top: 6px !important;
-  font-size: 12.5px !important;
-  color: var(--text-muted) !important;
 }
 
 .risk-body code {

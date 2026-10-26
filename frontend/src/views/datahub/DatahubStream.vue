@@ -133,7 +133,12 @@ const summary = computed(() => {
     const g = s.groups[0]
     return g && ((g.lag ?? 0) > 0 || g.pending > 0)
   }).length
-  const noGroup = list.filter((s) => s.groups.length === 0)
+  /*
+   * ⚠️ 必须同时判 length > 0（与后端 DashboardService 同一口径）。
+   * 空流没有消费组是正常的（没人写也没人读）；
+   * 只判 groups.length === 0 会把它当风险，两页的数字还会对不上。
+   */
+  const noGroup = list.filter((s) => s.groups.length === 0 && s.length > 0)
   return {
     count: list.length,
     totalEntries,
