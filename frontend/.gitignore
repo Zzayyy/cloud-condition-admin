@@ -16,4 +16,4 @@ dist-ssr
 auto-imports.d.ts
 components.d.ts
 
-frontend/dist.tar.gz
+dist.tar.gz
