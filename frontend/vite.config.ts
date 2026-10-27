@@ -38,6 +38,12 @@ export default defineConfig(({ mode }) => {
     .filter(Boolean)
 
   return {
+    /*
+     * 相对路径：后端打包托管时 index.html 在 /api/ 下，
+     * 用绝对路径 /assets/... 会 404；'./' 让资源跟着 index.html 走。
+     * 开发态 Vite 会把它当作根路径处理，不影响 npm run dev。
+     */
+    base: './',
     plugins: [
       vue(),
       // Naive UI 组件与 API 按需自动引入，模板里直接写 <n-button> 即可。

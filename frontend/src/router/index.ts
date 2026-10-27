@@ -1,5 +1,5 @@
 import type { RouteRecordRaw } from 'vue-router'
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 
 import { firstLeafPath, flattenMenu, menuTree, type MenuNode } from '@/config/menu'
 import { USE_MOCK } from '@/composables/useResource'
@@ -100,8 +100,14 @@ const routes: RouteRecordRaw[] = [
   layoutRoute,
 ]
 
+/*
+ * hash 路由：后端用 Java 托管 dist 时，页面挂在 /api/ 下，history 模式刷新
+ * 会向后端要 /api/xxx（404 或命中同名接口）。hash 后面的部分浏览器不发给服务器，
+ * 刷新与深链都只请求 /api/index.html，不需要服务端兜底。
+ * 开发态只是地址多一个 #，HMR 与代理都不受影响。
+ */
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes,
   scrollBehavior: () => ({ top: 0 }),
 })

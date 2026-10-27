@@ -71,6 +71,21 @@ public class WebConfig implements WebMvcConfigurer {
                                 "/system/auth/logout"
                         )
                         .check(r -> StpUtil.checkLogin())))
-                .addPathPatterns("/**");
+                .addPathPatterns("/**")
+                /*
+                 * 前端由本服务托管时（--spring.web.resources.static-locations），
+                 * index.html 与 assets 都是匿名请求，不能走登录校验：
+                 *
+                 *  - `/assets/**` 被拦时，浏览器拿到的是 {"code":40100} 而不是 JS，
+                 *    页面直接白屏；
+                 *  - `/` 命中的是 WelcomePageHandlerMapping，它的异常不会被
+                 *    @RestControllerAdvice 兜住，表现出来就是 HTTP 500；
+                 *  - `/error` 是错误分派路径，再次进拦截器时 Sa-Token 上下文已失效，
+                 *    会抛 SaTokenContextException，把真正的错误盖成 500。
+                 *
+                 * 这里排除的是「静态资源入口」，不是接口白名单：接口依旧默认全部
+                 * 拦截，靠注解与上面的 notMatch 放行。
+                 */
+                .excludePathPatterns("/", "/index.html", "/assets/**", "/favicon.ico", "/error");
     }
 }
