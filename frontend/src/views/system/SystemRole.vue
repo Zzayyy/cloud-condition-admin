@@ -627,70 +627,77 @@ const columns: DataTableColumns<AdminRole> = [
     <AppDialog
       v-model:show="showForm"
       :title="isCreating ? '新建角色' : `编辑角色 · ${form.code}`"
-      :width="640"
+      :width="980"
       :mask-closable="false"
       :close-on-esc="false"
     >
-      <n-alert v-if="editingBuiltin" type="info" :bordered="false" size="small" style="margin-bottom: 14px">
-        <template #header>这是内置角色</template>
-        内置角色的 <code>code</code> 与名称<b>不可修改</b>（审计要靠 code 认人，改名会让审计记录对不上）。
-        权限仍可调整，但请谨慎：<b>改权限等于改所有用这个角色的人的可见范围</b>。
-      </n-alert>
+      <!--
+        左右两栏：左基本信息、右权限树。
+        上下堆叠时，弹窗内容一高就会出现「弹窗滚一层、权限树再滚一层」：
+        鼠标停在树上滚的是树、停在树外滚的是弹窗，很难用。
+        分栏后纵向高度基本落在可视区内，通常只剩权限树自己那一个滚动条。
+      -->
+      <div class="role-form-layout">
+        <div class="role-form-basic">
+          <n-form label-placement="top" size="small">
+            <n-form-item label="角色编码 code">
+              <n-input
+                v-model:value="form.code"
+                placeholder="例：ops_readonly"
+                :disabled="!isCreating"
+                :input-props="{ autocapitalize: 'off', autocomplete: 'off' }"
+              />
+            </n-form-item>
+            <div class="field-hint">
+              <template v-if="isCreating">
+                小写字母开头，只能含小写字母、数字与下划线，长度 2~32。<b>创建后不可修改</b> ——
+                审计记录靠 code 认人，改名会让历史记录对不上。
+              </template>
+              <template v-else>角色编码创建后不可修改。</template>
+            </div>
 
-      <n-form label-placement="top" size="small">
-        <n-form-item label="角色编码 code">
-          <n-input
-            v-model:value="form.code"
-            placeholder="例：ops_readonly"
-            :disabled="!isCreating"
-            :input-props="{ autocapitalize: 'off', autocomplete: 'off' }"
-          />
-        </n-form-item>
-        <div class="field-hint">
-          <template v-if="isCreating">
-            小写字母开头，只能含小写字母、数字与下划线，长度 2~32。<b>创建后不可修改</b> ——
-            审计记录靠 code 认人，改名会让历史记录对不上。
-          </template>
-          <template v-else>角色编码创建后不可修改。</template>
+            <n-form-item label="角色名称">
+              <n-input
+                v-model:value="form.name"
+                placeholder="例：只读观察者"
+                :disabled="editingBuiltin"
+                maxlength="32"
+                show-count
+              />
+            </n-form-item>
+            <div v-if="editingBuiltin" class="field-hint">内置角色名称受保护，不可修改。</div>
+
+            <n-form-item label="说明">
+              <n-input
+                v-model:value="form.desc"
+                type="textarea"
+                placeholder="例：只读观察者，给外部同事核对数据用"
+                :autosize="{ minRows: 3, maxRows: 6 }"
+                maxlength="200"
+                show-count
+              />
+            </n-form-item>
+            <div class="field-hint">会显示在角色列表的「说明」列，写清用途便于别人判断该分给谁。</div>
+          </n-form>
         </div>
 
-        <n-form-item label="角色名称">
-          <n-input
-            v-model:value="form.name"
-            placeholder="例：只读观察者"
-            :disabled="editingBuiltin"
-            maxlength="32"
-            show-count
-          />
-        </n-form-item>
-        <div v-if="editingBuiltin" class="field-hint">内置角色名称受保护，不可修改。</div>
+        <div class="role-form-perm">
+          <div class="form-section-title">
+            <n-icon :component="KeyOutline" :color="accent" />
+            权限（至少选一个）
+          </div>
 
-        <n-form-item label="说明">
-          <n-input
-            v-model:value="form.desc"
-            type="textarea"
-            placeholder="这个角色是干什么的、适合给谁用"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-            maxlength="200"
-            show-count
+          <n-alert v-if="editingWildcard" type="warning" :bordered="false" size="small" style="margin-bottom: 10px">
+            该角色是通配符 <code>*</code>，权限不由勾选决定；这里的勾选项不会写回角色。
+          </n-alert>
+          <PermissionTree
+            v-else
+            v-model:permissions="formPermissions"
+            :disabled="editingWildcard"
+            :color="accent"
           />
-        </n-form-item>
-      </n-form>
-
-      <div class="form-section-title">
-        <n-icon :component="KeyOutline" :color="accent" />
-        权限（至少选一个）
+        </div>
       </div>
-
-      <n-alert v-if="editingWildcard" type="warning" :bordered="false" size="small" style="margin-bottom: 10px">
-        该角色是通配符 <code>*</code>，权限不由勾选决定；这里的勾选项不会写回角色。
-      </n-alert>
-      <PermissionTree
-        v-else
-        v-model:permissions="formPermissions"
-        :disabled="editingWildcard"
-        :color="accent"
-      />
 
       <template #footer>
         <n-button size="small" :disabled="saving" @click="showForm = false">取消</n-button>
@@ -749,6 +756,45 @@ const columns: DataTableColumns<AdminRole> = [
   display: flex;
   gap: 2px;
   align-items: center;
+}
+
+/**
+ * 编辑弹窗左右两栏：左基本信息（固定 300px）、右权限树（吃剩余宽度）。
+ *
+ * 为什么分栏：上下堆叠时，弹窗内容区和权限树各有一个滚动条，
+ * 滚轮落到哪个容器取决于鼠标位置，操作很别扭。分栏后整块高度
+ * 基本落在弹窗可视区内，通常只剩权限树自己那一个滚动条。
+ */
+.role-form-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.role-form-basic {
+  flex: 0 0 300px;
+  min-width: 0;
+}
+
+.role-form-perm {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * 小屏退回单列：980px 的弹窗会被 `calc(100vw - 48px)` 夹窄，
+ * 两栏再分下去权限键名会被挤断，不如纵向排（此时接受弹窗滚动）。
+ */
+@media (max-width: 900px) {
+  .role-form-layout {
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .role-form-basic {
+    flex: none;
+    width: 100%;
+  }
 }
 
 .field-hint {
