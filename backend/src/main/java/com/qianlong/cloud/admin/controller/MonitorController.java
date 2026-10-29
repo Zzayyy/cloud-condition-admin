@@ -12,13 +12,13 @@ import com.qianlong.cloud.admin.dto.MonitorDtos.MetricOption;
 import com.qianlong.cloud.admin.dto.MonitorDtos.TimeSeriesView;
 import com.qianlong.cloud.admin.service.MonitorService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import lombok.RequiredArgsConstructor;
 
 /**
  * 指标趋势接口（{@code /api/monitor/series}）。
  *
- * <p>供「消息总线」页的趋势卡使用。**只读**。
+ * <p>供「消息总线」页的趋势卡使用。**只读**，权限键 {@code menu:server-stream}。
  *
  * <h2>⚠️ 两类指标，性质完全不同（这是本接口最需要说清的事）</h2>
  * <table border="1">
@@ -45,6 +45,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class MonitorController {
 
+    private static final String MENU_SERVER_STREAM = "menu:server-stream";
+
     private final MonitorService monitorService;
 
     /**
@@ -54,7 +56,7 @@ public class MonitorController {
      * @param window    时间窗，形如 {@code 15m} / {@code 60m}（前端契约如此）；
      *                  也接受纯数字（分钟）
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SERVER_STREAM)
     @GetMapping("/series")
     public ApiResult<TimeSeriesView> series(@RequestParam(required = false) String metric,
                                             @RequestParam(required = false) String window) {
@@ -67,7 +69,7 @@ public class MonitorController {
      * <p>单独给出来是为了让页面**不用猜** —— 指标键写错时能立刻发现，
      * 而不是看到一个空图去怀疑后端。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SERVER_STREAM)
     @GetMapping("/metrics")
     public ApiResult<List<MetricOption>> metrics() {
         return ApiResult.ok(monitorService.metrics());

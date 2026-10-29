@@ -107,6 +107,28 @@ export const useTabsStore = defineStore('tabs', () => {
     persist()
   }
 
+  /**
+   * 剔除不满足条件的页签（权限变更后清理用）。
+   *
+   * 页签列表存在 sessionStorage 里、**跨登录保留**：换个权限更小的账号登录，
+   * 上一任留下的页签仍会躺在页签栏里 —— 点得进去，然后被守卫弹回来，
+   * 看起来像「点了没反应」。所以在权限集合变化时按当前可见菜单清一遍。
+   *
+   * @returns 被剔除的是否是当前激活页（调用方需要决定跳去哪）
+   */
+  function prune(keep: (tab: TabItem) => boolean): boolean {
+    const next = tabs.value.filter(keep)
+    if (next.length === tabs.value.length) return false
+
+    const active = activePath.value
+    tabs.value = next
+    // 激活页被清掉时落到剩余页签的最后一个；一个都不剩就交给调用方跳转
+    const activeRemoved = active !== '' && !next.some((t) => t.path === active)
+    if (activeRemoved) activePath.value = next[next.length - 1]?.path ?? ''
+    persist()
+    return activeRemoved
+  }
+
   return {
     tabs,
     activePath,
@@ -118,5 +140,6 @@ export const useTabsStore = defineStore('tabs', () => {
     closeRight,
     closeLeft,
     closeAll,
+    prune,
   }
 })

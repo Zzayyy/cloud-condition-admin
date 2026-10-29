@@ -21,7 +21,8 @@ import com.qianlong.cloud.admin.dto.AccountDtos.UserLogView;
 import com.qianlong.cloud.admin.service.AccountLogService;
 import com.qianlong.cloud.admin.service.AccountService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.dev33.satoken.annotation.SaCheckPermission;
+import cn.dev33.satoken.annotation.SaMode;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -34,10 +35,17 @@ import lombok.RequiredArgsConstructor;
  *   <li>登录日志 —— {@code listLogs}、{@code listLogStats}。</li>
  * </ul>
  *
- * <p><b>权限：只要求登录，不要求额外权限点。</b>
- * 本模块目前只读（没有写操作），因此没有 {@code action:account-*:*} 之类的权限点 ——
- * 权限点只列真正危险的动作，避免管理员图省事全勾上而失去意义。
- * 将来若加「重置账号密码」这类写操作，再引入独立权限点并写审计。
+ * <p><b>权限：按页面校验菜单权限。</b>
+ * 本模块目前只读（没有写操作），因此没有 {@code action:account-*:*} 之类的操作权限点 ——
+ * 操作权限点只列真正危险的动作，避免管理员图省事全勾上而失去意义。
+ * 但读也要求菜单权限，否则「侧边栏藏起来」挡不住直接打接口：
+ * <ul>
+ *   <li>{@code accounts*} —— 用户账号页<b>与</b>签署页共用，
+ *       两个菜单权限任一即可（OR）；</li>
+ *   <li>{@code redis*} —— 只有用户账号页用 → {@code menu:account-user}；</li>
+ *   <li>{@code logs*} —— 登录日志页 → {@code menu:account-log}。</li>
+ * </ul>
+ * 将来若加「重置账号密码」这类写操作，再引入独立操作权限点并写审计。
  *
  * <p>⚠️ 注意本模块**不返回 {@code T_User.Passwd}**：
  * 出参 DTO 里根本没有这个字段。
@@ -46,6 +54,15 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("/account")
 @RequiredArgsConstructor
 public class AccountController {
+
+    /** 菜单权限：用户账号页 */
+    private static final String MENU_ACCOUNT_USER = "menu:account-user";
+
+    /** 菜单权限：签署与股东号页（复用账号列表，按 signed 筛选） */
+    private static final String MENU_ACCOUNT_SIGN = "menu:account-sign";
+
+    /** 菜单权限：登录日志页 */
+    private static final String MENU_ACCOUNT_LOG = "menu:account-log";
 
     private final AccountService accountService;
     private final AccountLogService accountLogService;
@@ -56,7 +73,7 @@ public class AccountController {
      * <p>合并由后端做：两个源都要参与筛选（在线 / 已签署 / 渠道横跨两边），
      * 拆成两个接口会让前端无法正确分页与筛选。
      */
-    @SaCheckLogin
+    @SaCheckPermission(value = {MENU_ACCOUNT_USER, MENU_ACCOUNT_SIGN}, mode = SaMode.OR)
     @GetMapping("/accounts")
     public ApiResult<PageResult<AccountRow>> listAccounts(AccountQuery query) {
         AccountService.MergedAccounts result = accountService.listAccounts(query);
@@ -68,7 +85,7 @@ public class AccountController {
     }
 
     /** 单个账号详情（含 MySQL 与 Redis 两侧合并结果） */
-    @SaCheckLogin
+    @SaCheckPermission(value = {MENU_ACCOUNT_USER, MENU_ACCOUNT_SIGN}, mode = SaMode.OR)
     @GetMapping("/accounts/{account}")
     public ApiResult<AccountRow> getAccount(@PathVariable String account) {
         AccountRow row = accountService.getAccount(account);
@@ -86,14 +103,14 @@ public class AccountController {
      * <p>口径：账号列表本身是「MySQL T_User 与 Redis acc-* 合并」的结果，
      * 所以这里的全量 = 合并并集经筛选后的全部行，与列表 total 同源。
      */
-    @SaCheckLogin
+    @SaCheckPermission(value = {MENU_ACCOUNT_USER, MENU_ACCOUNT_SIGN}, mode = SaMode.OR)
     @GetMapping("/accounts/stats/summary")
     public ApiResult<AccountService.AccountStats> accountStats(AccountQuery query) {
         return ApiResult.ok(accountService.stats(query));
     }
 
     /** 账号在 Redis 中的实时态（acc-* 原始 JSON） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ACCOUNT_USER)
     @GetMapping("/redis/{account}")
     public ApiResult<RedisAccountView> getRedisAccount(@PathVariable String account) {
         RedisAccountView view = accountService.getRedisAccount(account);
@@ -113,7 +130,7 @@ public class AccountController {
      * 若某个实例连不上，页面上的 hasRedis 会偏低，需要有一个地方能确认
      * 「是账号真的没有实时对象」还是「我们没连上 Redis」。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ACCOUNT_USER)
     @GetMapping("/redis-instances")
     public ApiResult<AccountService.RedisInstanceStatus> redisInstances() {
         return ApiResult.ok(accountService.redisInstanceStatus());
@@ -122,7 +139,7 @@ public class AccountController {
     /* ================================ 登录日志 ================================ */
 
     /** 登录日志明细（分页 + 账号 / 关键字 / 设备有无 / 时间范围筛选） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ACCOUNT_LOG)
     @GetMapping("/logs")
     public ApiResult<PageResult<UserLogView>> listLogs(LogQuery query) {
         return ApiResult.ok(accountLogService.listLogs(query));
@@ -133,7 +150,7 @@ public class AccountController {
      *
      * <p>由后端 GROUP BY 一次算好；前端拿分页明细自己数只能得到当前页。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ACCOUNT_LOG)
     @GetMapping("/logs/stats")
     public ApiResult<PageResult<AccountLogStatView>> listLogStats(
             @RequestParam(required = false) String keyword,
@@ -155,7 +172,7 @@ public class AccountController {
      *
      * <p>与另外两个趋势接口（条件单 / 委托）形状一致：{@code date} + {@code count}。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ACCOUNT_LOG)
     @GetMapping("/logs/daily")
     public ApiResult<List<UserLogDailyRow>> logDaily(
             @RequestParam(required = false) String from,

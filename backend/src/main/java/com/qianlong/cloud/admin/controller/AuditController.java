@@ -28,7 +28,6 @@ import com.qianlong.cloud.admin.service.AuditQueryService;
 import com.qianlong.cloud.admin.service.AuditService;
 import com.qianlong.cloud.admin.service.LoginLogService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -43,13 +42,16 @@ import lombok.RequiredArgsConstructor;
  *       不是云单客户的 {@code T_UserLog}。</li>
  * </ul>
  *
- * <p>读取不要求 {@code manage} 权限点（只读观察者也该能看审计），
- * 但<b>导出</b>要求 {@code action:system-audit:export} —— 导出即离场，需留痕。
+ * <p>读取要求菜单权限 {@code menu:system-audit}（只读观察者拿到该菜单权限就能看），
+ * 但<b>导出</b>另外要求 {@code action:system-audit:export} —— 导出即离场，需留痕。
  */
 @RestController
 @RequestMapping("/system")
 @RequiredArgsConstructor
 public class AuditController {
+
+    /** 菜单权限：操作审计页 */
+    private static final String MENU_SYSTEM_AUDIT = "menu:system-audit";
 
     private static final String ACTION_EXPORT = "action:system-audit:export";
 
@@ -60,7 +62,7 @@ public class AuditController {
     /* ============================== 操作审计 ============================== */
 
     /** 审计明细（分页 + 多条件筛选 + 时间范围 + 排序） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_AUDIT)
     @GetMapping("/audit-logs")
     public ApiResult<PageResult<AuditLogView>> listAudit(AuditQuery query) {
         return ApiResult.ok(auditQueryService.listAuditLogs(query));
@@ -72,21 +74,21 @@ public class AuditController {
      * <p>动作键与前端 {@code src/config/permissions.ts} 同源；
      * 另含 {@code system:login} / {@code system:connection} 两个登记型动作。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_AUDIT)
     @GetMapping("/audit-logs/actions")
     public ApiResult<List<AuditActionOption>> auditActions() {
         return ApiResult.ok(auditService.actions());
     }
 
     /** 审计按天聚合（高危 / 其他）；未传 from/to 时默认最近 14 个自然日 */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_AUDIT)
     @GetMapping("/audit-logs/daily")
     public ApiResult<List<AuditDailyRow>> auditDaily(RangeQuery query) {
         return ApiResult.ok(auditQueryService.auditDaily(query));
     }
 
     /** 审计按动作聚合（Top 8） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_AUDIT)
     @GetMapping("/audit-logs/by-action")
     public ApiResult<List<NameValueRow>> auditByAction(RangeQuery query) {
         return ApiResult.ok(auditQueryService.auditByAction(query));
@@ -97,7 +99,7 @@ public class AuditController {
      *
      * <p>与 {@code /audit-logs} 列表同筛选条件，{@code totalCount} 应等于列表 {@code total}。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_AUDIT)
     @GetMapping("/audit-logs/stats/summary")
     public ApiResult<AuditStats> auditStats(AuditQuery query) {
         return ApiResult.ok(auditQueryService.auditStats(query));
@@ -108,7 +110,7 @@ public class AuditController {
      *
      * <p>与 {@code /login-logs} 列表同筛选条件。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_AUDIT)
     @GetMapping("/login-logs/stats/summary")
     public ApiResult<LoginStats> loginStats(LoginLogQuery query) {
         return ApiResult.ok(auditQueryService.loginStats(query));
@@ -117,21 +119,21 @@ public class AuditController {
     /* ============================== 管理端登录日志 ============================== */
 
     /** 登录日志明细（分页 + 账号 / IP / 结果 / 时间范围筛选） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_AUDIT)
     @GetMapping("/login-logs")
     public ApiResult<PageResult<LoginLogView>> listLoginLogs(LoginLogQuery query) {
         return ApiResult.ok(loginLogService.listLogs(query));
     }
 
     /** 登录成功 / 失败按天聚合 */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_AUDIT)
     @GetMapping("/login-logs/daily")
     public ApiResult<List<LoginDailyRow>> loginDaily(RangeQuery query) {
         return ApiResult.ok(auditQueryService.loginDaily(query));
     }
 
     /** 登录失败按来源 IP 聚合（Top 8） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_AUDIT)
     @GetMapping("/login-logs/fail-by-ip")
     public ApiResult<List<NameValueRow>> loginFailByIp(RangeQuery query) {
         return ApiResult.ok(auditQueryService.loginFailByIp(query));
@@ -152,7 +154,7 @@ public class AuditController {
      *
      * <p>导出动作本身写审计（{@code action:system-audit:export}），导出即离场，需留痕。
      */
-    @SaCheckPermission(ACTION_EXPORT)
+    @SaCheckPermission({MENU_SYSTEM_AUDIT, ACTION_EXPORT})
     @PostMapping("/audit-logs/export")
     public ApiResult<AuditExportResult> exportAudit(@CurrentAdminUser AdminPrincipal me,
                                                     @RequestBody(required = false) AuditQuery query,
@@ -187,7 +189,7 @@ public class AuditController {
      * <p>文件名只允许 {@code [A-Za-z0-9._-]}（由 {@link CsvExporter} 校验），
      * 从根上杜绝 {@code ../} 路径穿越 —— 这是文件下载接口最常见的漏洞。
      */
-    @SaCheckPermission(ACTION_EXPORT)
+    @SaCheckPermission({MENU_SYSTEM_AUDIT, ACTION_EXPORT})
     @GetMapping("/audit-logs/export/download")
     public org.springframework.http.ResponseEntity<org.springframework.core.io.Resource>
     downloadAuditExport(@RequestParam("file") String file) {

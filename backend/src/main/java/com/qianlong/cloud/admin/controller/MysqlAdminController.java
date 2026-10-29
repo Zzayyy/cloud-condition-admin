@@ -17,7 +17,6 @@ import com.qianlong.cloud.admin.dto.MysqlAdminDtos.ReadonlyQueryResult;
 import com.qianlong.cloud.admin.service.AuditService;
 import com.qianlong.cloud.admin.service.MysqlAdminService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -51,6 +50,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class MysqlAdminController {
 
+    /** 菜单权限：数据库管理页（表清单与表结构都要求它） */
+    private static final String MENU_STORAGE_MYSQL = "menu:storage-mysql";
+
     /** 只读 SQL 的权限点（已在 T_AdminRolePermission 里存在） */
     private static final String PERM_READONLY_SQL = "action:storage-mysql:readonly-sql";
 
@@ -60,16 +62,17 @@ public class MysqlAdminController {
     /**
      * 表/视图清单。
      *
-     * <p>只要登录即可 —— 这是「看有哪些表」，不含数据内容。
+     * <p>要求 {@code menu:storage-mysql} —— 表名与字段同样是内部信息，
+     * 不能靠「藏菜单」来挡。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STORAGE_MYSQL)
     @GetMapping("/tables")
     public ApiResult<List<MysqlTableView>> tables(@RequestParam String database) {
         return ApiResult.ok(mysqlAdminService.listTables(database));
     }
 
     /** 单表结构（字段、索引、DDL 原文） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STORAGE_MYSQL)
     @GetMapping("/schema")
     public ApiResult<MysqlTableSchemaView> schema(@RequestParam String database,
                                                   @RequestParam String table) {
@@ -82,7 +85,7 @@ public class MysqlAdminController {
      * <p>要求 {@code readonly-sql} 权限点：虽然只是「看一张表」，
      * 但它等于对整个库的任意表做 SELECT，和跑只读 SQL 是同一档能力。
      */
-    @SaCheckPermission(PERM_READONLY_SQL)
+    @SaCheckPermission({MENU_STORAGE_MYSQL, PERM_READONLY_SQL})
     @GetMapping("/query")
     public ApiResult<ReadonlyQueryResult> queryTable(@RequestParam String database,
                                                      @RequestParam String table,
@@ -102,7 +105,7 @@ public class MysqlAdminController {
      * 必须留痕（谁、什么 SQL、返回多少行、耗时）。SQL 文本会记进审计，
      * 但**不记结果内容** —— 审计是「谁做了什么」，不是数据副本。
      */
-    @SaCheckPermission(PERM_READONLY_SQL)
+    @SaCheckPermission({MENU_STORAGE_MYSQL, PERM_READONLY_SQL})
     @PostMapping("/query")
     public ApiResult<ReadonlyQueryResult> runSql(@CurrentAdminUser AdminPrincipal me,
                                                  @RequestBody SqlQueryRequest body,

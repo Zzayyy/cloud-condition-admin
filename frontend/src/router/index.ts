@@ -1,7 +1,8 @@
-import type { RouteRecordRaw } from 'vue-router'
+import type { RouteLocationNormalized, RouteLocationRaw, RouteRecordRaw } from 'vue-router'
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 import { firstLeafPath, flattenMenu, menuTree, type MenuNode } from '@/config/menu'
+import { firstAllowedPath, menuPermissionKey } from '@/config/permissions'
 import { USE_MOCK } from '@/composables/useResource'
 import BasicLayout from '@/layouts/BasicLayout.vue'
 
@@ -148,22 +149,68 @@ function mustChangeRedirect(name: unknown, mustChange: boolean) {
   return { name: 'system-profile', query: { force: '1' } }
 }
 
+/**
+ * 不受菜单权限约束的路由。
+ *
+ * - `system-profile`：个人信息页，所有已登录用户都能进，也是「一个菜单权限都没有」
+ *   时的兜底落点（否则会重定向到无处可去）；
+ * - `not-found`：404 不该再叠一层权限判定；
+ * - `root` / `login`：布局外壳与登录页，本身不是页面。
+ */
+const PERMISSION_EXEMPT_ROUTES = new Set(['system-profile', 'not-found', 'root', 'login'])
+
+/** 守卫用到的会话字段（避免在文件顶层引入 store 类型，pinia 尚未安装） */
+type AuthLike = {
+  profile: { permissions: string[] } | null
+  mustChangePassword: boolean
+  can: (key: string) => boolean
+}
+
+/** 登录后 / 关闭全部页签后的落脚点：第一个**有权访问**的页面 */
+function homePathOf(auth: AuthLike): string {
+  return firstAllowedPath(auth.profile?.permissions) ?? '/system/profile'
+}
+
+/**
+ * 菜单权限的**第二道闸**（第一道是侧边栏裁剪）。
+ *
+ * 只藏菜单是不够的：hash 路由可以直接手敲 `#/system/user`，
+ * 而后端读接口大多只有 `@SaCheckLogin`（`@SaCheckPermission` 只挡写操作），
+ * 于是「看不见入口」会变成「其实进得去」。这里按 `menu:<路由 name>` 拦一次。
+ *
+ * 超管是 `*`，`auth.can()` 直接放行，不用特判。
+ */
+function guardRedirect(to: RouteLocationNormalized, auth: AuthLike): RouteLocationRaw | null {
+  const forced = mustChangeRedirect(to.name, auth.mustChangePassword)
+  if (forced) return forced
+
+  const name = typeof to.name === 'string' ? to.name : undefined
+  if (!name || PERMISSION_EXEMPT_ROUTES.has(name)) return null
+  // 路由 name 就是菜单 name，权限键由它推导（menu.ts 里已写明这条约定）
+  if (auth.can(menuPermissionKey(name))) return null
+
+  const fallback = homePathOf(auth)
+  // 兜底页就是当前页时放行，否则会自己重定向自己
+  if (fallback === to.path) return null
+  return fallback
+}
+
 router.beforeEach(async (to) => {
   const { useAuthStore } = await import('@/stores/auth')
   const auth = useAuthStore()
 
   if (to.meta.public) {
-    return auth.isLoggedIn ? firstLeafPath() : true
+    return auth.isLoggedIn ? homePathOf(auth) : true
   }
 
   if (auth.isLoggedIn) {
-    return mustChangeRedirect(to.name, auth.mustChangePassword) ?? true
+    return guardRedirect(to, auth) ?? true
   }
 
   // 刷新页面后内存里是空的，但 localStorage 里可能还有 token —— 先试着换回身份
   await auth.fetchProfile()
   if (auth.isLoggedIn) {
-    return mustChangeRedirect(to.name, auth.mustChangePassword) ?? true
+    return guardRedirect(to, auth) ?? true
   }
 
   return {

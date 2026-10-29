@@ -39,9 +39,11 @@ import { mockAdminApi } from '@/api/mock/system'
 import { withDelay } from '@/api/mock/_shared'
 import type { AdminRole, AdminRolePayload } from '@/api/domain'
 import {
+  ACTION_PERMISSIONS,
   PERMISSION_WILDCARD,
   actionPermissionKey,
   allPermissionKeys,
+  menuPermissionKey,
 } from '@/config/permissions'
 import { useResource } from '@/composables/useResource'
 import { useAuthStore } from '@/stores/auth'
@@ -82,6 +84,21 @@ const canManage = computed(() => auth.can(actionPermissionKey('system-role', 'ma
 
 /** 契约里的权限点总数（演示数据里的角色权限点数量都以此为分母） */
 const totalPermissionKeys = allPermissionKeys().length
+
+/**
+ * 找出「有操作权限、却没有所属页面菜单权限」的键。
+ *
+ * 后端判定是「菜单 + 操作」AND，这类权限永远不可达。权限树勾选时会自动补菜单，
+ * 但旧数据（或直接写库）可能留下这种组合 —— 保存前必须拦住。
+ * 这里不能静默补菜单：补菜单等于悄悄扩了可见范围，属于提权。
+ */
+function deadActionKeys(keys: readonly string[]): string[] {
+  const set = new Set(keys)
+  return keys.filter((key) => {
+    const def = ACTION_PERMISSIONS.find((a) => actionPermissionKey(a.menu, a.action) === key)
+    return def !== undefined && !set.has(menuPermissionKey(def.menu))
+  })
+}
 
 /* ------------------------------ 角色列表取数 ------------------------------ */
 
@@ -302,6 +319,15 @@ async function submitForm() {
   }
   if (!editingWildcard.value && !formPermissions.value.length) {
     message.error('至少选择一个权限点：一个权限都没有的角色，登录后什么都看不到')
+    return
+  }
+
+  const dead = editingWildcard.value ? [] : deadActionKeys(formPermissions.value)
+  if (dead.length) {
+    message.error(
+      `以下操作权限缺少所属页面的「页面访问（菜单权限）」，保存后也无法使用：${dead.join('、')}。` +
+        '请勾上对应页面，或取消这些操作权限。',
+    )
     return
   }
 

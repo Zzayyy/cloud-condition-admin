@@ -8,7 +8,7 @@ import com.qianlong.cloud.admin.common.ApiResult;
 import com.qianlong.cloud.admin.dto.DashboardDtos.DashboardOverview;
 import com.qianlong.cloud.admin.service.DashboardService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -34,17 +34,22 @@ import lombok.RequiredArgsConstructor;
  * 这些原因由 {@code summary.idleReason} 汇总成一句话；页面直接展示它，
  * 免得每个数字被单独误读（「在线 0 个」会被读成全线宕机）。
  *
- * <p><b>权限</b>：只要求登录。只读接口。
+ * <p><b>权限</b>：{@code menu:dashboard}。只读接口。
+ *
+ * <p>菜单权限也校验：只藏侧边栏拦不住直接打接口的人，
+ * 而总览里的节点与业务量级同样属于内部信息。
  */
 @RestController
 @RequestMapping("/dashboard")
 @RequiredArgsConstructor
 public class DashboardController {
 
+    private static final String MENU_DASHBOARD = "menu:dashboard";
+
     private final DashboardService dashboardService;
 
     /** 总览数据（汇总 + 数据来源与规模 + 近 14 天趋势） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_DASHBOARD)
     @GetMapping("/overview")
     public ApiResult<DashboardOverview> overview() {
         return ApiResult.ok(dashboardService.overview());

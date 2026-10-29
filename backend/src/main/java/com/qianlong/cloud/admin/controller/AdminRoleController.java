@@ -19,8 +19,8 @@ import com.qianlong.cloud.admin.service.AdminRoleService;
 import com.qianlong.cloud.admin.service.AuditService;
 import com.qianlong.cloud.admin.service.PermissionCatalog;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckPermission;
+import cn.dev33.satoken.annotation.SaMode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,14 +32,24 @@ import lombok.RequiredArgsConstructor;
  * 这一页权限最大：改权限等于改所有人的可见范围，还包含「给自己提权」的风险，
  * 所以每个写操作都必须写审计（审计里带前后权限差异，便于事后追责）。
  *
- * <p>读取角色列表<b>不要求</b>该权限点：管理用户页要用角色下拉与角色名解析，
+ * <p>读取<b>不要求</b> {@code manage} 操作权限点：管理用户页要用角色下拉与角色名解析，
  * 若读也要求 {@code manage}，只读账号（如 viewer）根本渲染不出角色名，
  * 只能显示「角色 3」这种没有信息量的内容。
+ *
+ * <p>但读要求<b>菜单权限</b>：列表允许 {@code menu:system-role} 或
+ * {@code menu:system-user}（两个页面都要用），其余角色接口只认
+ * {@code menu:system-role} —— 否则改权限的页面藏起来了，权限数据仍能被直接读走。
  */
 @RestController
 @RequestMapping("/system/roles")
 @RequiredArgsConstructor
 public class AdminRoleController {
+
+    /** 菜单权限：角色与权限页 */
+    private static final String MENU_SYSTEM_ROLE = "menu:system-role";
+
+    /** 菜单权限：管理用户与权限页（角色下拉要用角色列表） */
+    private static final String MENU_SYSTEM_USER = "menu:system-user";
 
     private static final String ACTION_MANAGE = "action:system-role:manage";
 
@@ -47,14 +57,19 @@ public class AdminRoleController {
     private final AuditService auditService;
     private final PermissionCatalog catalog;
 
-    /** 全部角色（含权限点与引用人数） */
-    @SaCheckLogin
+    /**
+     * 全部角色（含权限点与引用人数）。
+     *
+     * <p>两个页面都要用：角色页本身，以及管理用户页的角色下拉。
+     * 所以这里用 OR —— 只要能看到其中一页就允许读。
+     */
+    @SaCheckPermission(value = {MENU_SYSTEM_ROLE, MENU_SYSTEM_USER}, mode = SaMode.OR)
     @GetMapping
     public ApiResult<List<AdminRoleView>> list() {
         return ApiResult.ok(roleService.listRoles());
     }
 
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_ROLE)
     @GetMapping("/{id}")
     public ApiResult<AdminRoleView> detail(@PathVariable Integer id) {
         return ApiResult.ok(roleService.getRole(id));
@@ -67,14 +82,14 @@ public class AdminRoleController {
      * 但如果两边清单不一致（有人只改了前端菜单、没同步后端字典），
      * 有了它就能立刻看出来，而不是等到「某个权限点永远勾不上」才发现。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SYSTEM_ROLE)
     @GetMapping("/permission-keys")
     public ApiResult<List<String>> permissionKeys() {
         return ApiResult.ok(catalog.allPermissionKeys().stream().sorted().toList());
     }
 
     /** 新建角色 */
-    @SaCheckPermission(ACTION_MANAGE)
+    @SaCheckPermission({MENU_SYSTEM_ROLE, ACTION_MANAGE})
     @PostMapping
     public ApiResult<AdminRoleView> create(@CurrentAdminUser AdminPrincipal me,
                                            @Valid @RequestBody AdminRolePayload payload,
@@ -98,7 +113,7 @@ public class AdminRoleController {
      * <p>审计里记的是<b>变更后的权限点数量与差异摘要</b>，不是完整权限数组 ——
      * 完整数组可能很长，而审计表要能一眼看出「这次改了什么」。
      */
-    @SaCheckPermission(ACTION_MANAGE)
+    @SaCheckPermission({MENU_SYSTEM_ROLE, ACTION_MANAGE})
     @PutMapping("/{id}")
     public ApiResult<AdminRoleView> update(@CurrentAdminUser AdminPrincipal me,
                                            @PathVariable Integer id,
@@ -119,7 +134,7 @@ public class AdminRoleController {
     }
 
     /** 删除角色（内置角色、以及仍被账号引用的角色会被拒绝） */
-    @SaCheckPermission(ACTION_MANAGE)
+    @SaCheckPermission({MENU_SYSTEM_ROLE, ACTION_MANAGE})
     @DeleteMapping("/{id}")
     public ApiResult<Void> delete(@CurrentAdminUser AdminPrincipal me,
                                   @PathVariable Integer id,

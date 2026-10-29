@@ -18,7 +18,6 @@ import com.qianlong.cloud.admin.dto.RedisAdminDtos.ScanResult;
 import com.qianlong.cloud.admin.service.AuditService;
 import com.qianlong.cloud.admin.service.RedisAdminService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +48,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class RedisAdminController {
 
+    /** 菜单权限：Redis 管理页（读接口都要求它） */
+    private static final String MENU_STORAGE_REDIS = "menu:storage-redis";
+
     /** 删除键的权限点（已在 T_AdminRolePermission 里存在，标记为高危） */
     private static final String PERM_DELETE_KEY = "action:storage-redis:delete-key";
 
@@ -67,14 +69,14 @@ public class RedisAdminController {
      * 两者用途不同。下面接口的 {@code instanceId} 参数接收的正是这个主机地址
      * （**参数名保持 {@code instanceId} 不变**，与前端 {@code endpoints.ts} 一致）。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STORAGE_REDIS)
     @GetMapping("/instances")
     public ApiResult<List<RedisInstanceView>> instances() {
         return ApiResult.ok(redisAdminService.listInstances());
     }
 
     /** 实例概览（INFO 常用字段 + 各 db 键数） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STORAGE_REDIS)
     @GetMapping("/info")
     public ApiResult<RedisInstanceInfoView> info(@RequestParam("instanceId") String host) {
         return ApiResult.ok(redisAdminService.instanceInfo(host));
@@ -87,7 +89,7 @@ public class RedisAdminController {
      * 明确告知「是否只扫了一部分」，{@code dbSize} 给出该 db 的真实键数，
      * 便于判断「列表不全」还是「本来就这么少」。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STORAGE_REDIS)
     @GetMapping("/keys")
     public ApiResult<ScanResult> keys(@RequestParam("instanceId") String host,
                                       @RequestParam(defaultValue = "0") int db,
@@ -103,7 +105,7 @@ public class RedisAdminController {
     }
 
     /** 单个键的内容（按类型返回不同结构，页面据此选渲染方式） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STORAGE_REDIS)
     @GetMapping("/key")
     public ApiResult<RedisKeyDetailView> keyDetail(@RequestParam("instanceId") String host,
                                                    @RequestParam(defaultValue = "0") int db,
@@ -117,7 +119,7 @@ public class RedisAdminController {
      * <p>订阅者数是判断「消息有没有人在听」的关键 ——
      * 光看频道名看不出来。现场 136 有 14 个频道、137 一个都没有。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STORAGE_REDIS)
     @GetMapping("/channels")
     public ApiResult<List<RedisPubSubChannelView>> channels(@RequestParam("instanceId") String host) {
         return ApiResult.ok(redisAdminService.pubsubChannels(host));
@@ -136,7 +138,7 @@ public class RedisAdminController {
      * <p>返回值是实际删除的键数：0 表示键本来就不存在 ——
      * **不假装成功**，前端据此如实提示。
      */
-    @SaCheckPermission(PERM_DELETE_KEY)
+    @SaCheckPermission({MENU_STORAGE_REDIS, PERM_DELETE_KEY})
     @DeleteMapping("/key")
     public ApiResult<Long> deleteKey(@RequestParam("instanceId") String host,
                                      @RequestParam(defaultValue = "0") int db,

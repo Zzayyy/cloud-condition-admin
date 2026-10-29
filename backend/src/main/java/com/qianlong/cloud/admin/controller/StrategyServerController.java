@@ -9,7 +9,7 @@ import com.qianlong.cloud.admin.dto.StrategyServerDtos.StrategyServerPage;
 import com.qianlong.cloud.admin.dto.StrategyServerDtos.StrategyServerQuery;
 import com.qianlong.cloud.admin.service.StrategyServerService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -35,12 +35,14 @@ import lombok.RequiredArgsConstructor;
  *       也改为只读标签。</li>
  * </ol>
  *
- * <p><b>权限</b>：只要求登录。本模块**只读**，未引入额外权限点。
+ * <p><b>权限</b>：{@code menu:server-strategy}。本模块**只读**，未引入操作权限点。
  */
 @RestController
 @RequestMapping("/strategy/servers")
 @RequiredArgsConstructor
 public class StrategyServerController {
+
+    private static final String MENU_SERVER_STRATEGY = "menu:server-strategy";
 
     private final StrategyServerService strategyServerService;
 
@@ -51,7 +53,7 @@ public class StrategyServerController {
      * 都是**全量**算的，不是当前页 —— 前端原先按当前页 filter，
      * 翻页时「在线节点」会莫名变化。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SERVER_STRATEGY)
     @GetMapping
     public ApiResult<StrategyServerPage> list(StrategyServerQuery query) {
         return ApiResult.ok(strategyServerService.listServers(query));

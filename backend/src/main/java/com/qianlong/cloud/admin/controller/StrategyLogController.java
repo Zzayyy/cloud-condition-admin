@@ -19,7 +19,7 @@ import com.qianlong.cloud.admin.dto.StrategyLogDtos.StrategyStatRow;
 import com.qianlong.cloud.admin.dto.StrategyLogDtos.StatusCountRow;
 import com.qianlong.cloud.admin.service.StrategyLogService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -46,12 +46,15 @@ import lombok.RequiredArgsConstructor;
  * <p><b>为什么没有写接口</b>：日志由策略平台追加写入，后台只读 ——
  * 没有任何「修改一条日志」的合理语义。
  *
- * <p>权限：只要求登录。只读模块不引入额外权限点。
+ * <p>权限：{@code menu:strategy-log}。只读模块不引入操作权限点，
+ * 但菜单权限要校验 —— 否则「侧边栏藏起来」只是障眼法。
  */
 @RestController
 @RequestMapping("/strategy/logs")
 @RequiredArgsConstructor
 public class StrategyLogController {
+
+    private static final String MENU_STRATEGY_LOG = "menu:strategy-log";
 
     private final StrategyLogService strategyLogService;
 
@@ -61,7 +64,7 @@ public class StrategyLogController {
      * <p>筛选：{@code keyword}（策略编号 / 日志内容 / 来源账号，三处模糊匹配）、
      * {@code status}、{@code fromIp}、{@code from}/{@code to} 时间范围。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STRATEGY_LOG)
     @GetMapping
     public ApiResult<StrategyLogPage> list(StrategyLogQuery query) {
         return ApiResult.ok(strategyLogService.listLogs(query));
@@ -74,14 +77,14 @@ public class StrategyLogController {
      * {@code LOG_STATUS} 取 —— 那 7 个值现场一个都不存在，
      * 做成下拉会让人「选一个、查出 0 条、以为查询坏了」。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STRATEGY_LOG)
     @GetMapping("/statuses")
     public ApiResult<List<String>> statuses() {
         return ApiResult.ok(strategyLogService.statuses());
     }
 
     /** 按天日志量（趋势图） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STRATEGY_LOG)
     @GetMapping("/stats/daily")
     public ApiResult<List<DailyLogRow>> daily(@RequestParam(required = false) String from,
                                               @RequestParam(required = false) String to) {
@@ -98,14 +101,14 @@ public class StrategyLogController {
      * 返回里的 {@code statusColumnEmpty} 让前端能区分
      * 「真的是 0%」与「这一列没数据」—— 二者含义完全不同。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STRATEGY_LOG)
     @GetMapping("/stats/summary")
     public ApiResult<StrategyLogStats> stats(StrategyLogQuery query) {
         return ApiResult.ok(strategyLogService.stats(query));
     }
 
     /** 按条件单聚合（「按策略单查看生命周期」） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STRATEGY_LOG)
     @GetMapping("/stats/by-strategy")
     public ApiResult<PageResult<StrategyStatRow>> byStrategy(
             @RequestParam(required = false) String keyword,
@@ -121,7 +124,7 @@ public class StrategyLogController {
      * <p>现场 {@code Status} 整列为 NULL，所以只会返回一行
      * {@code status=null, count=全表条数} —— 前端显示成「（空）」。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STRATEGY_LOG)
     @GetMapping("/stats/status-distribution")
     public ApiResult<List<StatusCountRow>> statusDistribution(StrategyLogQuery query) {
         return ApiResult.ok(strategyLogService.statusDistribution(query));
@@ -132,7 +135,7 @@ public class StrategyLogController {
      *
      * <p>与列表的「最新在前」方向相反 —— 轨迹要按时间顺序看才有意义。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_STRATEGY_LOG)
     @GetMapping("/{strategy}/timeline")
     public ApiResult<List<StrategyLogView>> timeline(@PathVariable Long strategy) {
         return ApiResult.ok(strategyLogService.timeline(strategy));

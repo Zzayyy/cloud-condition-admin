@@ -33,7 +33,8 @@ import {
   TrashOutline,
 } from '@vicons/ionicons5'
 
-import { findMenuChainByPath, firstLeafPath, menuTree, type MenuNode } from '@/config/menu'
+import { findMenuChainByPath, flattenMenu, type MenuNode } from '@/config/menu'
+import { filterMenuByPermissions, firstAllowedPath } from '@/config/permissions'
 import { accentOf, moduleKeyFromPath, tintOf } from '@/theme/palette'
 import { useAppStore, type ThemeMode } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -76,7 +77,28 @@ function toMenuOptions(nodes: MenuNode[], topLevel = true): MenuOption[] {
   })
 }
 
-const menuOptions = computed(() => toMenuOptions(menuTree))
+/**
+ * 侧边栏只渲染当前身份**有权访问**的菜单 —— 这是菜单权限的第一道闸，
+ * 第二道在 `router/index.ts` 的守卫里（防手敲 URL）。
+ *
+ * 分组（server / bizdata / …）不是权限键，由 `filterMenuByPermissions`
+ * 按「还有没有可见叶子」决定去留，不要给分组单独判权。
+ */
+const visibleMenuTree = computed(() => filterMenuByPermissions(authStore.profile?.permissions))
+
+const menuOptions = computed(() => toMenuOptions(visibleMenuTree.value))
+
+/** 当前身份可停留的页面路径（含不进菜单的个人信息页），用于清理页签 */
+const allowedTabPaths = computed(() => {
+  const paths = new Set(flattenMenu(visibleMenuTree.value).map((node) => node.path))
+  paths.add('/system/profile')
+  return paths
+})
+
+/** 关闭全部页签 / 页签被清空后的落脚点：第一个有权访问的页面 */
+function homePath() {
+  return firstAllowedPath(authStore.profile?.permissions) ?? '/system/profile'
+}
 
 const activeMenuKey = computed(() => (route.name as string) ?? '')
 
@@ -113,6 +135,21 @@ watch(
     const title = route.meta?.title as string | undefined
     if (!title || route.name === 'not-found' || route.name === 'root') return
     tabsStore.open({ name: route.name as string, path: route.path, title })
+  },
+  { immediate: true },
+)
+
+/**
+ * 权限变化（换账号登录、管理员改了角色）时清掉无权页签。
+ *
+ * 页签存在 sessionStorage 里、**跨登录恢复**：不清理的话，权限更小的账号
+ * 登录后仍会看到上一任留下的页签，点进去又被守卫弹回来，像「点了没反应」。
+ */
+watch(
+  allowedTabPaths,
+  (allowed) => {
+    const activeRemoved = tabsStore.prune((tab) => allowed.has(tab.path))
+    if (activeRemoved) router.replace(homePath())
   },
   { immediate: true },
 )
@@ -247,7 +284,7 @@ function handleCtxSelect(key: string) {
       return
     case 'close':
       settle(tabsStore.close(path))
-      if (!tabsStore.tabs.length) router.push(firstLeafPath())
+      if (!tabsStore.tabs.length) router.push(homePath())
       return
     case 'close-others':
       tabsStore.closeOthers(path)
@@ -261,7 +298,7 @@ function handleCtxSelect(key: string) {
       return
     case 'close-all':
       tabsStore.closeAll()
-      router.push(firstLeafPath())
+      router.push(homePath())
   }
 }
 

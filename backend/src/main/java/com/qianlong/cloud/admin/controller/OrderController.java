@@ -29,7 +29,7 @@ import com.qianlong.cloud.admin.dto.TradeServerDtos.TraderServerQuery;
 import com.qianlong.cloud.admin.service.OrderService;
 import com.qianlong.cloud.admin.service.TradeServerService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -46,13 +46,24 @@ import lombok.RequiredArgsConstructor;
  * 前端本页也没有写操作按钮（只有列表、筛选、详情、成交下钻），
  * 所以不存在「留一个能改库但改不对的接口」的问题。
  *
- * <p>权限：只要求登录。本模块只读，未引入额外权限点 ——
- * 权限点只列真正危险的动作，避免管理员图省事全勾上而失去意义。
+ * <p>权限：按页面校验菜单权限（{@code /trade/orders} → {@code menu:order}、
+ * {@code /trade/trades} → {@code menu:deal}、{@code /trade/servers|assignments}
+ * → {@code menu:server-trade}）。本模块只读，没有操作权限点 ——
+ * 操作权限点只列真正危险的动作，避免管理员图省事全勾上而失去意义。
  */
 @RestController
 @RequestMapping("/trade")
 @RequiredArgsConstructor
 public class OrderController {
+
+    /** 菜单权限：委托单管理页 */
+    private static final String MENU_ORDER = "menu:order";
+
+    /** 菜单权限：成交回报管理页 */
+    private static final String MENU_DEAL = "menu:deal";
+
+    /** 菜单权限：委托服务器页（节点与账号分配关系） */
+    private static final String MENU_SERVER_TRADE = "menu:server-trade";
 
     private final OrderService orderService;
     private final TradeServerService tradeServerService;
@@ -66,14 +77,14 @@ public class OrderController {
      * 这个值直接来自前端用户可点的 tab，所以后端用 {@code TradeTable} 枚举
      * 严格白名单校验，非法值返回 40000 而不是静默回落。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ORDER)
     @GetMapping("/orders")
     public ApiResult<OrderPage> listOrders(OrderQuery query) {
         return ApiResult.ok(orderService.listOrders(query));
     }
 
     /** 委托单详情（先主表后历史表） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ORDER)
     @GetMapping("/orders/{id}")
     public ApiResult<OrderView> orderDetail(@PathVariable Long id) {
         OrderView view = orderService.getOrder(id);
@@ -95,14 +106,14 @@ public class OrderController {
      * {@code /orders/stats/bs} 与 {@code /orders/{id}} 段数相同，
      * 但 Spring 的路径匹配**优先精确匹配**，所以 {@code stats} 不会被当成 id 解析。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ORDER)
     @GetMapping("/orders/{orderNo}/trades")
     public ApiResult<List<TradeView>> tradesByOrder(@PathVariable String orderNo) {
         return ApiResult.ok(orderService.listTradesByOrderNo(orderNo));
     }
 
     /** 买卖方向分布（全量口径，前端买卖分布图用） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ORDER)
     @GetMapping("/orders/stats/bs")
     public ApiResult<List<BsCountRow>> bsDistribution(
             @RequestParam(required = false) String table) {
@@ -110,7 +121,7 @@ public class OrderController {
     }
 
     /** 按天下单量趋势（趋势图用） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ORDER)
     @GetMapping("/orders/stats/daily")
     public ApiResult<List<DailyOrderRow>> dailyOrders(
             @RequestParam(required = false) String table,
@@ -126,7 +137,7 @@ public class OrderController {
      * 所以 {@code totalCount} 应与列表的 {@code total} 相等 ——
      * 卡片数字与「共 N 条」对不上时可据此立刻定位。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_ORDER)
     @GetMapping("/orders/stats/summary")
     public ApiResult<OrderStats> orderStats(OrderQuery query) {
         return ApiResult.ok(orderService.stats(query));
@@ -140,7 +151,7 @@ public class OrderController {
      * <p>放在这个 Controller 里是为了与前端 {@code tradeApi} 的分组一致
      * （{@code listOrders} 与 {@code listTrades} 同属 {@code tradeApi}）。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_DEAL)
     @GetMapping("/trades")
     public ApiResult<TradePage> listTrades(TradeQuery query) {
         return ApiResult.ok(orderService.listTrades(query));
@@ -152,7 +163,7 @@ public class OrderController {
      * <p>成交金额 / 总量 / 均价都由数据库算准，前端不再按当前页自己加。
      * 均价是「总额 ÷ 总量」，不是对每页均价的平均。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_DEAL)
     @GetMapping("/trades/stats/summary")
     public ApiResult<TradeStats> tradeStats(TradeQuery query) {
         return ApiResult.ok(orderService.tradeStats(query));
@@ -164,7 +175,7 @@ public class OrderController {
      * <p>参数与 {@code /trades} 列表一致（keyword / code / table），
      * 切换「当前成交 / 历史成交」tab 时趋势跟着变。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_DEAL)
     @GetMapping("/trades/stats/daily")
     public ApiResult<List<TradeDailyRow>> tradeDaily(TradeQuery query) {
         return ApiResult.ok(orderService.tradeDaily(
@@ -176,7 +187,7 @@ public class OrderController {
      *
      * <p>{@code limit} 默认 8（与页面上「最多显示 8 个合约」一致）。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_DEAL)
     @GetMapping("/trades/stats/codes")
     public ApiResult<List<CodeCountRow>> tradeCodes(
             TradeQuery query,
@@ -198,7 +209,7 @@ public class OrderController {
      * <p>默认排序是**在线优先 + 心跳倒序**：不这么排的话，进页面第一眼
      * 全是几个月前的残留，唯一活着的那台被挤到后面。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SERVER_TRADE)
     @GetMapping("/servers")
     public ApiResult<TradeServerPage> listServers(TraderServerQuery query) {
         return ApiResult.ok(tradeServerService.listServers(query));
@@ -210,7 +221,7 @@ public class OrderController {
      * <p>数据源是 {@code acc-*} 键里的 {@code traderserver} 字段，
      * 复用账号页的同一份映射（返回类型就是前端 {@code RedisAccount}）。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SERVER_TRADE)
     @GetMapping("/assignments")
     public ApiResult<PageResult<RedisAccountView>> listAssignments(AssignmentQuery query) {
         TradeServerService.MergedAssignments result = tradeServerService.listAssignments(query);
@@ -227,7 +238,7 @@ public class OrderController {
      * 会显示承载同一批账号。这是数据本身如此，不是查询写错；
      * 页面已注明「按 id 匹配，因 id 会重复仅供参考」。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SERVER_TRADE)
     @GetMapping("/servers/{serverId}/accounts")
     public ApiResult<List<RedisAccountView>> accountsByServer(@PathVariable Integer serverId) {
         return ApiResult.ok(tradeServerService.listAccountsByServer(serverId));

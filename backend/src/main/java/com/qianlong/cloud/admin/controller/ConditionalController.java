@@ -25,7 +25,6 @@ import com.qianlong.cloud.admin.service.AuditService;
 import com.qianlong.cloud.admin.service.ConditionalDispatchService;
 import com.qianlong.cloud.admin.service.ConditionalService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -57,14 +56,18 @@ import lombok.RequiredArgsConstructor;
  * 明确告知前端「写操作尚未实现及其原因」，而不是留一个能改库但改不对的接口。
  * 等现场确认下发链路（需要数据中心配合）后再补。
  *
- * <p>权限：只要求登录。将来补启停/删除时，应使用
- * {@code action:conditional:write} 权限点（该权限点已在 T_AdminRolePermission
- * 里存在，且标记为 high 危险级）。
+ * <p>权限：读接口要求 {@code menu:conditional}（藏菜单挡不住直接打接口的人）。
+ * 启停/删除另外要求 {@code action:conditional:write}
+ * （该权限点已在 T_AdminRolePermission 里存在，且标记为 high 危险级）——
+ * 菜单权限<b>不</b>隐式覆盖操作权限，两者是 AND 关系。
  */
 @RestController
 @RequestMapping("/strategy/conditionals")
 @RequiredArgsConstructor
 public class ConditionalController {
+
+    /** 菜单权限：条件单管理页 */
+    private static final String MENU_CONDITIONAL = "menu:conditional";
 
     /** 写操作权限点（已存在，high 危险级） */
     private static final String PERM_WRITE = "action:conditional:write";
@@ -81,14 +84,14 @@ public class ConditionalController {
      * 分别对应 {@code T_Conditional} / {@code T_Conditional_his} /
      * {@code V_Conditional}。数据只来自这三张表。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_CONDITIONAL)
     @GetMapping
     public ApiResult<ConditionalPage> list(ConditionalQuery query) {
         return ApiResult.ok(conditionalService.listConditionals(query));
     }
 
     /** 条件单详情 */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_CONDITIONAL)
     @GetMapping("/{id}")
     public ApiResult<ConditionalView> detail(@PathVariable Long id) {
         ConditionalView view = conditionalService.getConditional(id);
@@ -99,7 +102,7 @@ public class ConditionalController {
     }
 
     /** 按天新增趋势（趋势图用） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_CONDITIONAL)
     @GetMapping("/stats/daily")
     public ApiResult<List<DailyCreatedRow>> daily(@RequestParam(required = false) String from,
                                                   @RequestParam(required = false) String to) {
@@ -107,7 +110,7 @@ public class ConditionalController {
     }
 
     /** 类型分布（全量口径，不限于当前页） */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_CONDITIONAL)
     @GetMapping("/stats/types")
     public ApiResult<List<TypeCountRow>> typeDistribution() {
         return ApiResult.ok(conditionalService.typeDistribution());
@@ -119,7 +122,7 @@ public class ConditionalController {
      * <p>与列表同参数（source / keyword / type / mode），
      * 所以 {@code totalCount} 应与列表的 {@code total} 相等。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_CONDITIONAL)
     @GetMapping("/stats/summary")
     public ApiResult<ConditionalStats> stats() {
         // 全量口径：**故意不接收** source / keyword / type / mode ——
@@ -145,7 +148,7 @@ public class ConditionalController {
      * <p>权限：{@code action:conditional:write}（high 危险级）。
      * 成功与失败<b>都写审计</b> —— 失败也要留痕（「谁试过停哪张单但没成」必须查得到）。
      */
-    @SaCheckPermission(PERM_WRITE)
+    @SaCheckPermission({MENU_CONDITIONAL, PERM_WRITE})
     @PostMapping("/{id}/state")
     public ApiResult<ConditionalWriteResult> setState(@PathVariable Long id,
                                                       @RequestBody ConditionalStatePayload payload,
@@ -186,7 +189,7 @@ public class ConditionalController {
      * <p>做成接口而不是只写在文档里，是为了让「为什么这个按钮点了没用」
      * 在联调时一眼可见，而不是去翻代码。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_CONDITIONAL)
     @GetMapping("/instructions")
     public ApiResult<WriteStatus> instructions() {
         /*

@@ -234,6 +234,11 @@ npm run dev          # http://localhost:5173
    `action:storage-redis:delete-key` —— 否则「能看到页面」就等于「能删键」，
    操作权限点就白加了。界面上靠显式按钮帮管理员一并勾上，
    而不是靠运行时隐式放行（`hasPermission()` 只认精确键与 `*`）。
+   反过来，操作权限**必须**依附于所属页面的菜单权限（后端判定是
+   `@SaCheckPermission({menu:x, action:x:y})` 的 AND）：勾操作权限会自动补上
+   「页面访问」，取消页面访问会连带撤销该页操作权限，由
+   `normalizePermissionSelection()` 收敛；保存时还会兜底拦一次，
+   防止旧数据里留下「只有动作、没有页面」的死权限。
 2. **权限树里所有父节点一律不可勾选（`checkboxDisabled`）。**
    这是堵一条**静默提权**路径：naive-ui 的 Tree（treemate）在 `cascade` 模式下，
    会给任何被勾选的**父节点**自动展开勾上它的**全部子孙**
@@ -250,8 +255,9 @@ npm run dev          # http://localhost:5173
 4. **写错菜单名会直接报错。** `assertActionPermissions()` 在模块加载时自检
    「操作权限引用的菜单是否存在、键是否重复」——这类错误本来是**静默失效**
    （某个权限点永远勾不上），改成加载时就 `console.error` 打出来。
-5. **`can('')` 不是有效守卫。** 演示态下 `authStore.can()` 无条件放行，
-   传空键会返回 `true`。守卫一律要传真实的权限键，不要用空串/未定义值兜底。
+5. **`can('')` 不是有效守卫。** 超管的权限集合是 `['*']`，`hasPermission()` 遇到通配符
+   会直接返回 `true`，空键同样放行，权限键拼错也会被 `*` 掩盖。
+   守卫一律传真实的权限键，不要用空串/未定义值兜底。
 
 > 权限键总数（可用 `allPermissionKeys()` 核对）：菜单叶子数 + `ACTION_PERMISSIONS` 条数。
 > 当前是 **17 + 6 = 23** 个键（菜单叶子含 `总览` 自己 —— 它也是一个页面）。

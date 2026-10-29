@@ -16,7 +16,8 @@ import com.qianlong.cloud.admin.dto.DatahubDtos.DatahubTraceView;
 import com.qianlong.cloud.admin.dto.DatahubDtos.StreamQuery;
 import com.qianlong.cloud.admin.service.DatahubService;
 
-import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.dev33.satoken.annotation.SaCheckPermission;
+import cn.dev33.satoken.annotation.SaMode;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -39,13 +40,25 @@ import lombok.RequiredArgsConstructor;
  *       说明「只查了最近 N 条」——<b>「没找到」不等于「不存在」</b>。</li>
  * </ol>
  *
- * <p><b>权限</b>：只要求登录。本模块**全部只读**（没有任何写接口），
- * 因此没有独立权限点 —— 权限点只列真正危险的动作。
+ * <p><b>权限</b>：按页面对应的菜单权限校验。本模块**全部只读**（没有任何写接口），
+ * 因此没有操作权限点 —— 但读也要校验菜单权限，否则藏起来只是障眼法：
+ * <ul>
+ *   <li>{@code nodes} / {@code channels} → {@code menu:server-datahub}；</li>
+ *   <li>{@code streams} —— <b>两页共用</b>，{@code menu:server-datahub}
+ *       或 {@code menu:server-stream} 任一即可（OR）；</li>
+ *   <li>{@code streams/{key}/entries} / {@code trace} → {@code menu:server-stream}。</li>
+ * </ul>
  */
 @RestController
 @RequestMapping("/datahub")
 @RequiredArgsConstructor
 public class DatahubController {
+
+    /** 菜单权限：数据中台页 */
+    private static final String MENU_SERVER_DATAHUB = "menu:server-datahub";
+
+    /** 菜单权限：消息总线页 */
+    private static final String MENU_SERVER_STREAM = "menu:server-stream";
 
     private final DatahubService datahubService;
 
@@ -55,7 +68,7 @@ public class DatahubController {
      * <p>附带各 db 的键数与 {@code unique_id} 水位、stream 规模、频道数，
      * 以及该实例上的心跳状态。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SERVER_DATAHUB)
     @GetMapping("/nodes")
     public ApiResult<DatahubNodePage> listNodes(
             @RequestParam(required = false) Integer page,
@@ -77,7 +90,7 @@ public class DatahubController {
      *       单列出来而不是混进列表，也不是悄悄丢掉。</li>
      * </ul>
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SERVER_DATAHUB)
     @GetMapping("/channels")
     public ApiResult<DatahubService.ChannelScan> listChannels() {
         return ApiResult.ok(datahubService.listChannels());
@@ -91,7 +104,7 @@ public class DatahubController {
      * 现场流的总数在百级（137 db0 有 116 条），一次返回的代价可接受；
      * 每条的长度已由服务端的扫描上限兜住。
      */
-    @SaCheckLogin
+    @SaCheckPermission(value = {MENU_SERVER_DATAHUB, MENU_SERVER_STREAM}, mode = SaMode.OR)
     @GetMapping("/streams")
     public ApiResult<List<DatahubStreamView>> listStreams(StreamQuery query) {
         return ApiResult.ok(datahubService.listStreams(query));
@@ -103,7 +116,7 @@ public class DatahubController {
      * <p>路径参数是流名（可能含 {@code -} 等字符，前端已 encodeURIComponent）。
      * {@code window} 是尾部窗口大小，服务端有硬上限，传再大也没用。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SERVER_STREAM)
     @GetMapping("/streams/{key}/entries")
     public ApiResult<DatahubEntryPage> listStreamEntries(
             @PathVariable String key,
@@ -122,7 +135,7 @@ public class DatahubController {
      * 返回的 {@code searched} 会列出「在哪些流的多少条里找过」，
      * 便于判断「确实没有」还是「窗口太小没覆盖到」。
      */
-    @SaCheckLogin
+    @SaCheckPermission(MENU_SERVER_STREAM)
     @GetMapping("/trace")
     public ApiResult<DatahubTraceView> trace(
             @RequestParam String requestId,

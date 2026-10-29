@@ -16,6 +16,7 @@ import {
 import { DEMO_LOGIN_HINTS } from '@/api/mock/system'
 import { USE_MOCK } from '@/composables/useResource'
 import { firstLeafPath } from '@/config/menu'
+import { firstAllowedPath } from '@/config/permissions'
 import { useAuthStore, type LoginFailure } from '@/stores/auth'
 
 /**
@@ -64,9 +65,12 @@ async function handleSubmit() {
     else localStorage.removeItem(REMEMBER_KEY)
 
     message.success(`欢迎回来，${authStore.displayName}`)
-    // 登录前想去的页面（被守卫拦下时写在 query 里），否则进第一个业务页
+    // 登录前想去的页面（被守卫拦下时写在 query 里），否则进第一个**有权访问**的页面。
+    // 不能用静态的 firstLeafPath()：它可能指向这个人看不到的页面，进去就被守卫弹回来。
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
-    await router.replace(redirect || firstLeafPath())
+    await router.replace(
+      redirect || firstAllowedPath(authStore.profile?.permissions) || firstLeafPath(),
+    )
   } catch (err) {
     failure.value = err as LoginFailure
     // 密码清掉、账号留着：重试时不用重新输一遍账号

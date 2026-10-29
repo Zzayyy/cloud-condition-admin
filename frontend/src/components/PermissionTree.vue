@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, h, ref, type VNodeChild } from 'vue'
-import { NButton, NIcon, NTag, NTooltip, NTree, useDialog, type TreeOption } from 'naive-ui'
+import {
+  NButton,
+  NIcon,
+  NTag,
+  NTooltip,
+  NTree,
+  useDialog,
+  useMessage,
+  type TreeOption,
+} from 'naive-ui'
 import {
   ChevronDownOutline,
   ChevronUpOutline,
@@ -16,6 +25,7 @@ import {
   allPermissionKeys,
   buildPermissionTree,
   hasPermission,
+  normalizePermissionSelection,
   type PermissionTreeNode,
 } from '@/config/permissions'
 
@@ -73,16 +83,16 @@ const props = withDefaults(
 const emit = defineEmits<{ 'update:permissions': [keys: string[]] }>()
 
 const dialog = useDialog()
+const message = useMessage()
 
 /* ------------------------------ 契约派生数据 ------------------------------ */
 
 const ALL_REAL_KEYS = allPermissionKeys()
 const REAL_KEY_SET = new Set(ALL_REAL_KEYS)
-/** 契约顺序：emit 出去时按它排序，审计比对前后差异时稳定可读 */
-const KEY_ORDER = new Map(ALL_REAL_KEYS.map((key, index) => [key, index] as const))
 const ACTION_DEF = new Map(
   ACTION_PERMISSIONS.map((def) => [actionPermissionKey(def.menu, def.action), def] as const),
 )
+
 
 /* ------------------------------ 界面选项构建 ------------------------------ */
 
@@ -185,13 +195,21 @@ const dangerousSelected = computed(() =>
 /* ------------------------------ 写回 ------------------------------ */
 
 function commit(keys: Iterable<string>) {
-  const set = new Set<string>()
-  for (const key of keys) {
-    // 合成键与契约里不存在的键一律丢弃，绝不写进角色
-    if (REAL_KEY_SET.has(key)) set.add(key)
+  /*
+   * 收敛交给 `normalizePermissionSelection`：它会丢掉合成键 / 非法键，
+   * 维护 `action ⊆ menu`（勾动作自动补页面、取消页面连带撤销动作），
+   * 并返回被自动改动的键，用来解释「为什么勾选框自己变了」。
+   */
+  const result = normalizePermissionSelection(keys, checkedKeys.value)
+
+  if (result.addedMenus.length) {
+    message.info('已同时勾选所属页面的「页面访问（菜单权限）」：操作权限不能脱离页面')
   }
-  const sorted = [...set].sort((a, b) => (KEY_ORDER.get(a) ?? 0) - (KEY_ORDER.get(b) ?? 0))
-  emit('update:permissions', sorted)
+  if (result.removedActions.length) {
+    message.info('已一并移除该页的操作权限：没有页面访问权限时它们不会生效')
+  }
+
+  emit('update:permissions', result.keys)
 }
 
 function handleUpdateCheckedKeys(keys: Array<string | number>) {
@@ -439,6 +457,10 @@ function renderSuffix(info: { option: TreeOption }): VNodeChild {
             <div>
               标<b>高危</b>的是删除 / 下发协议 / 改账号与权限一类操作；
               批量勾选若会授出高危权限，会弹窗<b>逐条列出键名</b>并二次确认。
+            </div>
+            <div>
+              勾<b>操作权限</b>会自动补上所属页面的「页面访问」；取消页面访问会一并移除该页操作权限。
+              后端判定是「菜单 + 操作」<b>AND</b>，缺菜单的操作权限永远生效不了。
             </div>
           </div>
         </n-tooltip>
